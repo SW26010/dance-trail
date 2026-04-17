@@ -1,0 +1,1 @@
+- Every response is supposed to end by calling the "vscode-askQuestions" tool.
