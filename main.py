@@ -92,6 +92,12 @@ def cmd_import_vrcx():
     parser.add_argument("vrcx_db", help="VRCX.sqlite3 路径，建议使用复制后的快照")
     parser.add_argument("--app-db", default=None, help="输出 SQLite 路径，默认 data/dancing_log.sqlite3")
     parser.add_argument("--self-user-id", default=None, help="自己的 VRChat user_id，用于推断 self/other")
+    parser.add_argument(
+        "--blank-requester-source",
+        choices=["unknown", "random"],
+        default="random",
+        help="VRCX requester 为空时推断为何种来源，默认 random",
+    )
     parser.add_argument("--limit", type=int, default=None, help="最多导入多少条候选事件")
     parser.add_argument("--dry-run", action="store_true", help="只统计，不写入本地数据库")
     args = parser.parse_args(sys.argv[2:])
@@ -102,6 +108,7 @@ def cmd_import_vrcx():
         vrcx_db_path=args.vrcx_db,
         app_db_path=args.app_db,
         self_user_id=args.self_user_id,
+        blank_requester_source=args.blank_requester_source,
         limit=args.limit,
         dry_run=args.dry_run,
     )

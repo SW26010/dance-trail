@@ -58,6 +58,7 @@ def infer_source(
     display_name: str | None,
     user_id: str | None,
     self_user_id: str | None = None,
+    blank_requester_source: str = SOURCE_RANDOM,
 ) -> tuple[str, float]:
     """Infer source semantics conservatively from VRCX requester fields."""
     normalized_user_id = (user_id or "").strip()
@@ -70,6 +71,9 @@ def infer_source(
         return SOURCE_SELF, 0.95
     if normalized_self_id and normalized_user_id:
         return SOURCE_OTHER, 0.9
+    if not normalized_name and not normalized_user_id:
+        if blank_requester_source == SOURCE_RANDOM:
+            return SOURCE_RANDOM, 0.7
     return SOURCE_UNKNOWN, 0.5
 
 
@@ -110,10 +114,14 @@ def import_vrcx_database(
     vrcx_db_path: Path | str,
     app_db_path: Path | str | None = None,
     self_user_id: str | None = None,
+    blank_requester_source: str = SOURCE_RANDOM,
     limit: int | None = None,
     dry_run: bool = False,
 ) -> ImportStats:
     """Import VRCX video play rows into the local dancing-log database."""
+    if blank_requester_source not in {SOURCE_RANDOM, SOURCE_UNKNOWN}:
+        raise ValueError("blank_requester_source must be 'random' or 'unknown'")
+
     vrcx_path = Path(vrcx_db_path)
     if not vrcx_path.exists():
         raise FileNotFoundError(f"VRCX database not found: {vrcx_path}")
@@ -148,6 +156,7 @@ def import_vrcx_database(
                 row["display_name"],
                 row["user_id"],
                 self_user_id=self_user_id,
+                blank_requester_source=blank_requester_source,
             )
             event_key = _event_key(row)
 

@@ -254,6 +254,16 @@ The remaining hard problem is "can we infer source semantics with enough confide
    - fallback `unknown`
 5. Only later decide whether `queued_self` can be inferred from world-specific semantics or needs manual confirmation.
 
+Deferred follow-up:
+
+- after blank-requester rows are promoted to `random`, the remaining `unknown` rows are mostly "has `display_name`, missing `user_id`"
+- current volume is small enough to defer
+- a plausible next pass is:
+  - use VRCX player-history style tables keyed by local account
+  - search for rows near the playback timestamp with the same `display_name`
+  - recover the stable VRChat `user_id` when the match is unambiguous
+  - then backfill `self` or `other`
+
 ## Conservative Conclusion
 
 The VRCX path is viable and worth prioritizing.

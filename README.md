@@ -227,6 +227,18 @@ source 更新采用保守覆盖规则，优先级从高到低：
 queued_self > recommend > self > other > random > unknown
 ```
 
+当前默认推断规则：
+
+- `display_name` 和 `user_id` 都为空：按 `random`
+- 有 `display_name` 但没有 `user_id`：保留 `unknown`
+- 有 `user_id` 且等于 `--self-user-id`：按 `self`
+- 有 `user_id` 且不等于 `--self-user-id`：按 `other`
+
+暂时保留的后续待办：
+
+- 剩余 `unknown` 主要是“有 `display_name`、无 `user_id`”的历史事件，当前数量较少，先不继续深挖。
+- 一个可行思路是利用 VRCX 的玩家日志或好友/在线历史表，按事件时间窗口和 `display_name` 反查当时对应的稳定 `user_id`，再回填 `self` / `other`。
+
 ### 从录像抽取顶部校验帧
 
 用于检查 OBS overlay 中的歌曲 id、歌名和时间是否与导入事件一致。所有本地路径都通过参数传入，输出建议放在 git ignored 的 `analysis/` 下。
