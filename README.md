@@ -125,8 +125,8 @@ dance_events
 - [x] 初始化歌曲主数据 `songs.csv`。
 - [x] 手动记录舞蹈历史 `dance_log.csv`。
 - [x] 根据频次、喜好和最近跳舞时间生成每日推荐歌单。
+- [x] 从 VRCX SQLite 导入 Wanna Dance 历史播放事件到本地 SQLite。
 - [ ] 从 VRChat 日志实时采集播放事件。
-- [ ] 从 VRCX 数据库导入历史播放事件。
 - [ ] 从 CDN 日志导入辅助信息。
 - [ ] 迁移到 SQLite 作为主存储，CSV 作为导出格式。
 - [ ] 管理 OBS 录像文件并关联舞蹈事件。
@@ -205,6 +205,37 @@ uv run python main.py recommend
 uv run python main.py recommend -n 10
 ```
 
+### 从 VRCX 导入历史播放事件
+
+建议先复制一份 `VRCX.sqlite3` 快照，再从快照导入，避免直接读取运行中的 VRCX 数据库。
+
+```bash
+uv run python main.py import-vrcx "path/to/vrcx-snapshot/VRCX.sqlite3"
+uv run python main.py import-vrcx "path/to/vrcx-snapshot/VRCX.sqlite3" --self-user-id "usr_xxx"
+uv run python main.py import-vrcx "path/to/vrcx-snapshot/VRCX.sqlite3" --dry-run
+```
+
+导入结果会写入 `data/dancing_log.sqlite3`：
+
+- `vrcx_import_events`：保留 VRCX 原始播放事件和解析结果，方便追溯与回填。
+- `dance_events`：规范化后的舞蹈时间线事件。
+- `songs`：SQLite 歌曲表；若本地存在 `data/songs.csv`，导入前会自动同步歌曲主数据。
+
+source 更新采用保守覆盖规则，优先级从高到低：
+
+```text
+queued_self > recommend > self > other > random > unknown
+```
+
+### 从录像抽取顶部校验帧
+
+用于检查 OBS overlay 中的歌曲 id、歌名和时间是否与导入事件一致。所有本地路径都通过参数传入，输出建议放在 git ignored 的 `analysis/` 下。
+
+```bash
+uv run python main.py sample-frames "path/to/recordings/sample.mkv" --at 2110 2355 3566
+uv run python main.py sample-frames "path/to/recordings/sample.mkv" --output-dir analysis\recording_frames --top-ratio 0.18
+```
+
 ## 当前数据格式
 
 当前版本仍使用 CSV。后续计划迁移到 SQLite，CSV 保留为导入导出格式。
@@ -270,4 +301,3 @@ weight =
 - 从本机生成的历史快照。
 
 本地路径、用户 id、录像目录、VRCX 路径和 CDN 路径应放在 `.env` 或未来的本地配置文件中，并保持 git ignored。
-

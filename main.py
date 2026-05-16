@@ -44,7 +44,10 @@ def cmd_log():
     parser.add_argument("song_id", type=int, help="歌曲 ID")
     source_group = parser.add_mutually_exclusive_group()
     source_group.add_argument("--other", action="store_true", help="别人点的")
-    source_group.add_argument("--source", type=str, choices=["self", "recommend", "other"],
+    source_group.add_argument(
+        "--source",
+        type=str,
+        choices=["queued_self", "recommend", "self", "other", "random", "unknown"],
                               default=None, help="点歌来源 (默认自动判断)")
     parser.add_argument("--time", type=str, default=None, help="时间 (ISO 8601, 默认当前)")
     parser.add_argument("--note", type=str, default="", help="备注")
@@ -81,6 +84,70 @@ def cmd_log():
     print(f"已添加舞蹈记录 (id={args.song_id}, {SOURCE_LABELS.get(actual_source, actual_source)})")
 
 
+def cmd_import_vrcx():
+    """从 VRCX SQLite 导入历史播放事件"""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="从 VRCX SQLite 导入历史播放事件")
+    parser.add_argument("vrcx_db", help="VRCX.sqlite3 路径，建议使用复制后的快照")
+    parser.add_argument("--app-db", default=None, help="输出 SQLite 路径，默认 data/dancing_log.sqlite3")
+    parser.add_argument("--self-user-id", default=None, help="自己的 VRChat user_id，用于推断 self/other")
+    parser.add_argument("--limit", type=int, default=None, help="最多导入多少条候选事件")
+    parser.add_argument("--dry-run", action="store_true", help="只统计，不写入本地数据库")
+    args = parser.parse_args(sys.argv[2:])
+
+    from dancing_log.vrcx_importer import import_vrcx_database
+
+    stats = import_vrcx_database(
+        vrcx_db_path=args.vrcx_db,
+        app_db_path=args.app_db,
+        self_user_id=args.self_user_id,
+        limit=args.limit,
+        dry_run=args.dry_run,
+    )
+
+    print("VRCX 导入完成" if not args.dry_run else "VRCX 导入预检查完成")
+    print(f"  扫描候选行: {stats.scanned}")
+    print(f"  候选播放事件: {stats.candidate_events}")
+    print(f"  跳过无 song id: {stats.skipped_without_song_id}")
+    if not args.dry_run:
+        print(f"  staging 写入/更新: {stats.staging_changed}")
+        print(f"  dance_events 写入/更新: {stats.dance_events_changed}")
+
+
+def cmd_sample_recording_frames():
+    """从录像抽取顶部区域帧，用于 OCR/人工校验 overlay"""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="从录像抽取顶部区域帧")
+    parser.add_argument("recording", help="录像文件路径")
+    parser.add_argument("--output-dir", default="analysis/recording_frames", help="输出目录")
+    parser.add_argument(
+        "--at",
+        nargs="+",
+        type=float,
+        default=[60.0, 300.0, 600.0],
+        help="抽帧时间点，单位秒，可传多个",
+    )
+    parser.add_argument("--top-ratio", type=float, default=0.22, help="保留顶部高度比例")
+    parser.add_argument("--width", type=int, default=1920, help="输出宽度，默认 1920")
+    args = parser.parse_args(sys.argv[2:])
+
+    from dancing_log.recordings import sample_top_frames
+
+    outputs = sample_top_frames(
+        recording_path=args.recording,
+        output_dir=args.output_dir,
+        timestamps=args.at,
+        top_ratio=args.top_ratio,
+        width=args.width,
+    )
+
+    print("已抽取顶部帧:")
+    for path in outputs:
+        print(f"  {path}")
+
+
 def main():
     script_commands = {
         "scrape": ("scripts/scrape_wanna.py", "爬取 Wanna Dance 歌曲数据库"),
@@ -91,6 +158,8 @@ def main():
     builtin_commands = {
         "recommend": ("生成每日推荐歌单", cmd_recommend),
         "log": ("添加舞蹈记录", cmd_log),
+        "import-vrcx": ("从 VRCX SQLite 导入历史播放事件", cmd_import_vrcx),
+        "sample-frames": ("从录像抽取顶部区域帧", cmd_sample_recording_frames),
     }
 
     all_names = list(script_commands) + list(builtin_commands)
@@ -111,6 +180,8 @@ def main():
         print("  uv run python main.py log 5038 --other     # 别人点的")
         print("  uv run python main.py recommend           # 生成推荐歌单")
         print("  uv run python main.py recommend -n 10     # 推荐10首")
+        print("  uv run python main.py import-vrcx path/to/vrcx-snapshot/VRCX.sqlite3")
+        print("  uv run python main.py sample-frames path/to/recordings/example.mkv --at 60 300")
         sys.exit(0)
 
     cmd = sys.argv[1]

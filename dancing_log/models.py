@@ -44,11 +44,17 @@ DANCE_LOG_FIELDS = [
 SOURCE_SELF = "self"            # 主动点
 SOURCE_RECOMMEND = "recommend"  # 系统推荐
 SOURCE_OTHER = "other"          # 别人点
+SOURCE_QUEUED_SELF = "queued_self"  # 自己提前排队点
+SOURCE_RANDOM = "random"        # 随机播放
+SOURCE_UNKNOWN = "unknown"      # 未知
 
 SOURCE_LABELS = {
+    SOURCE_QUEUED_SELF: "提前排队",
     SOURCE_SELF: "主动点",
     SOURCE_RECOMMEND: "系统推荐",
     SOURCE_OTHER: "别人点",
+    SOURCE_RANDOM: "随机",
+    SOURCE_UNKNOWN: "未知",
 }
 
 
