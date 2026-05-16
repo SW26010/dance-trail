@@ -37,21 +37,75 @@ class ImportStats:
     skipped_without_song_id: int = 0
 
 
-def parse_wanna_song_id(video_url: str | None) -> int | None:
-    """Extract the Wanna Dance song id from an api.udon.dance playback URL."""
+@dataclass(frozen=True)
+class WannaUrlParseResult:
+    song_id: int | None
+    url_kind: str
+    method: str
+
+
+WANNA_API_HOSTS_DOCUMENTED = frozenset({
+    "api.udon.dance",
+})
+WANNA_API_HOSTS_OBSERVED = frozenset({
+    "api.wannadance.online",
+    "139.196.46.195:51886",
+})
+WANNA_API_HOSTS_UPSTREAM = frozenset({
+    "ud-orig.kiva.moe",
+})
+WANNA_API_HOSTS = (
+    WANNA_API_HOSTS_DOCUMENTED
+    | WANNA_API_HOSTS_OBSERVED
+    | WANNA_API_HOSTS_UPSTREAM
+)
+
+WANNA_CDN_HOSTS_DOCUMENTED = frozenset({
+    "play.udon.dance",
+    "nya.xin.moe",
+})
+WANNA_CDN_HOSTS_UPSTREAM = frozenset({
+    "ud-play.kiva.moe",
+    "ud-nya.kiva.moe",
+})
+WANNA_CDN_HOSTS = WANNA_CDN_HOSTS_DOCUMENTED | WANNA_CDN_HOSTS_UPSTREAM
+
+WANNA_API_PATH = "/api/songs/play"
+WANNA_CDN_FILE_RE = re.compile(r"^/files/[^/]+/(?P<song_id>\d+)-[^/]+\.mp4$", re.IGNORECASE)
+
+
+def parse_wanna_url(video_url: str | None) -> WannaUrlParseResult:
+    """Classify a Wanna Dance playback URL and extract its song id when possible."""
     if not video_url:
-        return None
+        return WannaUrlParseResult(None, "empty", "none")
 
     parsed = urlparse(video_url)
-    if "api.udon.dance" not in parsed.netloc.lower():
-        return None
+    host = parsed.netloc.lower()
+    path = parsed.path.lower()
 
-    raw_id = parse_qs(parsed.query).get("id", [None])[0]
-    if raw_id and raw_id.isdigit():
-        return int(raw_id)
+    if host in WANNA_API_HOSTS and path == WANNA_API_PATH:
+        raw_id = parse_qs(parsed.query).get("id", [None])[0]
+        if raw_id and raw_id.isdigit():
+            return WannaUrlParseResult(int(raw_id), "wanna_api", "api_query_id")
 
-    match = re.search(r"[?&]id=(\d+)", video_url)
-    return int(match.group(1)) if match else None
+        match = re.search(r"[?&]id=(\d+)", video_url)
+        if match:
+            return WannaUrlParseResult(int(match.group(1)), "wanna_api", "api_query_id_fallback")
+
+        return WannaUrlParseResult(None, "wanna_api", "missing_query_id")
+
+    if host in WANNA_CDN_HOSTS:
+        match = WANNA_CDN_FILE_RE.match(parsed.path)
+        if match:
+            return WannaUrlParseResult(int(match.group("song_id")), "wanna_cdn", "cdn_file_path")
+        return WannaUrlParseResult(None, "wanna_cdn", "unrecognized_cdn_path")
+
+    return WannaUrlParseResult(None, "other", "none")
+
+
+def parse_wanna_song_id(video_url: str | None) -> int | None:
+    """Extract the Wanna Dance song id from a recognized Wanna Dance URL."""
+    return parse_wanna_url(video_url).song_id
 
 
 def infer_source(
@@ -100,7 +154,12 @@ def _fetch_vrcx_rows(conn: sqlite3.Connection, limit: int | None = None) -> list
             display_name,
             user_id
         FROM gamelog_video_play
-        WHERE video_url LIKE '%api.udon.dance%'
+        WHERE
+            video_url LIKE '%/Api/Songs/play%'
+            OR video_url LIKE '%play.udon.dance/files/%'
+            OR video_url LIKE '%nya.xin.moe/files/%'
+            OR video_url LIKE '%ud-play.kiva.moe/files/%'
+            OR video_url LIKE '%ud-nya.kiva.moe/files/%'
         ORDER BY created_at
     """
     params: tuple[int, ...] = ()
