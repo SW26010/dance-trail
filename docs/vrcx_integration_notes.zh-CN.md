@@ -160,7 +160,7 @@ VRCX 数据库路径也可以配置在 `data/local_config.json` 的 `vrcx_db_pat
 当前 importer 会：
 
 - 读取 `gamelog_video_play`
-- 解析支持的 WannaDance 播放 URL
+- 解析支持的 WannaDance 和实测 PyPyDance 播放 URL
 - 写入溯源表 `vrcx_import_events`
 - 写入标准时间线表 `dance_events`
 - 如果解析到的 id 不在目录里，就创建 placeholder `dance_tracks`
@@ -169,10 +169,42 @@ VRCX 数据库路径也可以配置在 `data/local_config.json` 的 `vrcx_db_pat
 - 重复导入时保留更强的来源推断
 
 当前支持的 WannaDance URL 包括公开 API host、实测 API-compatible host、Kiva
-上游 host，以及支持的 CDN 文件 URL 模式。
+上游 host，以及支持的 CDN 文件 URL 模式。实测 PyPyDance API URL 也会解析为
+`pypydance:<id>`。
 
-PyPyDance、Dudu、VRDancing 和其他系统目前只识别为 unsupported 或 unknown，
-等看到真实元数据形状后再扩展。
+Dudu、VRDancing 和其他系统目前只识别为 unsupported 或 unknown，等看到真实
+元数据形状后再扩展。
+
+实时原始日志捕获单独实现在 `dancing_log/vrc_log_watcher.py`，入口命令：
+
+```bash
+uv run python main.py watch-vrc-log
+```
+
+这个命令目前定位为取证工具。它会 tail VRChat `output_log_*.txt`，在启用时镜像
+原始行，把视频相关候选行写入 `candidates.jsonl`，把解析后的信号写入
+`parsed_events.jsonl`，把按歌曲折叠后的记录写入 `playback_events.jsonl`，并把
+session 存到 `analysis/vrc_log_capture/`。它暂不写入 `dance_events`。
+
+watcher 默认读取 `data/local_config.json` 的 `vrc_log_dir`，否则回退到 Windows
+LocalLow 下的 VRChat 标准日志目录。默认从当前日志文件末尾开始，避免游玩时重扫旧
+日志；新建日志文件会从头读取，避免漏掉启动阶段信号。
+
+折叠后的 playback 行保留 `first_seen_at`、`resolved_at`、`video_loaded_at`、
+`actual_play_at`、`delay_to_actual_seconds`、`load_to_actual_seconds` 等延迟字段，
+也保留 `source_type`、`source_display_name` 等来源字段。
+
+实测捕获里有两类可用 actual-play 路径：
+
+- WannaDance/USharpVideo 会暴露 `DelayedVideoReady` 和 `OnVideoStart`；正常开播时
+  request-to-play 延迟稳定在约 10 秒。
+- PyPyDance 会出现第二条带正数播放 offset 的 VRCX `VideoPlay` 信号；watcher 用
+  `timestamp - offset` 作为近似 `actual_play_at`，并标记
+  `actual_play_method = vrcx_progress_offset`。
+
+半路观察会排除在 delay metrics 外。PyPyDance 大 offset 会标记
+`observed_mid_play` 和 `elapsed_at_first_seen_seconds`；WannaDance 的
+`Playing synced` 会写入 `synced_play_at`。
 
 ## 还不能完全确定的事
 

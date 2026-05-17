@@ -16,7 +16,8 @@
 - 重建时归档旧生成数据，不做原地迁移。
 - `data/local_config.json` 和 `data/queued_self/` 会作为本地输入保留。
 - WannaDance 是第一个真正实现的舞蹈系统。
-- PyPyDance、Dudu、VRDancing 和其他系统暂不支持，等看到真实元数据形状后再设计。
+- PyPyDance URL 身份已能从实测日志中识别；Dudu、VRDancing 和其他系统暂不支持，
+  等看到真实元数据形状后再设计。
 - `music_tracks` 和 `dance_track_music_links` 已实现，当前用保守的标题/歌手匹配。
 - 音乐平台匹配和热度快照暂缓。
 

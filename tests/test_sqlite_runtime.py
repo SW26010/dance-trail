@@ -414,16 +414,25 @@ class SQLiteRuntimeTest(unittest.TestCase):
                             "",
                             "",
                         ),
+                        (
+                            "2026-05-15T16:20:11.000Z",
+                            "https://api.dudufit.dance/api/v1/videos/1321?cdn=jpn",
+                            "Dudu Song",
+                            "",
+                            "wrld_3",
+                            "",
+                            "",
+                        ),
                     ],
                 )
                 conn.commit()
 
             stats = import_vrcx_database(vrcx_path, app_db_path=app_path)
 
-            self.assertEqual(stats.dance_events_changed, 1)
+            self.assertEqual(stats.dance_events_changed, 2)
             self.assertEqual(stats.skipped_unsupported, 1)
             with connect_db(app_path) as conn:
-                track_count = conn.execute(
+                wanna_track_count = conn.execute(
                     """
                     SELECT count(*)
                     FROM dance_tracks dt
@@ -432,17 +441,29 @@ class SQLiteRuntimeTest(unittest.TestCase):
                     """,
                     (WANNA_SYSTEM_KEY,),
                 ).fetchone()[0]
+                pypy_track_count = conn.execute(
+                    """
+                    SELECT count(*)
+                    FROM dance_tracks dt
+                    JOIN dance_systems ds ON ds.id = dt.system_id
+                    WHERE ds.key = 'pypydance' AND dt.external_id = '4051'
+                    """
+                ).fetchone()[0]
                 event_count = conn.execute("SELECT count(*) FROM dance_events").fetchone()[0]
                 parsed = conn.execute(
                     """
                     SELECT parsed_external_id, parsed_dance_track_id
                     FROM vrcx_import_events
+                    ORDER BY created_at
                     """
-                ).fetchone()
-            self.assertEqual(track_count, 1)
-            self.assertEqual(event_count, 1)
-            self.assertEqual(parsed["parsed_external_id"], "3114")
-            self.assertIsInstance(parsed["parsed_dance_track_id"], int)
+                ).fetchall()
+            self.assertEqual(wanna_track_count, 1)
+            self.assertEqual(pypy_track_count, 1)
+            self.assertEqual(event_count, 2)
+            self.assertEqual(parsed[0]["parsed_external_id"], "3114")
+            self.assertEqual(parsed[1]["parsed_external_id"], "4051")
+            self.assertIsInstance(parsed[0]["parsed_dance_track_id"], int)
+            self.assertIsInstance(parsed[1]["parsed_dance_track_id"], int)
 
     def test_queued_self_uses_cli_system_for_bare_track_refs(self):
         with tempfile.TemporaryDirectory() as tmp:

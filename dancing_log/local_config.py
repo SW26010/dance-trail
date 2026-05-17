@@ -13,6 +13,7 @@ CONFIG_FILE = DATA_DIR / "local_config.json"
 DEFAULT_CONFIG = {
     "self_user_id": None,
     "vrcx_db_path": None,
+    "vrc_log_dir": None,
     "wanna_cache_dir": None,
     "recordings_dir": None,
 }

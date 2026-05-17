@@ -282,6 +282,80 @@ def cmd_sample_recording_frames():
         print(f"  {path}")
 
 
+def cmd_watch_vrc_log():
+    """Capture live VRChat output logs for video playback forensics."""
+    import argparse
+
+    config = _get_local_config()
+    parser = argparse.ArgumentParser(description="Watch VRChat output logs for video playback lines")
+    parser.add_argument(
+        "--log-dir",
+        default=None,
+        help="VRChat log directory; falls back to local_config.json or the default LocalLow path",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Capture root directory; default is analysis/vrc_log_capture",
+    )
+    parser.add_argument("--session-name", default=None, help="Capture session directory name")
+    parser.add_argument(
+        "--from-start",
+        action="store_true",
+        help="Read the current log file from the beginning instead of tailing from EOF",
+    )
+    parser.add_argument(
+        "--no-raw",
+        action="store_true",
+        help="Do not mirror all raw log lines; candidate and parsed JSONL files are still written",
+    )
+    parser.add_argument(
+        "--poll-seconds",
+        type=float,
+        default=0.25,
+        help="Polling interval while waiting for new lines",
+    )
+    parser.add_argument(
+        "--stop-after-idle-seconds",
+        type=float,
+        default=None,
+        help="Stop after this many seconds without new lines; default runs until Ctrl+C",
+    )
+    args = parser.parse_args(sys.argv[2:])
+
+    from dancing_log.vrc_log_watcher import default_vrc_log_dir, watch_vrc_logs
+
+    log_dir = _pick_value(args.log_dir, config.get("vrc_log_dir")) or default_vrc_log_dir()
+    print(f"Watching VRChat logs: {log_dir}")
+    print("Press Ctrl+C to stop.")
+
+    stats = watch_vrc_logs(
+        log_dir=log_dir,
+        output_dir=args.output_dir,
+        session_name=args.session_name,
+        from_start=args.from_start,
+        include_raw=not args.no_raw,
+        poll_seconds=args.poll_seconds,
+        stop_after_idle_seconds=args.stop_after_idle_seconds,
+    )
+
+    print("VRChat log capture complete")
+    print(f"  session dir: {stats.session_dir}")
+    print(f"  raw lines: {stats.raw_lines}")
+    print(f"  candidate lines: {stats.candidate_lines}")
+    print(f"  parsed events: {stats.parsed_events}")
+    print(f"  playback events: {stats.playback_events}")
+    if stats.delay_metrics:
+        print(
+            "  delay to actual play: "
+            f"count={stats.delay_metrics.get('count')} "
+            f"avg={stats.delay_metrics.get('avg_seconds')}s "
+            f"min={stats.delay_metrics.get('min_seconds')}s "
+            f"max={stats.delay_metrics.get('max_seconds')}s"
+        )
+    print(f"  summary: {stats.session_dir / 'summary.json'}")
+
+
 def cmd_rebuild_data():
     """Archive generated local data and rebuild the current SQLite database."""
     import argparse
@@ -351,6 +425,7 @@ def main():
         "import-vrcx": ("Import historical playback rows from VRCX SQLite", cmd_import_vrcx),
         "sync-queued-self": ("Sync queued_self manifests", cmd_sync_queued_self),
         "sample-frames": ("Sample overlay verification frames from a recording", cmd_sample_recording_frames),
+        "watch-vrc-log": ("Capture live VRChat output logs", cmd_watch_vrc_log),
         "rebuild-data": ("Archive and rebuild generated local data", cmd_rebuild_data),
     }
 
@@ -375,6 +450,7 @@ def main():
         print("  uv run python main.py import-vrcx path/to/vrcx-snapshot/VRCX.sqlite3")
         print("  uv run python main.py import-vrcx")
         print("  uv run python main.py sync-queued-self --system wannadance")
+        print("  uv run python main.py watch-vrc-log")
         print("  uv run python main.py rebuild-data --archive-existing")
         print("  uv run python main.py sample-frames path/to/recordings/example.mkv --at 60 300")
         sys.exit(0)

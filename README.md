@@ -155,9 +155,37 @@ If `data/local_config.json` contains `vrcx_db_path`, the path can be omitted:
 uv run python main.py import-vrcx
 ```
 
-The importer currently supports WannaDance URLs. PyPyDance, Dudu, and other
-systems are counted as unsupported instead of being misclassified as
+The importer currently supports WannaDance and observed PyPyDance URLs. Dudu
+and other systems are counted as unsupported instead of being misclassified as
 WannaDance.
+
+## Live VRChat Log Capture
+
+Capture live VRChat Unity output logs for parser forensics:
+
+```bash
+uv run python main.py watch-vrc-log
+```
+
+The watcher uses `vrc_log_dir` from `data/local_config.json` when present, then
+falls back to the standard Windows LocalLow path. It writes only local ignored
+artifacts under `analysis/vrc_log_capture/<session>/`:
+
+- `raw_output_log.txt`: low-overhead mirror of captured raw lines
+- `candidates.jsonl`: video-related lines worth inspecting
+- `parsed_events.jsonl`: parsed playback-like events with URL classification
+- `playback_events.jsonl`: folded per-song events with playback delay metrics
+- `summary.json`: session counts and final read position
+
+By default it starts at the end of the current log file so old large logs are
+not rescanned while VRChat is running. Use `--from-start` to replay an existing
+log file, or `--no-raw` to skip the full raw mirror and keep only candidate and
+parsed JSONL output.
+
+`parsed_events.jsonl` remains a signal-level forensic stream. The deduplicated
+event view is `playback_events.jsonl`, which tracks request, resolve, load,
+actual-play, source, mid-play sync, and delay fields when those signals appear
+in the VRChat log.
 
 ## Queued-Self Manifests
 
@@ -188,6 +216,7 @@ Supported keys:
 {
   "self_user_id": null,
   "vrcx_db_path": null,
+  "vrc_log_dir": null,
   "wanna_cache_dir": null,
   "recordings_dir": null
 }

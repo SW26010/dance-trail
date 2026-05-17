@@ -35,11 +35,18 @@ class DanceUrlParsingTest(unittest.TestCase):
         self.assertEqual(result.url_kind, "wanna_cdn")
         self.assertEqual(result.method, "cdn_file_path")
 
-    def test_marks_other_dance_systems_as_unsupported(self):
+    def test_parses_pypydance_urls_and_marks_other_systems_as_unsupported(self):
         pypy = parse_dance_url("http://jd.pypy.moe/api/v1/videos/4051.mp4")
-        self.assertIsNone(pypy.system_key)
-        self.assertEqual(pypy.url_kind, "pypydance")
-        self.assertEqual(pypy.method, "unsupported_system")
+        self.assertEqual(pypy.system_key, "pypydance")
+        self.assertEqual(pypy.external_id, "4051")
+        self.assertEqual(pypy.url_kind, "pypydance_api")
+        self.assertEqual(pypy.method, "api_video_file_path")
+
+        pypy = parse_dance_url("http://api.pypy.dance/video?id=4666")
+        self.assertEqual(pypy.system_key, "pypydance")
+        self.assertEqual(pypy.external_id, "4666")
+        self.assertEqual(pypy.url_kind, "pypydance_api")
+        self.assertEqual(pypy.method, "api_query_id")
 
         dudu = parse_dance_url("https://api.dudufit.dance/api/v1/videos/1321?cdn=jpn")
         self.assertIsNone(dudu.system_key)

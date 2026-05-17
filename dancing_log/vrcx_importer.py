@@ -78,9 +78,11 @@ WANNA_CDN_HOSTS_UPSTREAM = frozenset({
     "ud-nya.kiva.moe",
 })
 WANNA_CDN_HOSTS = WANNA_CDN_HOSTS_DOCUMENTED | WANNA_CDN_HOSTS_UPSTREAM
+PYPY_SYSTEM_KEY = "pypydance"
 
 WANNA_API_PATH = "/api/songs/play"
 WANNA_CDN_FILE_RE = re.compile(r"^/files/[^/]+/(?P<song_id>\d+)-[^/]+\.mp4$", re.IGNORECASE)
+PYPY_VIDEO_FILE_RE = re.compile(r"^/api/v1/videos/(?P<video_id>\d+)\.mp4$", re.IGNORECASE)
 
 
 def parse_dance_url(video_url: str | None) -> DanceUrlParseResult:
@@ -119,7 +121,21 @@ def parse_dance_url(video_url: str | None) -> DanceUrlParseResult:
             )
         return DanceUrlParseResult(None, None, "wanna_cdn", "unrecognized_cdn_path")
 
+    if host == "api.pypy.dance" and path == "/video":
+        raw_id = parse_qs(parsed.query).get("id", [None])[0]
+        if raw_id and raw_id.isdigit():
+            return DanceUrlParseResult(PYPY_SYSTEM_KEY, raw_id, "pypydance_api", "api_query_id")
+        return DanceUrlParseResult(None, None, "pypydance_api", "missing_query_id")
+
     if "pypy" in host:
+        match = PYPY_VIDEO_FILE_RE.match(parsed.path)
+        if match:
+            return DanceUrlParseResult(
+                PYPY_SYSTEM_KEY,
+                match.group("video_id"),
+                "pypydance_api",
+                "api_video_file_path",
+            )
         return DanceUrlParseResult(None, None, "pypydance", "unsupported_system")
     if "dudu" in host:
         return DanceUrlParseResult(None, None, "dudu", "unsupported_system")
@@ -364,4 +380,6 @@ def _is_supported(parsed: DanceUrlParseResult) -> bool:
 def _system_name(system_key: str | None) -> str:
     if system_key == WANNA_SYSTEM_KEY:
         return "WannaDance"
+    if system_key == PYPY_SYSTEM_KEY:
+        return "PyPyDance"
     return system_key or "Unknown"

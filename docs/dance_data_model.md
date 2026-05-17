@@ -15,8 +15,9 @@ The first refactor implements the core model directly:
 - Existing generated data is archived during rebuild, not migrated in place.
 - `data/local_config.json` and `data/queued_self/` are preserved as local inputs.
 - WannaDance is the first implemented dance system.
-- PyPyDance, Dudu, VRDancing, and other systems remain unsupported until their
-  real metadata shapes are inspected.
+- PyPyDance URL identity is supported from observed logs; Dudu, VRDancing, and
+  other systems remain unsupported until their real metadata shapes are
+  inspected.
 - `music_tracks` and `dance_track_music_links` are implemented with conservative
   title/artist matching.
 - Provider matching and popularity snapshots are deferred.

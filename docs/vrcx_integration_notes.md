@@ -259,7 +259,7 @@ The VRCX database path can also be stored in `data/local_config.json` as
 The importer currently:
 
 - reads `gamelog_video_play`
-- parses supported WannaDance playback URLs
+- parses supported WannaDance and observed PyPyDance playback URLs
 - writes provenance rows to `vrcx_import_events`
 - writes normalized timeline rows to `dance_events`
 - creates placeholder `dance_tracks` rows when a parsed id is not already in the
@@ -270,10 +270,47 @@ The importer currently:
 
 Supported WannaDance URL families include documented API hosts, observed
 WannaDance-compatible API hosts, upstream Kiva hosts, and supported CDN file URL
-patterns.
+patterns. Observed PyPyDance API URLs are also parsed into `pypydance:<id>`.
 
-PyPyDance, Dudu, VRDancing, and other systems are recognized only as unsupported
-or unknown until their real metadata shapes are inspected.
+Dudu, VRDancing, and other systems are recognized only as unsupported or unknown
+until their real metadata shapes are inspected.
+
+Live raw-log capture is implemented separately in `dancing_log/vrc_log_watcher.py`
+and exposed through:
+
+```bash
+uv run python main.py watch-vrc-log
+```
+
+This command is intentionally forensic-only for the first iterations. It tails
+VRChat `output_log_*.txt` files, mirrors raw lines when enabled, writes
+video-related candidates to `candidates.jsonl`, writes parsed playback-like
+signals to `parsed_events.jsonl`, writes folded per-song rows to
+`playback_events.jsonl`, and stores the session under `analysis/vrc_log_capture/`.
+It does not write `dance_events`.
+
+The watcher defaults to `data/local_config.json` key `vrc_log_dir`, falling back
+to the standard Windows LocalLow VRChat log directory. It starts from the current
+log file's end by default to avoid rescanning old large logs during gameplay;
+newly created log files are read from the beginning so startup lines are not
+missed.
+
+The folded playback rows keep delay-oriented fields such as `first_seen_at`,
+`resolved_at`, `video_loaded_at`, `actual_play_at`,
+`delay_to_actual_seconds`, and `load_to_actual_seconds`. They also keep source
+fields such as `source_type` and `source_display_name`.
+
+Observed captures show two useful actual-play paths:
+
+- WannaDance/USharpVideo exposes `DelayedVideoReady` and `OnVideoStart`, with a
+  stable roughly 10 second request-to-play delay in normal starts.
+- PyPyDance can emit a second VRCX `VideoPlay` signal with a positive playback
+  offset; the watcher uses `timestamp - offset` as an approximate
+  `actual_play_at` with `actual_play_method = vrcx_progress_offset`.
+
+Mid-play observations are excluded from delay metrics. Large PyPyDance offsets
+set `observed_mid_play` and `elapsed_at_first_seen_seconds`; WannaDance
+`Playing synced` lines set `synced_play_at`.
 
 ## Recommended Next Steps
 

@@ -1,0 +1,1225 @@
+"""Lightweight VRChat output log watcher for playback forensics."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+import csv
+import json
+import os
+import re
+import time
+
+from dancing_log.vrcx_importer import parse_dance_url
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_CAPTURE_ROOT = PROJECT_ROOT / "analysis" / "vrc_log_capture"
+LOG_FILE_PATTERN = "output_log_*.txt"
+
+VIDEO_TOKENS = (
+    "video playback",
+    "usharpvideo",
+    "videoplay",
+    "lsmedia",
+    "added url",
+    "resolving url",
+    "resolve url",
+    "resolved to",
+    "playvideointernal",
+    "loadroutedurl",
+    "video loaded",
+    "delayedvideoready",
+    "onvideostart",
+    "playing synced",
+)
+
+TIMESTAMP_RE = re.compile(
+    r"^(?P<timestamp>\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?)"
+)
+URL_RE = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
+COLOR_TAG_RE = re.compile(r"</?color(?:=[^>]*)?>", re.IGNORECASE)
+VIDEO_PLAYBACK_RE = re.compile(
+    r"\[Video Playback\]\s+"
+    r"(?P<action>Attempting to resolve URL|Resolving URL)\s+"
+    r"'(?P<url>[^']+)'",
+    re.IGNORECASE,
+)
+VIDEO_RESOLVED_RE = re.compile(
+    r"\[Video Playback\]\s+URL\s+'(?P<url>[^']+)'\s+resolved to\s+'(?P<resolved_url>[^']+)'",
+    re.IGNORECASE,
+)
+USER_ADDED_URL_RE = re.compile(
+    r"\bUser\s+(?P<display_name>.+?)\s+added URL\s+(?P<url>https?://\S+)",
+    re.IGNORECASE,
+)
+USHARP_VIDEO_RE = re.compile(
+    r"\[USharpVideo(?:\s*\([^)]+\))?\]\s+Started video load for URL:\s*"
+    r"(?P<url>https?://\S+)"
+    r"(?:,\s*requested by\s*(?P<display_name>.*?))?\s*$",
+    re.IGNORECASE,
+)
+USHARP_PLAY_INTERNAL_RE = re.compile(
+    r"\[USharpVideo(?:\s*\([^)]+\))?\]\s+PlayVideoInternal:\s+Playing video\s+"
+    r"(?P<url>https?://\S+)",
+    re.IGNORECASE,
+)
+USHARP_LOAD_ROUTED_RE = re.compile(
+    r"\[USharpVideo(?:\s*\([^)]+\))?\]\s+LoadRoutedURL:\s+"
+    r"(?P<url>https?://\S+)\s+routed to\s+(?P<routed_url>https?://\S+)",
+    re.IGNORECASE,
+)
+USHARP_VIDEO_LOADED_RE = re.compile(
+    r"\[USharpVideo(?:\s*\([^)]+\))?\]\s+Video loaded\s+"
+    r"\((?P<load_seconds>[\d.]+)\s+seconds\),\s+but let's wait for\s+"
+    r"(?P<wait_seconds>[\d.]+)\s+seconds before playing it",
+    re.IGNORECASE,
+)
+USHARP_DELAYED_READY_RE = re.compile(
+    r"\[USharpVideo(?:\s*\([^)]+\))?\]\s+DelayedVideoReady:\s+Time's up,\s+let's play",
+    re.IGNORECASE,
+)
+USHARP_ON_VIDEO_START_RE = re.compile(
+    r"\[USharpVideo(?:\s*\([^)]+\))?\]\s+OnVideoStart:\s+Started video:\s+"
+    r"(?P<url>https?://\S+)",
+    re.IGNORECASE,
+)
+USHARP_PLAYING_SYNCED_RE = re.compile(
+    r"\[USharpVideo(?:\s*\([^)]+\))?\]\s+Playing synced\s+"
+    r"(?P<url>https?://\S+)",
+    re.IGNORECASE,
+)
+VRCX_VIDEO_PLAY_RE = re.compile(
+    r"\[VRCX\]\s+VideoPlay\((?P<world>[^)]+)\)\s*(?P<payload>.*)",
+    re.IGNORECASE,
+)
+VRCX_LSMEDIA_RE = re.compile(
+    r"\[VRCX\]\s+LSMedia\s*(?P<payload>.*)",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class ParsedVrcLogEvent:
+    """One parsed playback-like event from a VRChat output log line."""
+
+    timestamp: str | None
+    event_type: str
+    video_url: str | None
+    display_name: str | None
+    parser_name: str
+    raw_line: str
+    world_parser: str | None = None
+    video_name: str | None = None
+    video_id: str | None = None
+    requester_marker: str | None = None
+    source_hint: str | None = None
+    actual_play_at: str | None = None
+    actual_play_signal_at: str | None = None
+    actual_play_offset_seconds: float | None = None
+    actual_play_method: str | None = None
+    routed_url: str | None = None
+    resolved_url: str | None = None
+    video_offset_seconds: float | None = None
+    duration_seconds: float | None = None
+    load_seconds: float | None = None
+    wait_seconds: float | None = None
+
+    def to_capture_record(
+        self,
+        *,
+        source_file: Path | str | None = None,
+        line_number: int | None = None,
+        byte_offset: int | None = None,
+    ) -> dict:
+        parsed = parse_dance_url(self.video_url)
+        return {
+            "captured_at": _utc_now(),
+            "timestamp": self.timestamp,
+            "event_type": self.event_type,
+            "video_url": self.video_url,
+            "display_name": self.display_name,
+            "video_name": self.video_name,
+            "video_id": self.video_id,
+            "requester_marker": self.requester_marker,
+            "source_hint": self.source_hint,
+            "actual_play_at": self.actual_play_at,
+            "actual_play_signal_at": self.actual_play_signal_at,
+            "actual_play_offset_seconds": self.actual_play_offset_seconds,
+            "actual_play_method": self.actual_play_method,
+            "parser_name": self.parser_name,
+            "world_parser": self.world_parser,
+            "dance_system_key": parsed.system_key,
+            "dance_external_id": parsed.external_id,
+            "url_kind": parsed.url_kind,
+            "parse_method": parsed.method,
+            "routed_url": self.routed_url,
+            "resolved_url": self.resolved_url,
+            "video_offset_seconds": self.video_offset_seconds,
+            "duration_seconds": self.duration_seconds,
+            "load_seconds": self.load_seconds,
+            "wait_seconds": self.wait_seconds,
+            "source_file": str(source_file) if source_file is not None else None,
+            "line_number": line_number,
+            "byte_offset": byte_offset,
+            "raw_line": _trim_newline(self.raw_line),
+        }
+
+
+@dataclass
+class WatchStats:
+    """Summary of one watcher session."""
+
+    session_dir: Path
+    started_at: str
+    ended_at: str | None = None
+    raw_lines: int = 0
+    candidate_lines: int = 0
+    parsed_events: int = 0
+    playback_events: int = 0
+    delay_metrics: dict[str, float | int | None] = field(default_factory=dict)
+    parser_counts: dict[str, int] = field(default_factory=dict)
+    last_file: str | None = None
+    last_offset: int = 0
+    idle_stopped: bool = False
+    errors: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "session_dir": str(self.session_dir),
+            "started_at": self.started_at,
+            "ended_at": self.ended_at,
+            "raw_lines": self.raw_lines,
+            "candidate_lines": self.candidate_lines,
+            "parsed_events": self.parsed_events,
+            "playback_events": self.playback_events,
+            "delay_metrics": self.delay_metrics,
+            "parser_counts": dict(sorted(self.parser_counts.items())),
+            "last_file": self.last_file,
+            "last_offset": self.last_offset,
+            "idle_stopped": self.idle_stopped,
+            "errors": self.errors,
+        }
+
+
+class PlaybackEventBuilder:
+    """Fold line-level parser signals into per-song playback events."""
+
+    def __init__(self) -> None:
+        self._events: dict[str, dict] = {}
+        self._open_by_canonical: dict[str, str] = {}
+        self._occurrence_counts: dict[str, int] = {}
+        self._active_key: str | None = None
+
+    def observe(self, record: dict) -> None:
+        canonical_key = self._canonical_key_for_record(record)
+        key = None
+        if canonical_key is not None:
+            key = self._event_key_for_record(canonical_key, record)
+        timestamp = record.get("timestamp")
+
+        if key is None and record.get("event_type") == "video-loaded":
+            key = self._active_key
+        if key is None and record.get("event_type") == "actual-play":
+            key = self._key_for_actual_play(timestamp) or self._active_key
+        if key is None:
+            return
+
+        event = self._events.setdefault(key, self._new_event(key))
+        self._merge_signal(event, record)
+
+        if record.get("video_url"):
+            self._active_key = key
+
+    def records(self) -> list[dict]:
+        records = [self._finalize_event(event) for event in self._events.values()]
+        return sorted(
+            records,
+            key=lambda event: (
+                _timestamp_sort_key(event.get("first_seen_at")),
+                event.get("event_key") or "",
+            ),
+        )
+
+    def _new_event(self, key: str, canonical_key: str | None = None) -> dict:
+        return {
+            "event_key": key,
+            "canonical_key": canonical_key,
+            "first_seen_at": None,
+            "request_at": None,
+            "load_started_at": None,
+            "resolve_attempt_at": None,
+            "resolved_at": None,
+            "video_loaded_at": None,
+            "expected_ready_at": None,
+            "actual_play_at": None,
+            "actual_play_signal_at": None,
+            "actual_play_offset_seconds": None,
+            "actual_play_method": None,
+            "on_video_start_at": None,
+            "synced_play_at": None,
+            "observed_mid_play": False,
+            "elapsed_at_first_seen_seconds": None,
+            "video_url": None,
+            "routed_url": None,
+            "resolved_url": None,
+            "dance_system_key": None,
+            "dance_external_id": None,
+            "url_kind": None,
+            "video_name": None,
+            "video_id": None,
+            "display_name": None,
+            "requester_marker": None,
+            "source_hint": None,
+            "source_type": None,
+            "source_display_name": None,
+            "world_parser": None,
+            "duration_seconds": None,
+            "load_seconds": None,
+            "wait_seconds": None,
+            "source_file": None,
+            "first_line_number": None,
+            "last_line_number": None,
+            "signal_count": 0,
+            "parser_names": set(),
+            "raw_event_types": set(),
+        }
+
+    def _merge_signal(self, event: dict, record: dict) -> None:
+        timestamp = record.get("timestamp")
+        timestamp_dt = _parse_vrc_timestamp(timestamp)
+        event_type = record.get("event_type")
+
+        if event["first_seen_at"] is None or _timestamp_sort_key(timestamp) < _timestamp_sort_key(event["first_seen_at"]):
+            event["first_seen_at"] = timestamp
+        event["signal_count"] += 1
+        event["parser_names"].add(record.get("parser_name"))
+        event["raw_event_types"].add(event_type)
+
+        self._copy_first(event, record, "source_file")
+        self._copy_first(event, record, "dance_system_key")
+        self._copy_first(event, record, "dance_external_id")
+        self._copy_first(event, record, "url_kind")
+        self._copy_first(event, record, "world_parser")
+        self._copy_first(event, record, "video_id")
+        self._copy_first(event, record, "video_name")
+        self._copy_first(event, record, "display_name")
+        self._copy_first(event, record, "requester_marker")
+        self._copy_first(event, record, "source_hint")
+        self._copy_first(event, record, "duration_seconds")
+
+        for field_name in ("video_url", "routed_url", "resolved_url"):
+            if record.get(field_name):
+                event[field_name] = record[field_name]
+
+        line_number = record.get("line_number")
+        if isinstance(line_number, int):
+            if event["first_line_number"] is None or line_number < event["first_line_number"]:
+                event["first_line_number"] = line_number
+            if event["last_line_number"] is None or line_number > event["last_line_number"]:
+                event["last_line_number"] = line_number
+
+        if event_type == "request":
+            self._copy_time(event, "request_at", timestamp)
+        elif event_type == "load-start":
+            self._copy_time(event, "load_started_at", timestamp)
+        elif event_type == "resolve-attempt":
+            self._copy_time(event, "resolve_attempt_at", timestamp)
+        elif event_type == "resolve-complete":
+            self._copy_time(event, "resolved_at", timestamp)
+        elif event_type == "video-loaded":
+            self._copy_time(event, "video_loaded_at", timestamp)
+            event["load_seconds"] = record.get("load_seconds")
+            event["wait_seconds"] = record.get("wait_seconds")
+            if timestamp_dt is not None and record.get("wait_seconds") is not None:
+                event["expected_ready_at"] = _format_vrc_timestamp(
+                    timestamp_dt + timedelta(seconds=float(record["wait_seconds"]))
+                )
+        elif event_type == "actual-play":
+            self._copy_time(event, "actual_play_at", timestamp, prefer_latest=True)
+            self._copy_time(event, "actual_play_signal_at", timestamp, prefer_latest=True)
+            event["actual_play_method"] = (
+                record.get("actual_play_method")
+                or record.get("parser_name")
+                or event.get("actual_play_method")
+            )
+        elif event_type == "playback-progress":
+            self._copy_time(event, "actual_play_signal_at", timestamp)
+            if event["actual_play_at"] is None:
+                self._copy_time(event, "actual_play_at", record.get("actual_play_at") or timestamp)
+            self._copy_first(event, record, "actual_play_offset_seconds")
+            self._copy_first(event, record, "actual_play_method")
+        elif event_type == "playback-sync":
+            self._copy_time(event, "synced_play_at", timestamp)
+            event["observed_mid_play"] = True
+        elif event_type == "on-video-start":
+            self._copy_time(event, "on_video_start_at", timestamp)
+            if event["actual_play_at"] is None:
+                self._copy_time(event, "actual_play_at", timestamp)
+            self._copy_time(event, "actual_play_signal_at", timestamp)
+            self._copy_first(event, record, "actual_play_method")
+            if event["actual_play_method"] is None:
+                event["actual_play_method"] = record.get("parser_name")
+
+    def _finalize_event(self, event: dict) -> dict:
+        finalized = dict(event)
+        finalized["parser_names"] = sorted(name for name in event["parser_names"] if name)
+        finalized["raw_event_types"] = sorted(name for name in event["raw_event_types"] if name)
+        for set_field in ("parser_names", "raw_event_types"):
+            if not finalized[set_field]:
+                finalized[set_field] = []
+
+        if finalized["actual_play_at"] is None and finalized["on_video_start_at"] is not None:
+            finalized["actual_play_at"] = finalized["on_video_start_at"]
+
+        source_type, source_display_name = _source_fields(finalized)
+        finalized["source_type"] = source_type
+        finalized["source_display_name"] = source_display_name
+
+        delay_to_actual = _seconds_between(
+            finalized.get("first_seen_at"),
+            finalized.get("actual_play_at"),
+        )
+        if delay_to_actual is not None and delay_to_actual < 0:
+            finalized["observed_mid_play"] = True
+            finalized["elapsed_at_first_seen_seconds"] = round(abs(delay_to_actual), 3)
+            finalized["delay_to_actual_seconds"] = None
+        elif finalized.get("observed_mid_play"):
+            finalized["elapsed_at_first_seen_seconds"] = None
+            finalized["delay_to_actual_seconds"] = None
+        else:
+            finalized["elapsed_at_first_seen_seconds"] = None
+            finalized["delay_to_actual_seconds"] = delay_to_actual
+        finalized["load_to_actual_seconds"] = _seconds_between(
+            finalized.get("video_loaded_at"),
+            finalized.get("actual_play_at"),
+        )
+        finalized["request_to_resolve_seconds"] = _seconds_between(
+            finalized.get("first_seen_at"),
+            finalized.get("resolved_at"),
+        )
+        return finalized
+
+    def _canonical_key_for_record(self, record: dict) -> str | None:
+        url = record.get("video_url") or record.get("routed_url")
+        if not url:
+            return None
+        parsed = parse_dance_url(url)
+        if parsed.system_key and parsed.external_id:
+            return f"{parsed.system_key}:{parsed.external_id}"
+        return f"url:{url}"
+
+    def _event_key_for_record(self, canonical_key: str, record: dict) -> str:
+        current_key = self._open_by_canonical.get(canonical_key)
+        if record.get("event_type") in {"request", "load-start", "resolve-attempt"}:
+            if current_key is None or self._events.get(current_key, {}).get("actual_play_at"):
+                return self._new_occurrence(canonical_key, record.get("timestamp"))
+            return current_key
+        if current_key is None:
+            return self._new_occurrence(canonical_key, record.get("timestamp"))
+        return current_key
+
+    def _new_occurrence(self, canonical_key: str, timestamp: str | None) -> str:
+        count = self._occurrence_counts.get(canonical_key, 0) + 1
+        self._occurrence_counts[canonical_key] = count
+        event_key = f"{canonical_key}#{count}"
+        self._events[event_key] = self._new_event(event_key, canonical_key)
+        self._open_by_canonical[canonical_key] = event_key
+        return event_key
+
+    def _key_for_actual_play(self, timestamp: str | None) -> str | None:
+        timestamp_dt = _parse_vrc_timestamp(timestamp)
+        if timestamp_dt is None:
+            return self._active_key
+
+        best_key = None
+        best_delta = None
+        for key, event in self._events.items():
+            if event.get("actual_play_at"):
+                continue
+            expected_dt = _parse_vrc_timestamp(event.get("expected_ready_at"))
+            if expected_dt is None:
+                continue
+            delta = abs((timestamp_dt - expected_dt).total_seconds())
+            if best_delta is None or delta < best_delta:
+                best_key = key
+                best_delta = delta
+        if best_delta is not None and best_delta <= 3.0:
+            return best_key
+        return self._active_key
+
+    @staticmethod
+    def _copy_first(event: dict, record: dict, field_name: str) -> None:
+        if event.get(field_name) in (None, "") and record.get(field_name) not in (None, ""):
+            event[field_name] = record[field_name]
+
+    @staticmethod
+    def _copy_time(
+        event: dict,
+        field_name: str,
+        timestamp: str | None,
+        *,
+        prefer_latest: bool = False,
+    ) -> None:
+        if timestamp is None:
+            return
+        if event.get(field_name) is None:
+            event[field_name] = timestamp
+            return
+        if prefer_latest and _timestamp_sort_key(timestamp) > _timestamp_sort_key(event[field_name]):
+            event[field_name] = timestamp
+
+
+def default_vrc_log_dir() -> Path:
+    """Return VRChat's default Windows output log directory."""
+    local_appdata = os.environ.get("LOCALAPPDATA")
+    if local_appdata:
+        local_path = Path(local_appdata)
+        if local_path.name.lower() == "local":
+            return local_path.with_name("LocalLow") / "VRChat" / "VRChat"
+        return Path(f"{local_appdata}Low") / "VRChat" / "VRChat"
+    return Path.home() / "AppData" / "LocalLow" / "VRChat" / "VRChat"
+
+
+def is_video_candidate_line(line: str) -> bool:
+    """Return true when the line is worth running heavier video parsers on."""
+    folded = line.casefold()
+    return any(token in folded for token in VIDEO_TOKENS)
+
+
+def parse_vrc_log_line(line: str) -> list[ParsedVrcLogEvent]:
+    """Parse one VRChat output log line into zero or more playback events."""
+    if not is_video_candidate_line(line):
+        return []
+
+    timestamp = _extract_timestamp(line)
+    plain_line = _strip_color_tags(line)
+    events: list[ParsedVrcLogEvent] = []
+
+    match = VIDEO_PLAYBACK_RE.search(plain_line)
+    if match:
+        events.append(
+            ParsedVrcLogEvent(
+                timestamp=timestamp,
+                event_type="resolve-attempt",
+                video_url=_clean_url(match.group("url")),
+                display_name=None,
+                parser_name="video_playback_resolve",
+                raw_line=line,
+            )
+        )
+
+    match = VIDEO_RESOLVED_RE.search(plain_line)
+    if match:
+        events.append(
+            ParsedVrcLogEvent(
+                timestamp=timestamp,
+                event_type="resolve-complete",
+                video_url=_clean_url(match.group("url")),
+                display_name=None,
+                parser_name="video_playback_resolved",
+                raw_line=line,
+                resolved_url=_clean_url(match.group("resolved_url")),
+            )
+        )
+
+    match = USER_ADDED_URL_RE.search(plain_line)
+    if match:
+        events.append(
+            ParsedVrcLogEvent(
+                timestamp=timestamp,
+                event_type="request",
+                video_url=_clean_url(match.group("url")),
+                display_name=_clean_display_name(match.group("display_name")),
+                parser_name="user_added_url",
+                raw_line=line,
+            )
+        )
+
+    match = USHARP_PLAY_INTERNAL_RE.search(plain_line)
+    if match:
+        events.append(
+            ParsedVrcLogEvent(
+                timestamp=timestamp,
+                event_type="request",
+                video_url=_clean_url(match.group("url")),
+                display_name=None,
+                parser_name="usharp_play_internal",
+                raw_line=line,
+            )
+        )
+
+    match = USHARP_VIDEO_RE.search(plain_line)
+    if match:
+        events.append(
+            ParsedVrcLogEvent(
+                timestamp=timestamp,
+                event_type="load-start",
+                video_url=_clean_url(match.group("url")),
+                display_name=_clean_display_name(match.group("display_name")),
+                parser_name="usharp_video_load",
+                raw_line=line,
+            )
+        )
+
+    match = USHARP_LOAD_ROUTED_RE.search(plain_line)
+    if match:
+        events.append(
+            ParsedVrcLogEvent(
+                timestamp=timestamp,
+                event_type="route",
+                video_url=_clean_url(match.group("url")),
+                display_name=None,
+                parser_name="usharp_load_routed_url",
+                raw_line=line,
+                routed_url=_clean_url(match.group("routed_url")),
+            )
+        )
+
+    match = USHARP_VIDEO_LOADED_RE.search(plain_line)
+    if match:
+        events.append(
+            ParsedVrcLogEvent(
+                timestamp=timestamp,
+                event_type="video-loaded",
+                video_url=None,
+                display_name=None,
+                parser_name="usharp_video_loaded",
+                raw_line=line,
+                load_seconds=_float_or_none(match.group("load_seconds")),
+                wait_seconds=_float_or_none(match.group("wait_seconds")),
+            )
+        )
+
+    match = USHARP_DELAYED_READY_RE.search(plain_line)
+    if match:
+        events.append(
+            ParsedVrcLogEvent(
+                timestamp=timestamp,
+                event_type="actual-play",
+                video_url=None,
+                display_name=None,
+                parser_name="usharp_delayed_video_ready",
+                raw_line=line,
+            )
+        )
+
+    match = USHARP_ON_VIDEO_START_RE.search(plain_line)
+    if match:
+        events.append(
+            ParsedVrcLogEvent(
+                timestamp=timestamp,
+                event_type="on-video-start",
+                video_url=_clean_url(match.group("url")),
+                display_name=None,
+                parser_name="usharp_on_video_start",
+                raw_line=line,
+            )
+        )
+
+    match = USHARP_PLAYING_SYNCED_RE.search(plain_line)
+    if match:
+        events.append(
+            ParsedVrcLogEvent(
+                timestamp=timestamp,
+                event_type="playback-sync",
+                video_url=_clean_url(match.group("url")),
+                display_name=None,
+                parser_name="usharp_playing_synced",
+                raw_line=line,
+            )
+        )
+
+    match = VRCX_VIDEO_PLAY_RE.search(plain_line)
+    if match:
+        events.extend(
+            _events_from_payload(
+                timestamp=timestamp,
+                payload=match.group("payload"),
+                parser_name="vrcx_video_play",
+                raw_line=line,
+                world_parser=match.group("world").strip() or None,
+            )
+        )
+
+    match = VRCX_LSMEDIA_RE.search(plain_line)
+    if match:
+        events.extend(
+            _events_from_payload(
+                timestamp=timestamp,
+                payload=match.group("payload"),
+                parser_name="vrcx_lsmedia",
+                raw_line=line,
+                world_parser="LSMedia",
+            )
+        )
+
+    return _dedupe_events(events)
+
+
+def watch_vrc_logs(
+    *,
+    log_dir: Path | str | None = None,
+    output_dir: Path | str | None = None,
+    session_name: str | None = None,
+    from_start: bool = False,
+    include_raw: bool = True,
+    poll_seconds: float = 0.25,
+    stop_after_idle_seconds: float | None = None,
+) -> WatchStats:
+    """Tail VRChat output logs and write raw/candidate/parsed capture artifacts."""
+    resolved_log_dir = Path(log_dir) if log_dir is not None else default_vrc_log_dir()
+    capture_root = Path(output_dir) if output_dir is not None else DEFAULT_CAPTURE_ROOT
+    session_dir = capture_root / (session_name or datetime.now().strftime("%Y-%m-%d_%H%M%S"))
+    session_dir.mkdir(parents=True, exist_ok=True)
+
+    stats = WatchStats(session_dir=session_dir, started_at=_utc_now())
+    initial_latest = _latest_log_file(resolved_log_dir, stats.errors)
+    opened_any_file = False
+    current_path: Path | None = None
+    current_handle = None
+    current_line_number = 0
+    idle_since = time.monotonic()
+    playback_builder = PlaybackEventBuilder()
+
+    raw_handle = None
+    candidates_handle = None
+    parsed_handle = None
+
+    try:
+        if include_raw:
+            raw_handle = open(
+                session_dir / "raw_output_log.txt",
+                "a",
+                encoding="utf-8",
+                errors="replace",
+                buffering=1,
+            )
+        candidates_handle = open(
+            session_dir / "candidates.jsonl",
+            "a",
+            encoding="utf-8",
+            buffering=1,
+        )
+        parsed_handle = open(
+            session_dir / "parsed_events.jsonl",
+            "a",
+            encoding="utf-8",
+            buffering=1,
+        )
+
+        while True:
+            latest_path = _latest_log_file(resolved_log_dir, stats.errors)
+            if latest_path and latest_path != current_path:
+                if current_path is None or _is_newer_log(latest_path, current_path):
+                    if current_handle is not None:
+                        current_handle.close()
+                    current_path = latest_path
+                    current_line_number = 0
+                    start_offset = _start_offset(
+                        latest_path,
+                        initial_latest=initial_latest,
+                        opened_any_file=opened_any_file,
+                        from_start=from_start,
+                    )
+                    current_handle = open(
+                        latest_path,
+                        "r",
+                        encoding="utf-8",
+                        errors="replace",
+                    )
+                    current_handle.seek(start_offset)
+                    stats.last_file = str(latest_path)
+                    stats.last_offset = start_offset
+                    opened_any_file = True
+                    idle_since = time.monotonic()
+
+            made_progress = False
+            if current_handle is not None and current_path is not None:
+                made_progress, current_line_number = _drain_handle(
+                    current_handle=current_handle,
+                    current_path=current_path,
+                    raw_handle=raw_handle,
+                    candidates_handle=candidates_handle,
+                    parsed_handle=parsed_handle,
+                    stats=stats,
+                    playback_builder=playback_builder,
+                    line_number=current_line_number,
+                )
+
+                try:
+                    if current_path.stat().st_size < stats.last_offset:
+                        current_handle.close()
+                        current_handle = None
+                        current_path = None
+                        current_line_number = 0
+                except OSError as exc:
+                    _record_error(stats.errors, f"stat failed for {current_path}: {exc}")
+
+            if made_progress:
+                idle_since = time.monotonic()
+            else:
+                if (
+                    stop_after_idle_seconds is not None
+                    and time.monotonic() - idle_since >= stop_after_idle_seconds
+                ):
+                    stats.idle_stopped = True
+                    break
+                time.sleep(max(poll_seconds, 0.01))
+    except KeyboardInterrupt:
+        pass
+    finally:
+        stats.ended_at = _utc_now()
+        if current_handle is not None:
+            current_handle.close()
+        for handle in (raw_handle, candidates_handle, parsed_handle):
+            if handle is not None:
+                handle.close()
+        playback_records = playback_builder.records()
+        stats.playback_events = len(playback_records)
+        stats.delay_metrics = _delay_metrics(playback_records)
+        _write_jsonl_file(session_dir / "playback_events.jsonl", playback_records)
+        _write_json(session_dir / "summary.json", stats.to_dict())
+
+    return stats
+
+
+def _drain_handle(
+    *,
+    current_handle,
+    current_path: Path,
+    raw_handle,
+    candidates_handle,
+    parsed_handle,
+    stats: WatchStats,
+    playback_builder: PlaybackEventBuilder,
+    line_number: int,
+) -> tuple[bool, int]:
+    made_progress = False
+    while True:
+        byte_offset = current_handle.tell()
+        line = current_handle.readline()
+        if not line:
+            break
+
+        made_progress = True
+        line_number += 1
+        stats.raw_lines += 1
+        stats.last_file = str(current_path)
+        stats.last_offset = current_handle.tell()
+
+        if raw_handle is not None:
+            raw_handle.write(line)
+
+        if not is_video_candidate_line(line):
+            continue
+
+        stats.candidate_lines += 1
+        _write_jsonl(
+            candidates_handle,
+            {
+                "captured_at": _utc_now(),
+                "source_file": str(current_path),
+                "line_number": line_number,
+                "byte_offset": byte_offset,
+                "raw_line": _trim_newline(line),
+            },
+        )
+
+        for event in parse_vrc_log_line(line):
+            stats.parsed_events += 1
+            stats.parser_counts[event.parser_name] = (
+                stats.parser_counts.get(event.parser_name, 0) + 1
+            )
+            record = event.to_capture_record(
+                source_file=current_path,
+                line_number=line_number,
+                byte_offset=byte_offset,
+            )
+            _write_jsonl(
+                parsed_handle,
+                record,
+            )
+            playback_builder.observe(record)
+    return made_progress, line_number
+
+
+def _events_from_payload(
+    *,
+    timestamp: str | None,
+    payload: str,
+    parser_name: str,
+    raw_line: str,
+    world_parser: str | None,
+) -> list[ParsedVrcLogEvent]:
+    parsed_payload = _parse_video_play_payload(payload)
+    urls = parsed_payload["urls"]
+    if not urls:
+        return []
+
+    event_type = "request"
+    actual_play_at = None
+    actual_play_signal_at = None
+    actual_play_offset_seconds = None
+    actual_play_method = None
+    video_offset_seconds = parsed_payload["video_offset_seconds"]
+    if video_offset_seconds is not None and video_offset_seconds > 0:
+        event_type = "playback-progress"
+        actual_play_signal_at = timestamp
+        actual_play_offset_seconds = video_offset_seconds
+        actual_play_method = "vrcx_progress_offset"
+        timestamp_dt = _parse_vrc_timestamp(timestamp)
+        if timestamp_dt is not None:
+            actual_play_at = _format_vrc_timestamp(
+                timestamp_dt - timedelta(seconds=video_offset_seconds)
+            )
+
+    return [
+        ParsedVrcLogEvent(
+            timestamp=timestamp,
+            event_type=event_type,
+            video_url=url,
+            display_name=parsed_payload["display_name"],
+            parser_name=parser_name,
+            raw_line=raw_line,
+            world_parser=world_parser,
+            video_name=parsed_payload["video_name"],
+            video_id=parsed_payload["video_id"],
+            requester_marker=parsed_payload["requester_marker"],
+            source_hint=parsed_payload["source_hint"],
+            actual_play_at=actual_play_at,
+            actual_play_signal_at=actual_play_signal_at,
+            actual_play_offset_seconds=actual_play_offset_seconds,
+            actual_play_method=actual_play_method,
+            video_offset_seconds=video_offset_seconds,
+            duration_seconds=parsed_payload["duration_seconds"],
+        )
+        for url in urls
+    ]
+
+
+def _parse_video_play_payload(payload: str) -> dict:
+    fields = _csv_fields(payload)
+    urls = _extract_urls(payload)
+    display_name = _display_name_from_payload(payload)
+    video_offset_seconds = None
+    duration_seconds = None
+    video_name = None
+    video_id = None
+    requester_marker = None
+    source_hint = None
+
+    if fields:
+        url_index = next((index for index, field in enumerate(fields) if URL_RE.search(field)), None)
+        if url_index is not None:
+            trailing = fields[url_index + 1 :]
+            if trailing:
+                video_offset_seconds = _float_or_none(trailing[0])
+                if video_offset_seconds is not None:
+                    display_name = None
+            if len(trailing) > 1:
+                duration_seconds = _float_or_none(trailing[1])
+                if duration_seconds == 114514:
+                    duration_seconds = None
+            if len(trailing) > 2:
+                title_payload = trailing[2]
+                video_id, video_name, requester_marker = _parse_video_title_payload(title_payload)
+                if requester_marker:
+                    if requester_marker.casefold() == "random":
+                        source_hint = "random"
+                    else:
+                        display_name = requester_marker
+                        source_hint = "requester_marker"
+            elif len(trailing) == 1 and video_offset_seconds is None and display_name is None:
+                display_name = _clean_display_name(trailing[0])
+
+    structured = _try_json(payload)
+    if structured is not None:
+        structured_name = _find_key(structured, {"name", "title", "videoname", "video_name"})
+        structured_id = _find_key(structured, {"id", "videoid", "video_id"})
+        if isinstance(structured_name, str):
+            video_name = video_name or _clean_display_name(structured_name)
+        if structured_id is not None:
+            video_id = video_id or str(structured_id)
+
+    return {
+        "urls": urls,
+        "display_name": display_name,
+        "video_name": video_name,
+        "video_id": video_id,
+        "requester_marker": requester_marker,
+        "source_hint": source_hint,
+        "video_offset_seconds": video_offset_seconds,
+        "duration_seconds": duration_seconds,
+    }
+
+
+def _parse_video_title_payload(value: str) -> tuple[str | None, str | None, str | None]:
+    text = _clean_display_name(value) or ""
+    requester_marker = None
+    marker_match = re.search(r"\((?P<marker>[^()]*)\)\s*$", text)
+    if marker_match:
+        requester_marker = _clean_display_name(marker_match.group("marker"))
+        text = text[: marker_match.start()].strip()
+
+    video_id = None
+    id_match = re.match(r"^\$?(?P<id>\d+)(?:\.\s*|\s*:\s*)(?P<title>.*)$", text)
+    if id_match:
+        video_id = id_match.group("id")
+        text = id_match.group("title").strip()
+
+    return video_id, text or None, requester_marker
+
+
+def _display_name_from_payload(payload: str) -> str | None:
+    structured = _try_json(payload)
+    if structured is not None:
+        value = _find_key(structured, {"displayname", "display_name", "requester", "user"})
+        if isinstance(value, str):
+            return _clean_display_name(value)
+
+    fields = _csv_fields(payload)
+    for index, field in enumerate(fields):
+        if URL_RE.search(field):
+            for candidate in fields[index + 1 :]:
+                if candidate.strip() and not URL_RE.search(candidate):
+                    return _clean_display_name(candidate)
+    return None
+
+
+def _extract_urls(payload: str) -> list[str]:
+    structured = _try_json(payload)
+    urls: list[str] = []
+    if structured is not None:
+        value = _find_key(structured, {"url", "videourl", "video_url"})
+        if isinstance(value, str):
+            urls.append(value)
+
+    fields = _csv_fields(payload)
+    for field in fields:
+        urls.extend(match.group(0) for match in URL_RE.finditer(field))
+
+    if not urls:
+        urls.extend(match.group(0) for match in URL_RE.finditer(payload))
+
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for url in urls:
+        clean = _clean_url(url)
+        if clean and clean not in seen:
+            cleaned.append(clean)
+            seen.add(clean)
+    return cleaned
+
+
+def _latest_log_file(log_dir: Path, errors: list[str]) -> Path | None:
+    try:
+        candidates = [path for path in log_dir.glob(LOG_FILE_PATTERN) if path.is_file()]
+    except OSError as exc:
+        _record_error(errors, f"cannot list {log_dir}: {exc}")
+        return None
+    if not candidates:
+        return None
+    return max(candidates, key=lambda path: (_mtime_ns(path), path.name))
+
+
+def _is_newer_log(candidate: Path, current: Path) -> bool:
+    return (_mtime_ns(candidate), candidate.name) > (_mtime_ns(current), current.name)
+
+
+def _mtime_ns(path: Path) -> int:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
+def _start_offset(
+    path: Path,
+    *,
+    initial_latest: Path | None,
+    opened_any_file: bool,
+    from_start: bool,
+) -> int:
+    if from_start:
+        return 0
+    if not opened_any_file and initial_latest is not None and path == initial_latest:
+        try:
+            return path.stat().st_size
+        except OSError:
+            return 0
+    return 0
+
+
+def _extract_timestamp(line: str) -> str | None:
+    match = TIMESTAMP_RE.match(line)
+    return match.group("timestamp") if match else None
+
+
+def _parse_vrc_timestamp(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    for fmt in ("%Y.%m.%d %H:%M:%S.%f", "%Y.%m.%d %H:%M:%S"):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            pass
+    return None
+
+
+def _format_vrc_timestamp(value: datetime) -> str:
+    text = value.strftime("%Y.%m.%d %H:%M:%S.%f")
+    return text.rstrip("0").rstrip(".")
+
+
+def _timestamp_sort_key(value: str | None) -> str:
+    parsed = _parse_vrc_timestamp(value)
+    if parsed is None:
+        return ""
+    return parsed.isoformat()
+
+
+def _seconds_between(start: str | None, end: str | None) -> float | None:
+    start_dt = _parse_vrc_timestamp(start)
+    end_dt = _parse_vrc_timestamp(end)
+    if start_dt is None or end_dt is None:
+        return None
+    return round((end_dt - start_dt).total_seconds(), 3)
+
+
+def _delay_metrics(playback_records: list[dict]) -> dict[str, float | int | None]:
+    delays = [
+        float(record["delay_to_actual_seconds"])
+        for record in playback_records
+        if record.get("delay_to_actual_seconds") is not None
+    ]
+    if not delays:
+        return {
+            "count": 0,
+            "min_seconds": None,
+            "max_seconds": None,
+            "avg_seconds": None,
+        }
+    return {
+        "count": len(delays),
+        "min_seconds": round(min(delays), 3),
+        "max_seconds": round(max(delays), 3),
+        "avg_seconds": round(sum(delays) / len(delays), 3),
+    }
+
+
+def _source_fields(event: dict) -> tuple[str, str | None]:
+    source_hint = (event.get("source_hint") or "").casefold()
+    requester_marker = _clean_display_name(event.get("requester_marker"))
+    display_name = _clean_display_name(event.get("display_name"))
+
+    if source_hint == "random" or (requester_marker or "").casefold() == "random":
+        return "random", None
+    if source_hint == "requester_marker" and requester_marker:
+        return "player", requester_marker
+    if display_name and display_name.casefold() != "random":
+        return "player", display_name
+    return "unknown", None
+
+
+def _strip_color_tags(line: str) -> str:
+    return COLOR_TAG_RE.sub("", line)
+
+
+def _float_or_none(value: str | None) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def _clean_url(value: str | None) -> str:
+    if not value:
+        return ""
+    return value.strip().strip("\"'").rstrip(".,);]}")
+
+
+def _clean_display_name(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip().strip("\"'")
+    return cleaned or None
+
+
+def _trim_newline(value: str) -> str:
+    return value.rstrip("\r\n")
+
+
+def _dedupe_events(events: list[ParsedVrcLogEvent]) -> list[ParsedVrcLogEvent]:
+    deduped: list[ParsedVrcLogEvent] = []
+    seen: set[tuple[str, str | None, str]] = set()
+    for event in events:
+        key = (event.video_url, event.display_name, event.parser_name)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(event)
+    return deduped
+
+
+def _try_json(payload: str):
+    text = payload.strip()
+    if not text.startswith(("{", "[")):
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return None
+
+
+def _csv_fields(payload: str) -> list[str]:
+    try:
+        return next(csv.reader([payload], skipinitialspace=True))
+    except csv.Error:
+        return []
+
+
+def _find_key(value, keys: set[str]):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if str(key).replace("-", "_").replace(" ", "_").lower() in keys:
+                return child
+        for child in value.values():
+            found = _find_key(child, keys)
+            if found is not None:
+                return found
+    elif isinstance(value, list):
+        for child in value:
+            found = _find_key(child, keys)
+            if found is not None:
+                return found
+    return None
+
+
+def _write_json(path: Path, value: dict) -> None:
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(value, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+
+
+def _write_jsonl(handle, value: dict) -> None:
+    json.dump(value, handle, ensure_ascii=False, separators=(",", ":"))
+    handle.write("\n")
+
+
+def _write_jsonl_file(path: Path, values: list[dict]) -> None:
+    with open(path, "w", encoding="utf-8") as handle:
+        for value in values:
+            _write_jsonl(handle, value)
+
+
+def _record_error(errors: list[str], message: str) -> None:
+    if not errors or errors[-1] != message:
+        errors.append(message)
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
