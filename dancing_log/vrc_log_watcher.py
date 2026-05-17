@@ -20,12 +20,15 @@ DEFAULT_CAPTURE_ROOT = PROJECT_ROOT / "analysis" / "vrc_log_capture"
 LOG_FILE_PATTERN = "output_log_*.txt"
 STRICT_PROMOTION_COMPLETION_RATIO = 1.0
 COMPLETION_EPSILON_SECONDS = 0.001
+PREVIEW_SUPPRESSION_SECONDS = 90.0
+RETRY_MERGE_SECONDS = 30.0
 
 VIDEO_TOKENS = (
     "video playback",
     "usharpvideo",
     "videoplay",
     "lsmedia",
+    "previewvideo",
     "added url",
     "resolving url",
     "resolve url",
@@ -97,6 +100,13 @@ USHARP_ON_VIDEO_START_RE = re.compile(
 USHARP_PLAYING_SYNCED_RE = re.compile(
     r"\[USharpVideo(?:\s*\([^)]+\))?\]\s+Playing synced\s+"
     r"(?P<url>https?://\S+)",
+    re.IGNORECASE,
+)
+WANNADANCE_PREVIEW_RE = re.compile(
+    r"\[VideoListManager\]\s+PreviewVideo:\s+"
+    r"(?P<video_id>\d+)\s+"
+    r"(?P<url>https?://\S+)"
+    r"(?:,\s*time\s+(?P<preview_start>[\d.]+)\s*-\s*(?P<preview_end>[\d.]+))?",
     re.IGNORECASE,
 )
 VRCX_VIDEO_PLAY_RE = re.compile(
@@ -238,11 +248,23 @@ class PlaybackEventBuilder:
         self._events: dict[str, dict] = {}
         self._open_by_canonical: dict[str, str] = {}
         self._occurrence_counts: dict[str, int] = {}
+        self._preview_until_by_canonical: dict[str, datetime | None] = {}
         self._active_key: str | None = None
         self._update_callback = update_callback
 
     def observe(self, record: dict) -> None:
         canonical_key = self._canonical_key_for_record(record)
+        event_type = record.get("event_type")
+        if event_type == "preview":
+            if canonical_key is not None:
+                self._mark_preview(canonical_key, record.get("timestamp"))
+            return
+
+        if canonical_key is not None and record.get("parser_name") in {"user_added_url", "vrcx_video_play"}:
+            self._preview_until_by_canonical.pop(canonical_key, None)
+        elif canonical_key is not None and self._is_preview_suppressed(canonical_key, record.get("timestamp")):
+            return
+
         key = None
         if canonical_key is not None:
             key = self._event_key_for_record(canonical_key, record)
@@ -251,7 +273,7 @@ class PlaybackEventBuilder:
         if key is None and record.get("event_type") == "video-loaded":
             key = self._active_key
         if key is None and record.get("event_type") == "actual-play":
-            key = self._key_for_actual_play(timestamp) or self._active_key
+            key = self._active_key or self._key_for_actual_play(timestamp)
         if key is None:
             return
 
@@ -272,6 +294,10 @@ class PlaybackEventBuilder:
                 event.get("event_key") or "",
             ),
         )
+
+    def close_open_events(self) -> None:
+        self._open_by_canonical.clear()
+        self._active_key = None
 
     def _new_event(self, key: str, canonical_key: str | None = None) -> dict:
         return {
@@ -386,13 +412,12 @@ class PlaybackEventBuilder:
             self._copy_first(event, record, "actual_play_method")
         elif event_type == "playback-sync":
             self._copy_time(event, "synced_play_at", timestamp)
-            event["observed_mid_play"] = True
         elif event_type == "on-video-start":
-            self._copy_time(event, "on_video_start_at", timestamp)
-            if event["actual_play_at"] is None:
-                self._copy_time(event, "actual_play_at", timestamp)
-            self._copy_time(event, "actual_play_signal_at", timestamp)
-            self._copy_first(event, record, "actual_play_method")
+            self._copy_time(event, "on_video_start_at", timestamp, prefer_latest=True)
+            if event["actual_play_at"] is None or event.get("actual_play_method") == "usharp_delayed_video_ready":
+                self._copy_time(event, "actual_play_at", timestamp, prefer_latest=True)
+                event["actual_play_method"] = record.get("parser_name")
+            self._copy_time(event, "actual_play_signal_at", timestamp, prefer_latest=True)
             if event["actual_play_method"] is None:
                 event["actual_play_method"] = record.get("parser_name")
 
@@ -446,13 +471,28 @@ class PlaybackEventBuilder:
 
     def _event_key_for_record(self, canonical_key: str, record: dict) -> str:
         current_key = self._open_by_canonical.get(canonical_key)
-        if record.get("event_type") in {"request", "load-start", "resolve-attempt"}:
-            if current_key is None or self._events.get(current_key, {}).get("actual_play_at"):
+        current_event = self._events.get(current_key) if current_key is not None else None
+        event_type = record.get("event_type")
+        if event_type in {"request", "load-start"}:
+            if current_key is None or current_event is None or current_event.get("actual_play_at"):
+                return self._new_occurrence(canonical_key, record.get("timestamp"))
+            return current_key
+        if event_type in {"route", "resolve-attempt", "resolve-complete"} and current_event is not None:
+            if current_event.get("actual_play_at") and not self._is_recent_same_occurrence(
+                current_event,
+                record.get("timestamp"),
+            ):
                 return self._new_occurrence(canonical_key, record.get("timestamp"))
             return current_key
         if current_key is None:
             return self._new_occurrence(canonical_key, record.get("timestamp"))
         return current_key
+
+    @staticmethod
+    def _is_recent_same_occurrence(event: dict, timestamp: str | None) -> bool:
+        last_seen_at = event.get("last_seen_at") or event.get("actual_play_at")
+        seconds_since_last_seen = _seconds_between(last_seen_at, timestamp)
+        return seconds_since_last_seen is not None and 0 <= seconds_since_last_seen <= RETRY_MERGE_SECONDS
 
     def _new_occurrence(self, canonical_key: str, timestamp: str | None) -> str:
         count = self._occurrence_counts.get(canonical_key, 0) + 1
@@ -461,6 +501,27 @@ class PlaybackEventBuilder:
         self._events[event_key] = self._new_event(event_key, canonical_key)
         self._open_by_canonical[canonical_key] = event_key
         return event_key
+
+    def _mark_preview(self, canonical_key: str, timestamp: str | None) -> None:
+        timestamp_dt = _parse_vrc_timestamp(timestamp)
+        if timestamp_dt is None:
+            self._preview_until_by_canonical[canonical_key] = None
+            return
+        self._preview_until_by_canonical[canonical_key] = timestamp_dt + timedelta(
+            seconds=PREVIEW_SUPPRESSION_SECONDS
+        )
+
+    def _is_preview_suppressed(self, canonical_key: str, timestamp: str | None) -> bool:
+        if canonical_key not in self._preview_until_by_canonical:
+            return False
+        suppress_until = self._preview_until_by_canonical[canonical_key]
+        if suppress_until is None:
+            return True
+        timestamp_dt = _parse_vrc_timestamp(timestamp)
+        if timestamp_dt is None or timestamp_dt <= suppress_until:
+            return True
+        self._preview_until_by_canonical.pop(canonical_key, None)
+        return False
 
     def _key_for_actual_play(self, timestamp: str | None) -> str | None:
         timestamp_dt = _parse_vrc_timestamp(timestamp)
@@ -590,6 +651,21 @@ def parse_vrc_log_line(line: str) -> list[ParsedVrcLogEvent]:
     timestamp = _extract_timestamp(line)
     plain_line = _strip_color_tags(line)
     events: list[ParsedVrcLogEvent] = []
+
+    match = WANNADANCE_PREVIEW_RE.search(plain_line)
+    if match:
+        events.append(
+            ParsedVrcLogEvent(
+                timestamp=timestamp,
+                event_type="preview",
+                video_url=_clean_url(match.group("url")),
+                display_name=None,
+                parser_name="wannadance_preview",
+                raw_line=line,
+                video_id=match.group("video_id"),
+                source_hint="preview",
+            )
+        )
 
     match = VIDEO_PLAYBACK_RE.search(plain_line)
     if match:
@@ -861,6 +937,8 @@ def watch_vrc_logs(
             str(event.get("duration_seconds")) if event.get("duration_seconds") is not None else None
         )
         if event.get("observed_mid_play"):
+            if not interrupt_if_incomplete:
+                return False
             changed = mark_live_playback_event_interrupted(
                 app_conn,
                 live_event_key,
@@ -989,6 +1067,7 @@ def watch_vrc_logs(
         observed_at: str,
         current_live_event_key: str | None = None,
         interrupt_others: bool = False,
+        interrupt_started_others: bool = False,
         completion_reason: str = "observed_full_duration",
         interrupt_reason: str = "superseded_before_completion",
     ) -> bool:
@@ -996,11 +1075,14 @@ def watch_vrc_logs(
         for live_event_key, event in list(live_events.items()):
             if live_event_key == current_live_event_key:
                 continue
+            interrupt_if_incomplete = interrupt_others or (
+                interrupt_started_others and bool(event.get("actual_play_at"))
+            )
             changed = (
                 settle_live_event(
                     event,
                     observed_at=observed_at,
-                    interrupt_if_incomplete=interrupt_others,
+                    interrupt_if_incomplete=interrupt_if_incomplete,
                     completion_reason=completion_reason,
                     interrupt_reason=interrupt_reason,
                 )
@@ -1050,14 +1132,22 @@ def watch_vrc_logs(
                     ):
                         update[field_name] = existing_update.get(field_name)
                 live_events[live_event_key] = update
-                observed_at = event.get("actual_play_at") or event.get("first_seen_at")
-                if observed_at:
+                actual_observed_at = event.get("actual_play_at")
+                if actual_observed_at:
                     settle_pending_events(
-                        observed_at=observed_at,
+                        observed_at=actual_observed_at,
                         current_live_event_key=live_event_key,
                         interrupt_others=True,
                     )
-                current_observed_at = event.get("last_seen_at") or observed_at
+                else:
+                    first_observed_at = event.get("first_seen_at")
+                    if first_observed_at:
+                        settle_pending_events(
+                            observed_at=first_observed_at,
+                            current_live_event_key=live_event_key,
+                            interrupt_started_others=True,
+                        )
+                current_observed_at = event.get("last_seen_at") or actual_observed_at
                 if current_observed_at:
                     settle_live_event(
                         update,
@@ -1089,6 +1179,8 @@ def watch_vrc_logs(
 
         if event_type not in {"room-left", "application-quit", "video-shutdown"}:
             return
+
+        playback_builder.close_open_events()
 
         observed_at = event.get("observed_at") or event.get("timestamp") or stats.last_log_timestamp
         interrupt_reason = {

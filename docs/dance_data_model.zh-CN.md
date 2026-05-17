@@ -251,7 +251,8 @@ PRIMARY KEY(dance_track_id, music_track_id)
 只有显式 live promotion 路径可以把 row 推进到 `dance_events`。promotion 要求
 `completion_status = completed`、存在 `actual_play_at`、有已知 `duration_seconds`、
 `observed_mid_play = false`，并且有解析出的舞蹈身份字段。半路观察和 interrupted row
-仍然服务于 OBS 叠加层和取证复查，但不应自动成为普通延迟或统计事件。
+都不应自动成为普通延迟或统计事件。半路观察可以先保持为 `pending`，用于 OBS overlay
+显示直接进房时的当前曲目；interrupted row 则保留用于取证复查。
 
 ## 关系图
 

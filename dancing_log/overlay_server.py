@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from queue import Empty, Full, Queue
+import sys
 import threading
 from urllib.parse import urlparse
 
@@ -168,6 +169,14 @@ class _OverlayHTTPServer(ThreadingHTTPServer):
     def __init__(self, server_address, request_handler_class, state: OverlayState) -> None:
         super().__init__(server_address, request_handler_class)
         self.state = state
+
+    def handle_error(self, request, client_address) -> None:
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (BrokenPipeError, ConnectionAbortedError, ConnectionResetError)):
+            return
+        if isinstance(exc, OSError) and getattr(exc, "winerror", None) in {10053, 10054}:
+            return
+        super().handle_error(request, client_address)
 
 
 class _OverlayHandler(BaseHTTPRequestHandler):
@@ -434,14 +443,29 @@ function updateClock() {
     : "0%";
 }
 
+function visibleStatus(snapshot) {
+  const status = snapshot.status || null;
+  if (!status) return null;
+  const statusSequence = Number(status._overlay_sequence || 0);
+  const latestEventSequence = (snapshot.events || []).reduce(
+    (latest, event) => Math.max(latest, Number(event._overlay_sequence || 0)),
+    0
+  );
+  if (status.event_type === "room-entering" && latestEventSequence > statusSequence) {
+    return null;
+  }
+  return status;
+}
+
 function render(snapshot) {
   state.current = snapshot.current || null;
   const event = state.current;
   if (!event) {
+    const status = visibleStatus(snapshot);
     nodes.trackId.textContent = "live";
     nodes.system.textContent = "waiting";
-    nodes.title.textContent = snapshot.status && snapshot.status.message
-      ? snapshot.status.message
+    nodes.title.textContent = status && status.message
+      ? status.message
       : "Waiting for playback";
     nodes.source.textContent = "source unknown";
     nodes.requester.textContent = "";

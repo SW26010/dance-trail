@@ -184,7 +184,7 @@ parsed JSONL output.
 
 `parsed_events.jsonl` remains a signal-level forensic stream. The deduplicated
 event view is `playback_events.jsonl`, which tracks request, resolve, load,
-actual-play, source, mid-play sync, and delay fields when those signals appear
+actual-play, source, mid-play progress, and delay fields when those signals appear
 in the VRChat log.
 
 For live local state and OBS overlay output:
@@ -200,10 +200,20 @@ self-contained, binds only to localhost, and updates through server-sent events.
 strictly completed the full known duration.
 
 Room leave and VRChat quit/shutdown log events clear the overlay's current
-playback and mark pending live rows as interrupted. One known limitation remains:
-joining a PyPyDance room mid-song can briefly show the URL and then return the
-overlay to "Waiting for playback" even though the room is still playing. Keep
-that as a fixture target rather than relying on it for promotion.
+playback and mark pending live rows as interrupted. Entering-room status is
+shown only until a newer playback event arrives, so stale room transitions do
+not cover the current track.
+
+WannaDance `PreviewVideo` lines suppress the preview player's load/resolve/start
+noise, but a later real VRCX `VideoPlay` for the same song is still accepted.
+Same-song retry/resolve signals are folded back into the active playback event,
+so the overlay keeps the VRCX title instead of falling back to a raw URL.
+
+WannaDance/PyPyDance `Playing synced` lines are recorded as `synced_play_at`
+only; they do not by themselves clear the overlay or mark a row as mid-play.
+Mid-play detection comes from explicit progress offsets. Mid-play rows remain
+visible in the overlay as pending current playback, but they remain ineligible
+for promotion into official history.
 
 ## Queued-Self Manifests
 

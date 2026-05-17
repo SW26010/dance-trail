@@ -388,16 +388,30 @@ full duration. If a next song appears too early, or a room leave / VRChat quit /
 video shutdown appears before completion, the pending live row is marked
 `interrupted` and is not promoted.
 
-Known limitation: joining a PyPyDance room mid-song can still fail to keep the
-overlay current. In manual testing the overlay briefly showed the URL, then
-returned to "Waiting for playback" even though the room continued playing. This
-needs a real fixture before changing promotion behavior.
+Current watcher/overlay behavior is based on the 2026-05-17 and 2026-05-18 live
+captures:
+
+- Room leave, application quit, and video shutdown clear the overlay current
+  state and interrupt pending live rows. Entering-room status is superseded as
+  soon as a newer playback event arrives.
+- WannaDance `PreviewVideo` marks a preview suppression window, so preview loads
+  such as song card previews are not mistaken for current playback. A later real
+  VRCX `VideoPlay` for the same song clears that suppression.
+- Retry and resolve signals for the same song shortly after playback starts are
+  folded back into the existing playback event, preserving the VRCX title and
+  requester fields instead of creating a URL-only current row.
+- `Playing synced` is recorded as `synced_play_at` only. It does not clear the
+  overlay and does not make a row `observed_mid_play`.
+- True mid-room joins are detected from explicit positive progress offsets.
+  These rows can remain visible as pending overlay current playback, but they
+  remain ineligible for promotion into official history.
 
 ## Recommended Next Steps
 
 1. Keep collecting inspection fixtures for real PyPyDance, Dudu, VRDancing, and
    other dance-system VRCX rows.
-2. Add a fixture for the PyPyDance mid-room-join overlay reset case.
+2. Add a fixture for true PyPyDance mid-room-join behavior with positive
+   playback offsets.
 3. Design one extension table per additional dance system only after the input
    shape is known.
 4. Add a correction/backfill command for existing `unknown` source rows.

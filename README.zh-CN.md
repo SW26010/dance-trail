@@ -150,15 +150,21 @@ server-sent events 更新，不依赖外部字体、图片、CDN 或网络请求
 
 `live_playback_events` 会随着日志信号即时更新；`dance_events` 只有在显式传入
 `--promote-live` 且 live row 严格完整播放已知 `duration_seconds` 后才会写入。
-半路进房、mid-play sync、未播完离开、未播完切歌、两次播放间隔小于曲目时长的记录
+半路进房、带正 progress offset、未播完离开、未播完切歌、两次播放间隔小于曲目时长的记录
 都不会进入正式历史。
 
 watcher 会识别离开房间和 VRChat 退出/视频系统关闭日志，用它们清空 overlay 当前播放，
-并把尚未完成的 live row 标记为 `interrupted`。
+并把尚未完成的 live row 标记为 `interrupted`。进入房间状态只会显示到更新的播放事件
+到来为止，避免没有当前曲目时残留旧的“Entering Room/进入房间”状态。
 
-已知限制：PyPyDance 半路进房且歌曲已经播放一半时，overlay 可能短暂显示 URL 后回到
-“Waiting for playback”，即使房间里仍在正常播放。先把它作为后续 fixture/bug 处理，
-不要依赖它做 promotion。
+WannaDance 的 `PreviewVideo` 会抑制预览播放器带来的 load/resolve/start 噪声；如果之后
+出现真正的 VRCX `VideoPlay`，同一首歌仍会被接受为真实播放。同一首歌的 retry/resolve
+信号会合并回当前 playback event，所以 overlay 会保留 VRCX 曲名，不会退回显示原始 URL。
+
+WannaDance/PyPyDance 的 `Playing synced` 行现在只记录为 `synced_play_at`，不会单独
+清空 overlay，也不会直接把 live row 判定为半路播放。半路播放以 VRCX 的正 progress
+offset 等明确偏移信号为准；这类 row 会作为 pending current 显示在 overlay 上，但不会
+进入正式历史。
 
 ## Queued-Self 清单
 

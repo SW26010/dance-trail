@@ -272,9 +272,18 @@ overlay 页面通过 server-sent events 读取同一份 live state。它显示�
 完整时长后才标记完成。下一首过早出现、离开房间、退出 VRChat 或视频系统关闭时，尚未
 完成的 live row 会标记为 `interrupted`，不会推进正式历史。
 
-已知限制：PyPyDance 半路进房且歌曲已经播放一半时，overlay 仍可能无法保持当前播放。
-手测表现是短暂显示 URL 后回到 “Waiting for playback”，但房间里仍在正常播放。修复前
-需要先保存真实 fixture，不应为它放宽 promotion 语义。
+当前 watcher/overlay 行为基于 2026-05-17 和 2026-05-18 的真实 live capture 收口：
+
+- 离开房间、退出应用、视频系统 shutdown 会清空 overlay 当前播放，并中断 pending live row。
+  进入房间状态会在更新的播放事件到来后自动让位。
+- WannaDance `PreviewVideo` 会开启预览抑制窗口，避免歌曲卡片预览被误认成当前播放。
+  如果之后同一首歌出现真正的 VRCX `VideoPlay`，抑制会被解除。
+- 同一首歌在开始播放后短时间内出现 retry/resolve，会合并回已有 playback event，保留
+  VRCX 曲名和 requester 字段，不再生成一个只显示 URL 的 current row。
+- `Playing synced` 只记录为 `synced_play_at`，不会清空 overlay，也不会让 row 变成
+  `observed_mid_play`。
+- 真正半路进房由明确的正 progress offset 判断。这类 row 可以保持为 overlay 的 pending
+  current playback，但不会 promotion 到正式历史。
 
 ## 还不能完全确定的事
 
@@ -295,7 +304,7 @@ overlay 页面通过 server-sent events 读取同一份 live state。它显示�
 ## 推荐下一步
 
 1. 继续收集真实 PyPyDance、Dudu、VRDancing 和其他舞蹈系统的 VRCX 行作为 fixture。
-2. 为 PyPyDance 半路进房 overlay 重置问题增加 fixture。
+2. 为带正 playback offset 的真实 PyPyDance 半路进房行为增加 fixture。
 3. 看到输入形状后，再为每个新舞蹈系统设计自己的扩展表。
 4. 增加一个修正或回填命令，用来处理现有 `unknown` 来源。
 

@@ -263,8 +263,9 @@ Rows from this table can be promoted into `dance_events` only through the
 explicit live promotion path. Promotion requires `completion_status =
 completed`, `actual_play_at`, known `duration_seconds`,
 `observed_mid_play = false`, and parsed dance identity fields. Mid-play
-observations and interrupted rows remain useful for the OBS overlay and forensic
-review but must not automatically become normal delay/statistics events.
+observations may remain `pending` so the OBS overlay can show the current track
+after a mid-room join, and interrupted rows remain useful for forensic review.
+Neither case should automatically become a normal delay/statistics event.
 
 ## Relationship Diagram
 
