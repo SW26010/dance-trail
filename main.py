@@ -232,6 +232,7 @@ def cmd_sample_recording_frames():
 def main():
     script_commands = {
         "scrape": ("Fetch Wanna Dance song metadata", "scripts/scrape_wanna.py"),
+        "sync-wanna": ("Sync Wanna Dance songs into SQLite", "scripts/sync_wanna_songs.py"),
         "match": ("Match NetEase popularity data", "scripts/match_netease.py"),
         "init": ("Build songs.csv from scraped data", "scripts/init_songs.py"),
         "test-apis": ("Test music APIs", "scripts/test_music_apis.py"),

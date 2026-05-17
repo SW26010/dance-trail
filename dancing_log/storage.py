@@ -41,7 +41,23 @@ def init_schema(conn: sqlite3.Connection) -> None:
             want_to_learn INTEGER NOT NULL DEFAULT 0,
             netease_id INTEGER,
             popularity REAL,
-            comment_count INTEGER
+            comment_count INTEGER,
+            cache_category INTEGER,
+            cache_title TEXT,
+            cache_title_spell TEXT,
+            cache_player_index INTEGER,
+            cache_volume REAL,
+            cache_start_seconds REAL,
+            cache_end_seconds REAL,
+            cache_flip INTEGER,
+            cache_skip_random INTEGER,
+            cache_checksum TEXT,
+            cache_url TEXT,
+            cache_url_for_quest TEXT,
+            local_video_path TEXT,
+            local_metadata_path TEXT,
+            local_download_path TEXT,
+            cache_updated_at TEXT
         );
 
         CREATE TABLE IF NOT EXISTS dance_events (
@@ -88,7 +104,37 @@ def init_schema(conn: sqlite3.Connection) -> None:
             ON vrcx_import_events(parsed_song_id);
         """
     )
+    _ensure_song_cache_columns(conn)
     conn.commit()
+
+
+def _ensure_song_cache_columns(conn: sqlite3.Connection) -> None:
+    """Add cache metadata columns for databases created before this schema."""
+    existing = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(songs)").fetchall()
+    }
+    columns = {
+        "cache_category": "INTEGER",
+        "cache_title": "TEXT",
+        "cache_title_spell": "TEXT",
+        "cache_player_index": "INTEGER",
+        "cache_volume": "REAL",
+        "cache_start_seconds": "REAL",
+        "cache_end_seconds": "REAL",
+        "cache_flip": "INTEGER",
+        "cache_skip_random": "INTEGER",
+        "cache_checksum": "TEXT",
+        "cache_url": "TEXT",
+        "cache_url_for_quest": "TEXT",
+        "local_video_path": "TEXT",
+        "local_metadata_path": "TEXT",
+        "local_download_path": "TEXT",
+        "cache_updated_at": "TEXT",
+    }
+    for name, column_type in columns.items():
+        if name not in existing:
+            conn.execute(f"ALTER TABLE songs ADD COLUMN {name} {column_type}")
 
 
 def sync_songs_from_csv(
