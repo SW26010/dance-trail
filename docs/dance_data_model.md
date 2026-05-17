@@ -2,6 +2,21 @@
 
 Date: 2026-05-17
 
+## First implementation scope
+
+The first refactor implements the core model directly and does not preserve the
+legacy `songs` / `dance_events.song_id` runtime path.
+
+- Existing generated data is archived, not migrated.
+- `data/local_config.json` and `data/queued_self/` remain the local inputs for
+  rebuilding a clean database.
+- The first system-specific table implemented is `wannadance_songs`.
+- PyPyDance, Dudu, and other systems remain unsupported until their real
+  metadata shapes are inspected.
+- `music_tracks` and `dance_track_music_links` are implemented now with
+  conservative title/artist matching.
+- Provider matching and popularity snapshots remain deferred.
+
 ## 背景
 
 当前 SQLite schema 主要围绕 WannaDance 工作：

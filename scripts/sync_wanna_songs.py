@@ -1,4 +1,4 @@
-"""Synchronize Wanna Dance songs into local SQLite and CSV/JSON artifacts.
+"""Synchronize WannaDance tracks into local SQLite and CSV/JSON artifacts.
 
 Usage:
     uv run python main.py sync-wanna
@@ -18,7 +18,7 @@ from dancing_log.wanna_catalog import sync_wanna_catalog
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Sync Wanna Dance catalog into SQLite")
+    parser = argparse.ArgumentParser(description="Sync WannaDance catalog into SQLite")
     parser.add_argument("--app-db", default=None, help="SQLite database path")
     parser.add_argument("--cache-dir", default=None, help="Local wannadance-song cache directory")
     parser.add_argument("--offline", action="store_true", help="Use local cache only; skip the public API")
@@ -33,12 +33,12 @@ def main() -> None:
         write_files=args.write_files and not args.no_files,
     )
     source = "API + cache" if stats.used_api else "cache only"
-    print("Wanna Dance catalog sync complete")
+    print("WannaDance catalog sync complete")
     print(f"  source: {source}")
     print(f"  API songs: {stats.api_count}")
     print(f"  cached songs: {stats.cache_count}")
-    print(f"  database songs before: {stats.db_before}")
-    print(f"  database songs after: {stats.db_after}")
+    print(f"  database tracks before: {stats.db_before}")
+    print(f"  database tracks after: {stats.db_after}")
     print(f"  inserted: {stats.inserted}")
     print(f"  updated/touched: {stats.updated}")
     print(f"  catalog rows without local cache: {stats.missing_in_cache}")

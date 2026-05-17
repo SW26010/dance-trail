@@ -1,4 +1,4 @@
-"""Wanna Dance song catalog import and cache synchronization."""
+"""WannaDance catalog import and cache synchronization."""
 
 from __future__ import annotations
 
@@ -11,28 +11,20 @@ import sqlite3
 import urllib.request
 
 from dancing_log.local_config import load_local_config
-from dancing_log.storage import DATA_DIR, DB_FILE, connect_db
+from dancing_log.storage import (
+    DATA_DIR,
+    DB_FILE,
+    WANNA_SYSTEM_KEY,
+    connect_db,
+    ensure_dance_track,
+    ensure_music_track,
+    link_dance_track_to_music,
+)
 
 
 API_URL = "https://x.kiva.moe/api/v2/wanna/songs"
 WANNA_JSON = DATA_DIR / "wanna_songs.json"
 WANNA_CSV = DATA_DIR / "wanna_songs.csv"
-SONGS_CSV = DATA_DIR / "songs.csv"
-
-SONG_FIELDS = [
-    "id",
-    "name",
-    "artist",
-    "dancer",
-    "player_count",
-    "group",
-    "major",
-    "favorite",
-    "want_to_learn",
-    "netease_id",
-    "popularity",
-    "comment_count",
-]
 
 
 @dataclass
@@ -48,7 +40,7 @@ class SyncStats:
 
 
 def fetch_wanna_api(url: str = API_URL, timeout: int = 60) -> dict:
-    """Fetch the public Wanna Dance catalog API."""
+    """Fetch the public WannaDance catalog API."""
     req = urllib.request.Request(
         url,
         headers={"User-Agent": "dancing-log/0.1"},
@@ -58,7 +50,7 @@ def fetch_wanna_api(url: str = API_URL, timeout: int = 60) -> dict:
 
 
 def extract_api_songs(data: dict) -> list[dict]:
-    """Extract public songs from the Wanna Dance API response."""
+    """Extract public songs from the WannaDance API response."""
     groups = data.get("data", {}).get("groups", [])
     songs: list[dict] = []
     seen_ids: set[int] = set()
@@ -134,7 +126,7 @@ def load_cache_songs(cache_dir: Path | str | None) -> list[dict]:
 
 
 def merge_catalog(api_songs: list[dict], cache_songs: list[dict]) -> list[dict]:
-    """Merge API catalog rows with local cache metadata by Wanna song id."""
+    """Merge API catalog rows with local cache metadata by WannaDance song id."""
     merged: dict[int, dict] = {}
     for song in cache_songs:
         song_id = song["id"]
@@ -162,7 +154,7 @@ def sync_wanna_catalog(
     use_api: bool = True,
     write_files: bool = False,
 ) -> SyncStats:
-    """Synchronize Wanna Dance catalog data into SQLite and CSV/JSON artifacts."""
+    """Synchronize WannaDance catalog data into SQLite and optional artifacts."""
     config = load_local_config()
     resolved_cache_dir = cache_dir if cache_dir is not None else config.get("wanna_cache_dir")
 
@@ -183,45 +175,69 @@ def sync_wanna_catalog(
         _write_catalog_files(merged, api_songs)
 
     with connect_db(db_path or DB_FILE) as conn:
-        db_before = conn.execute("SELECT count(*) FROM songs").fetchone()[0]
-        existing_ids = {row["id"] for row in conn.execute("SELECT id FROM songs")}
+        db_before = _wanna_track_count(conn)
+        existing_ids = _wanna_external_ids(conn)
         changed = upsert_catalog(conn, merged)
-        db_after = conn.execute("SELECT count(*) FROM songs").fetchone()[0]
-    merged_ids = {song["id"] for song in merged}
-    cache_ids = {song["id"] for song in cache_songs}
+        db_after = _wanna_track_count(conn)
+    merged_ids = {str(song["id"]) for song in merged}
+    cache_ids = {str(song["id"]) for song in cache_songs}
+    inserted = len(merged_ids - existing_ids)
     return SyncStats(
         api_count=len(api_songs),
         cache_count=len(cache_songs),
         db_before=db_before,
         db_after=db_after,
-        inserted=len(merged_ids - existing_ids),
-        updated=changed - len(merged_ids - existing_ids),
+        inserted=inserted,
+        updated=changed - inserted,
         missing_in_cache=len(merged_ids - cache_ids),
         used_api=used_api,
     )
 
 
 def upsert_catalog(conn: sqlite3.Connection, songs: list[dict]) -> int:
-    """Upsert merged catalog rows while preserving user flags and music matches."""
+    """Upsert merged catalog rows into dance_tracks and wannadance_songs."""
     changed = 0
     for song in songs:
+        title = song.get("name") or song.get("cache_title") or ""
+        artist = song.get("artist") or ""
+        dance_track_id = ensure_dance_track(
+            conn,
+            WANNA_SYSTEM_KEY,
+            song["id"],
+            {
+                "title": title,
+                "artist": artist,
+                "dancer": song.get("dancer"),
+                "player_count": song.get("player_count"),
+                "group": song.get("group"),
+                "major": song.get("major"),
+            },
+        )
         conn.execute(
             """
-            INSERT INTO songs (
-                id, name, artist, dancer, player_count, song_group, major,
-                cache_category, cache_title, cache_title_spell, cache_player_index,
-                cache_volume, cache_start_seconds, cache_end_seconds, cache_flip,
-                cache_skip_random, cache_checksum, cache_url, cache_url_for_quest,
-                local_video_path, local_metadata_path, local_download_path, cache_updated_at
+            INSERT INTO wannadance_songs (
+                dance_track_id,
+                wanna_id,
+                cache_category,
+                cache_title,
+                cache_title_spell,
+                cache_player_index,
+                cache_volume,
+                cache_start_seconds,
+                cache_end_seconds,
+                cache_flip,
+                cache_skip_random,
+                cache_checksum,
+                cache_url,
+                cache_url_for_quest,
+                local_video_path,
+                local_metadata_path,
+                local_download_path,
+                cache_updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                name = COALESCE(NULLIF(excluded.name, ''), songs.name),
-                artist = COALESCE(NULLIF(excluded.artist, ''), songs.artist),
-                dancer = COALESCE(NULLIF(excluded.dancer, ''), songs.dancer),
-                player_count = COALESCE(excluded.player_count, songs.player_count),
-                song_group = COALESCE(NULLIF(excluded.song_group, ''), songs.song_group),
-                major = COALESCE(NULLIF(excluded.major, ''), songs.major),
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(dance_track_id) DO UPDATE SET
+                wanna_id = excluded.wanna_id,
                 cache_category = excluded.cache_category,
                 cache_title = excluded.cache_title,
                 cache_title_spell = excluded.cache_title_spell,
@@ -240,13 +256,8 @@ def upsert_catalog(conn: sqlite3.Connection, songs: list[dict]) -> int:
                 cache_updated_at = excluded.cache_updated_at
             """,
             (
+                dance_track_id,
                 song["id"],
-                song.get("name") or song.get("cache_title"),
-                song.get("artist"),
-                song.get("dancer"),
-                song.get("player_count"),
-                song.get("group"),
-                song.get("major"),
                 song.get("cache_category"),
                 song.get("cache_title"),
                 song.get("cache_title_spell"),
@@ -265,13 +276,48 @@ def upsert_catalog(conn: sqlite3.Connection, songs: list[dict]) -> int:
                 song.get("cache_updated_at"),
             ),
         )
+
+        if title.strip() and artist.strip():
+            music_track_id = ensure_music_track(conn, title, artist)
+            link_dance_track_to_music(
+                conn,
+                dance_track_id,
+                music_track_id,
+                confidence=0.85,
+                match_method="title_artist_auto",
+            )
         changed += 1
     conn.commit()
     return changed
 
 
+def _wanna_track_count(conn: sqlite3.Connection) -> int:
+    row = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM dance_tracks dt
+        JOIN dance_systems ds ON ds.id = dt.system_id
+        WHERE ds.key = ?
+        """,
+        (WANNA_SYSTEM_KEY,),
+    ).fetchone()
+    return int(row[0])
+
+
+def _wanna_external_ids(conn: sqlite3.Connection) -> set[str]:
+    rows = conn.execute(
+        """
+        SELECT dt.external_id
+        FROM dance_tracks dt
+        JOIN dance_systems ds ON ds.id = dt.system_id
+        WHERE ds.key = ?
+        """,
+        (WANNA_SYSTEM_KEY,),
+    ).fetchall()
+    return {row["external_id"] for row in rows}
+
+
 def _write_catalog_files(merged: list[dict], api_songs: list[dict]) -> None:
-    existing_csv = _load_existing_song_csv()
     with open(WANNA_JSON, "w", encoding="utf-8") as f:
         json.dump(api_songs or merged, f, ensure_ascii=False, indent=2)
 
@@ -280,38 +326,6 @@ def _write_catalog_files(merged: list[dict], api_songs: list[dict]) -> None:
         writer = csv.DictWriter(f, fieldnames=public_fields)
         writer.writeheader()
         writer.writerows({field: song.get(field, "") for field in public_fields} for song in merged)
-
-    with open(SONGS_CSV, "w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=SONG_FIELDS)
-        writer.writeheader()
-        writer.writerows(
-            {
-                "id": song.get("id", ""),
-                "name": song.get("name") or song.get("cache_title", ""),
-                "artist": song.get("artist", ""),
-                "dancer": song.get("dancer", ""),
-                "player_count": song.get("player_count", ""),
-                "group": song.get("group", ""),
-                "major": song.get("major", ""),
-                "favorite": existing_csv.get(song["id"], {}).get("favorite", 0),
-                "want_to_learn": existing_csv.get(song["id"], {}).get("want_to_learn", 0),
-                "netease_id": existing_csv.get(song["id"], {}).get("netease_id", ""),
-                "popularity": existing_csv.get(song["id"], {}).get("popularity", ""),
-                "comment_count": existing_csv.get(song["id"], {}).get("comment_count", ""),
-            }
-            for song in merged
-        )
-
-
-def _load_existing_song_csv() -> dict[int, dict]:
-    if not SONGS_CSV.exists():
-        return {}
-    with open(SONGS_CSV, encoding="utf-8-sig", newline="") as f:
-        return {
-            song_id: row
-            for row in csv.DictReader(f)
-            if (song_id := _to_int(row.get("id"))) is not None
-        }
 
 
 def _metadata_sort_key(path: Path) -> tuple[int, str]:

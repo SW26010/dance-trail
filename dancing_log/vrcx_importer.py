@@ -1,5 +1,7 @@
 """Import dance playback events from a local VRCX SQLite database."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from contextlib import closing
 from pathlib import Path
@@ -8,7 +10,12 @@ import re
 import sqlite3
 from urllib.parse import parse_qs, urlparse
 
-from dancing_log.storage import connect_db
+from dancing_log.storage import (
+    WANNA_SYSTEM_KEY,
+    connect_db,
+    ensure_dance_system,
+    ensure_dance_track,
+)
 
 
 SOURCE_SELF = "self"
@@ -35,12 +42,13 @@ class ImportStats:
     candidate_events: int = 0
     staging_changed: int = 0
     dance_events_changed: int = 0
-    skipped_without_song_id: int = 0
+    skipped_unsupported: int = 0
 
 
 @dataclass(frozen=True)
-class WannaUrlParseResult:
-    song_id: int | None
+class DanceUrlParseResult:
+    system_key: str | None
+    external_id: str | None
     url_kind: str
     method: str
 
@@ -75,10 +83,10 @@ WANNA_API_PATH = "/api/songs/play"
 WANNA_CDN_FILE_RE = re.compile(r"^/files/[^/]+/(?P<song_id>\d+)-[^/]+\.mp4$", re.IGNORECASE)
 
 
-def parse_wanna_url(video_url: str | None) -> WannaUrlParseResult:
-    """Classify a Wanna Dance playback URL and extract its song id when possible."""
+def parse_dance_url(video_url: str | None) -> DanceUrlParseResult:
+    """Classify a playback URL and extract a supported dance-system id."""
     if not video_url:
-        return WannaUrlParseResult(None, "empty", "none")
+        return DanceUrlParseResult(None, None, "empty", "none")
 
     parsed = urlparse(video_url)
     host = parsed.netloc.lower()
@@ -87,26 +95,43 @@ def parse_wanna_url(video_url: str | None) -> WannaUrlParseResult:
     if host in WANNA_API_HOSTS and path == WANNA_API_PATH:
         raw_id = parse_qs(parsed.query).get("id", [None])[0]
         if raw_id and raw_id.isdigit():
-            return WannaUrlParseResult(int(raw_id), "wanna_api", "api_query_id")
+            return DanceUrlParseResult(WANNA_SYSTEM_KEY, raw_id, "wanna_api", "api_query_id")
 
         match = re.search(r"[?&]id=(\d+)", video_url)
         if match:
-            return WannaUrlParseResult(int(match.group(1)), "wanna_api", "api_query_id_fallback")
+            return DanceUrlParseResult(
+                WANNA_SYSTEM_KEY,
+                match.group(1),
+                "wanna_api",
+                "api_query_id_fallback",
+            )
 
-        return WannaUrlParseResult(None, "wanna_api", "missing_query_id")
+        return DanceUrlParseResult(None, None, "wanna_api", "missing_query_id")
 
     if host in WANNA_CDN_HOSTS:
         match = WANNA_CDN_FILE_RE.match(parsed.path)
         if match:
-            return WannaUrlParseResult(int(match.group("song_id")), "wanna_cdn", "cdn_file_path")
-        return WannaUrlParseResult(None, "wanna_cdn", "unrecognized_cdn_path")
+            return DanceUrlParseResult(
+                WANNA_SYSTEM_KEY,
+                match.group("song_id"),
+                "wanna_cdn",
+                "cdn_file_path",
+            )
+        return DanceUrlParseResult(None, None, "wanna_cdn", "unrecognized_cdn_path")
 
-    return WannaUrlParseResult(None, "other", "none")
+    if "pypy" in host:
+        return DanceUrlParseResult(None, None, "pypydance", "unsupported_system")
+    if "dudu" in host:
+        return DanceUrlParseResult(None, None, "dudu", "unsupported_system")
+    return DanceUrlParseResult(None, None, "other", "unsupported")
 
 
 def parse_wanna_song_id(video_url: str | None) -> int | None:
-    """Extract the Wanna Dance song id from a recognized Wanna Dance URL."""
-    return parse_wanna_url(video_url).song_id
+    """Extract a WannaDance song id from a supported WannaDance URL."""
+    result = parse_dance_url(video_url)
+    if result.system_key != WANNA_SYSTEM_KEY or result.external_id is None:
+        return None
+    return int(result.external_id)
 
 
 def infer_source(
@@ -155,12 +180,7 @@ def _fetch_vrcx_rows(conn: sqlite3.Connection, limit: int | None = None) -> list
             display_name,
             user_id
         FROM gamelog_video_play
-        WHERE
-            video_url LIKE '%/Api/Songs/play%'
-            OR video_url LIKE '%play.udon.dance/files/%'
-            OR video_url LIKE '%nya.xin.moe/files/%'
-            OR video_url LIKE '%ud-play.kiva.moe/files/%'
-            OR video_url LIKE '%ud-nya.kiva.moe/files/%'
+        WHERE video_url IS NOT NULL AND video_url != ''
         ORDER BY created_at
     """
     params: tuple[int, ...] = ()
@@ -192,22 +212,22 @@ def import_vrcx_database(
 
     stats = ImportStats(scanned=len(rows), candidate_events=len(rows))
     if dry_run:
-        skipped = sum(1 for row in rows if parse_wanna_song_id(row["video_url"]) is None)
+        skipped = sum(1 for row in rows if not _is_supported(parse_dance_url(row["video_url"])))
         return ImportStats(
             scanned=stats.scanned,
             candidate_events=stats.candidate_events,
-            skipped_without_song_id=skipped,
+            skipped_unsupported=skipped,
         )
 
     with connect_db(app_db_path) as app_conn:
         staging_changed = 0
         dance_events_changed = 0
-        skipped_without_song_id = 0
+        skipped_unsupported = 0
 
         for row in rows:
-            song_id = parse_wanna_song_id(row["video_url"])
-            if song_id is None:
-                skipped_without_song_id += 1
+            parsed = parse_dance_url(row["video_url"])
+            if not _is_supported(parsed):
+                skipped_unsupported += 1
                 continue
 
             source, confidence = infer_source(
@@ -217,11 +237,17 @@ def import_vrcx_database(
                 blank_requester_source=blank_requester_source,
             )
             event_key = _event_key(row)
+            system_id = ensure_dance_system(app_conn, parsed.system_key, _system_name(parsed.system_key))
+            dance_track_id = ensure_dance_track(app_conn, parsed.system_key, parsed.external_id)
 
-            app_conn.execute(
-                "INSERT OR IGNORE INTO songs (id) VALUES (?)",
-                (song_id,),
-            )
+            if parsed.system_key == WANNA_SYSTEM_KEY:
+                app_conn.execute(
+                    """
+                    INSERT OR IGNORE INTO wannadance_songs (dance_track_id, wanna_id)
+                    VALUES (?, ?)
+                    """,
+                    (dance_track_id, int(parsed.external_id)),
+                )
 
             staging_cursor = app_conn.execute(
                 """
@@ -234,13 +260,18 @@ def import_vrcx_database(
                     location,
                     display_name,
                     user_id,
-                    parsed_song_id,
+                    parsed_system_id,
+                    parsed_external_id,
+                    parsed_dance_track_id,
                     inferred_source,
                     confidence,
                     event_key
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(event_key) DO UPDATE SET
+                    parsed_system_id = excluded.parsed_system_id,
+                    parsed_external_id = excluded.parsed_external_id,
+                    parsed_dance_track_id = excluded.parsed_dance_track_id,
                     inferred_source = excluded.inferred_source,
                     confidence = excluded.confidence
                 WHERE
@@ -261,7 +292,9 @@ def import_vrcx_database(
                     row["location"],
                     row["display_name"],
                     row["user_id"],
-                    song_id,
+                    system_id,
+                    parsed.external_id,
+                    dance_track_id,
                     source,
                     confidence,
                     event_key,
@@ -273,7 +306,7 @@ def import_vrcx_database(
                 """
                 INSERT INTO dance_events (
                     played_at,
-                    song_id,
+                    dance_track_id,
                     source,
                     confidence,
                     event_source,
@@ -286,6 +319,7 @@ def import_vrcx_database(
                 )
                 VALUES (?, ?, ?, ?, 'vrcx', ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(event_key) DO UPDATE SET
+                    dance_track_id = excluded.dance_track_id,
                     source = excluded.source,
                     confidence = excluded.confidence
                 WHERE
@@ -299,7 +333,7 @@ def import_vrcx_database(
                 """,
                 (
                     row["created_at"],
-                    song_id,
+                    dance_track_id,
                     source,
                     confidence,
                     event_key,
@@ -319,5 +353,15 @@ def import_vrcx_database(
         candidate_events=stats.candidate_events,
         staging_changed=staging_changed,
         dance_events_changed=dance_events_changed,
-        skipped_without_song_id=skipped_without_song_id,
+        skipped_unsupported=skipped_unsupported,
     )
+
+
+def _is_supported(parsed: DanceUrlParseResult) -> bool:
+    return bool(parsed.system_key and parsed.external_id)
+
+
+def _system_name(system_key: str | None) -> str:
+    if system_key == WANNA_SYSTEM_KEY:
+        return "WannaDance"
+    return system_key or "Unknown"

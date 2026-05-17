@@ -20,32 +20,33 @@ def cmd_recommend():
     import argparse
 
     parser = argparse.ArgumentParser(description="Generate daily recommendation playlist")
-    parser.add_argument("-n", "--count", type=int, default=20, help="Number of songs to recommend")
+    parser.add_argument("-n", "--count", type=int, default=20, help="Number of dance tracks to recommend")
     args = parser.parse_args(sys.argv[2:])
 
-    from dancing_log.models import generate_daily_playlist, load_dance_log, load_songs
+    from dancing_log.models import generate_daily_playlist, load_dance_log, load_dance_tracks
 
-    songs = load_songs()
-    if not songs:
-        print("Error: songs table is empty. Run `uv run python main.py sync-wanna` first.")
+    tracks = load_dance_tracks()
+    if not tracks:
+        print("Error: dance_tracks table is empty. Run `uv run python main.py sync-wanna` first.")
         sys.exit(1)
 
     dance_log = load_dance_log()
-    playlist = generate_daily_playlist(songs, dance_log, count=args.count)
+    playlist = generate_daily_playlist(tracks, dance_log, count=args.count)
 
     print(f"Daily playlist (Top {args.count}):\n")
-    for i, song in enumerate(playlist, 1):
-        fav = "*" if song.get("favorite") in ("1", "true", True) else " "
-        want = "+" if song.get("want_to_learn") in ("1", "true", True) else " "
-        pop = song.get("popularity", "")
-        pop_str = f"pop={pop}" if pop else ""
-        count = song.get("_dance_count", 0)
-        days = song.get("_days_since_last")
+    for i, track in enumerate(playlist, 1):
+        fav = "*" if track.get("favorite") in ("1", "true", True, 1) else " "
+        want = "+" if track.get("want_to_learn") in ("1", "true", True, 1) else " "
+        count = track.get("_dance_count", 0)
+        days = track.get("_days_since_last")
         days_str = f"{days}d ago" if days is not None else "never"
+        title = track.get("title") or "(untitled)"
+        artist = track.get("artist") or ""
+        track_ref = f"{track['system_key']}:{track['external_id']}"
 
         print(
-            f"  {i:>3}. [{song['id']:>5}] {fav}{want} {song['name']} - {song['artist']}"
-            f"  w={song['_weight']:.1f}  {pop_str}  danced {count}x  {days_str}"
+            f"  {i:>3}. [{track_ref}] {fav}{want} {title} - {artist}"
+            f"  w={track['_weight']:.1f}  danced {count}x  {days_str}"
         )
 
 
@@ -54,7 +55,8 @@ def cmd_log():
     import argparse
 
     parser = argparse.ArgumentParser(description="Add one dance log record")
-    parser.add_argument("song_id", type=int, help="Song ID")
+    parser.add_argument("--system", required=True, help="Dance system key, for example wannadance")
+    parser.add_argument("external_id", help="External id in the selected dance system")
     source_group = parser.add_mutually_exclusive_group()
     source_group.add_argument("--other", action="store_true", help="Picked by someone else")
     source_group.add_argument(
@@ -74,13 +76,16 @@ def cmd_log():
         SOURCE_SELF,
         add_dance_record,
     )
-    from dancing_log.storage import get_song
+    from dancing_log.storage import get_dance_track
 
-    song = get_song(args.song_id)
-    if song and (song.get("name") or song.get("artist")):
-        print(f"Recording: {song['name']} - {song['artist']}")
+    track = get_dance_track(args.system, args.external_id)
+    if track and (track.get("title") or track.get("artist")):
+        print(f"Recording: {track['title']} - {track['artist']}")
     else:
-        print(f"Warning: song id {args.song_id} is not in SQLite songs table, continuing anyway.")
+        print(
+            f"Warning: {args.system}:{args.external_id} is not in dance_tracks, "
+            "continuing with a placeholder track."
+        )
 
     if args.other:
         source = SOURCE_OTHER
@@ -93,13 +98,17 @@ def cmd_log():
         auto_detect = True
 
     actual_source = add_dance_record(
-        song_id=args.song_id,
+        system_key=args.system,
+        external_id=args.external_id,
         source=source,
         note=args.note,
         timestamp=args.time,
         auto_detect=auto_detect,
     )
-    print(f"Added dance record (id={args.song_id}, {SOURCE_LABELS.get(actual_source, actual_source)})")
+    print(
+        f"Added dance record ({args.system}:{args.external_id}, "
+        f"{SOURCE_LABELS.get(actual_source, actual_source)})"
+    )
 
 
 def cmd_import_vrcx():
@@ -151,7 +160,7 @@ def cmd_import_vrcx():
     print("VRCX dry run complete" if args.dry_run else "VRCX import complete")
     print(f"  scanned candidate rows: {stats.scanned}")
     print(f"  candidate events: {stats.candidate_events}")
-    print(f"  skipped without song id: {stats.skipped_without_song_id}")
+    print(f"  skipped unsupported URLs: {stats.skipped_unsupported}")
     if not args.dry_run:
         print(f"  staging inserts/updates: {stats.staging_changed}")
         print(f"  dance_events inserts/updates: {stats.dance_events_changed}")
@@ -164,6 +173,7 @@ def cmd_sync_queued_self():
     parser = argparse.ArgumentParser(description="Sync queued_self Markdown manifests")
     parser.add_argument("--app-db", default=None, help="SQLite path")
     parser.add_argument("--manifest-dir", default=None, help="Manifest directory")
+    parser.add_argument("--system", required=True, help="Dance system key for bare manifest ids")
     args = parser.parse_args(sys.argv[2:])
 
     from dancing_log.queued_self_importer import sync_queued_self_manifests
@@ -171,13 +181,14 @@ def cmd_sync_queued_self():
     stats = sync_queued_self_manifests(
         app_db_path=args.app_db,
         manifest_dir=args.manifest_dir,
+        system_key=args.system,
     )
 
     print("queued_self sync complete")
     print(f"  scanned files: {stats.files_scanned}")
     print(f"  manifest entries: {stats.entries_seen}")
-    print(f"  entries with song id: {stats.entries_with_song_id}")
-    print(f"  entries without song id: {stats.entries_without_song_id}")
+    print(f"  entries with track ref: {stats.entries_with_track_ref}")
+    print(f"  entries without track ref: {stats.entries_without_track_ref}")
     print(f"  matched entries: {stats.matched_entries}")
     print(f"  unmatched entries: {stats.unmatched_entries}")
     print(f"  existing events updated: {stats.existing_events_updated}")
@@ -228,11 +239,66 @@ def cmd_sample_recording_frames():
         print(f"  {path}")
 
 
+def cmd_rebuild_data():
+    """Archive generated local data and rebuild the current SQLite database."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Archive old generated data and rebuild local SQLite")
+    parser.add_argument(
+        "--archive-existing",
+        action="store_true",
+        help="Required: archive generated data files before rebuilding",
+    )
+    parser.add_argument("--offline", action="store_true", help="Use local WannaDance cache only")
+    parser.add_argument("--limit-vrcx", type=int, default=None, help="Limit imported VRCX rows")
+    parser.add_argument(
+        "--queued-system",
+        default="wannadance",
+        help="Dance system key for bare queued_self manifest ids",
+    )
+    args = parser.parse_args(sys.argv[2:])
+
+    if not args.archive_existing:
+        parser.error("--archive-existing is required to avoid accidental data loss")
+
+    config = _get_local_config()
+    from dancing_log.queued_self_importer import sync_queued_self_manifests
+    from dancing_log.rebuild import archive_existing_data
+    from dancing_log.vrcx_importer import import_vrcx_database
+    from dancing_log.wanna_catalog import sync_wanna_catalog
+
+    archive = archive_existing_data()
+    print(f"Archived generated data to: {archive.archive_dir}")
+    for path in archive.archived:
+        print(f"  {path.name}")
+
+    sync_stats = sync_wanna_catalog(use_api=not args.offline)
+    print("WannaDance catalog sync complete")
+    print(f"  database tracks after: {sync_stats.db_after}")
+
+    vrcx_db_path = config.get("vrcx_db_path")
+    if vrcx_db_path:
+        import_stats = import_vrcx_database(
+            vrcx_db_path=vrcx_db_path,
+            self_user_id=config.get("self_user_id"),
+            limit=args.limit_vrcx,
+        )
+        print("VRCX import complete")
+        print(f"  dance_events inserts/updates: {import_stats.dance_events_changed}")
+        print(f"  skipped unsupported URLs: {import_stats.skipped_unsupported}")
+    else:
+        print("VRCX import skipped: vrcx_db_path is not configured")
+
+    queued_stats = sync_queued_self_manifests(system_key=args.queued_system)
+    print("queued_self sync complete")
+    print(f"  matched entries: {queued_stats.matched_entries}")
+    print(f"  unmatched entries: {queued_stats.unmatched_entries}")
+
+
 def main():
     script_commands = {
         "scrape": ("Fetch Wanna Dance song metadata", "scripts/scrape_wanna.py"),
-        "sync-wanna": ("Sync Wanna Dance songs into SQLite", "scripts/sync_wanna_songs.py"),
-        "match": ("Match NetEase popularity data", "scripts/match_netease.py"),
+        "sync-wanna": ("Sync WannaDance tracks into SQLite", "scripts/sync_wanna_songs.py"),
         "test-apis": ("Test music APIs", "scripts/test_music_apis.py"),
     }
     builtin_commands = {
@@ -241,6 +307,7 @@ def main():
         "import-vrcx": ("Import historical playback rows from VRCX SQLite", cmd_import_vrcx),
         "sync-queued-self": ("Sync queued_self manifests", cmd_sync_queued_self),
         "sample-frames": ("Sample overlay verification frames from a recording", cmd_sample_recording_frames),
+        "rebuild-data": ("Archive and rebuild generated local data", cmd_rebuild_data),
     }
 
     all_names = list(script_commands) + list(builtin_commands)
@@ -257,12 +324,13 @@ def main():
         print("\nExamples:")
         print("  uv run python main.py scrape")
         print("  uv run python main.py sync-wanna")
-        print("  uv run python main.py log 5038")
-        print("  uv run python main.py log 5038 --other")
+        print("  uv run python main.py log --system wannadance 5038")
+        print("  uv run python main.py log --system wannadance 5038 --other")
         print("  uv run python main.py recommend -n 10")
         print("  uv run python main.py import-vrcx path/to/vrcx-snapshot/VRCX.sqlite3")
         print("  uv run python main.py import-vrcx")
-        print("  uv run python main.py sync-queued-self")
+        print("  uv run python main.py sync-queued-self --system wannadance")
+        print("  uv run python main.py rebuild-data --archive-existing")
         print("  uv run python main.py sample-frames path/to/recordings/example.mkv --at 60 300")
         sys.exit(0)
 
