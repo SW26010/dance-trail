@@ -160,7 +160,7 @@ def sync_wanna_catalog(
     db_path: Path | str | None = None,
     cache_dir: Path | str | None = None,
     use_api: bool = True,
-    write_files: bool = True,
+    write_files: bool = False,
 ) -> SyncStats:
     """Synchronize Wanna Dance catalog data into SQLite and CSV/JSON artifacts."""
     config = load_local_config()
@@ -182,11 +182,11 @@ def sync_wanna_catalog(
     if write_files:
         _write_catalog_files(merged, api_songs)
 
-    conn = connect_db(db_path or DB_FILE)
-    db_before = conn.execute("SELECT count(*) FROM songs").fetchone()[0]
-    existing_ids = {row["id"] for row in conn.execute("SELECT id FROM songs")}
-    changed = upsert_catalog(conn, merged)
-    db_after = conn.execute("SELECT count(*) FROM songs").fetchone()[0]
+    with connect_db(db_path or DB_FILE) as conn:
+        db_before = conn.execute("SELECT count(*) FROM songs").fetchone()[0]
+        existing_ids = {row["id"] for row in conn.execute("SELECT id FROM songs")}
+        changed = upsert_catalog(conn, merged)
+        db_after = conn.execute("SELECT count(*) FROM songs").fetchone()[0]
     merged_ids = {song["id"] for song in merged}
     cache_ids = {song["id"] for song in cache_songs}
     return SyncStats(

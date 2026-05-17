@@ -1,20 +1,18 @@
 """
 数据模型定义和推荐权重计算
 
-数据文件:
-- data/songs.csv        歌曲主数据 (以 wanna id 为主键)
-- data/dance_log.csv    舞蹈记录
+SQLite 是运行时主存储。CSV 只应作为导入/导出工件，不参与日常逻辑。
 """
 
-import csv
 import hashlib
 import math
 from datetime import datetime, date, timezone
-from pathlib import Path
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-SONGS_FILE = DATA_DIR / "songs.csv"
-DANCE_LOG_FILE = DATA_DIR / "dance_log.csv"
+from dancing_log.storage import (
+    add_dance_event,
+    load_dance_log as load_dance_events_from_db,
+    load_songs as load_songs_from_db,
+)
 
 # === 歌曲主数据字段 ===
 SONG_FIELDS = [
@@ -35,7 +33,7 @@ SONG_FIELDS = [
 # === 舞蹈记录字段 ===
 DANCE_LOG_FIELDS = [
     "timestamp",        # str, ISO 8601 时间 (e.g. 2026-04-17T20:30:00+08:00)
-    "song_id",          # int, 歌曲 ID (对应 songs.csv 的 id)
+    "song_id",          # int, 歌曲 ID (对应 SQLite songs.id)
     "source",           # str, 点歌来源: self=主动点, recommend=系统推荐, other=别人点
     "note",             # str, 备注 (可选)
 ]
@@ -58,38 +56,14 @@ SOURCE_LABELS = {
 }
 
 
-def load_songs() -> list[dict]:
-    """加载歌曲主数据"""
-    if not SONGS_FILE.exists():
-        return []
-    with open(SONGS_FILE, encoding="utf-8-sig") as f:
-        return list(csv.DictReader(f))
+def load_songs(db_path: str | None = None) -> list[dict]:
+    """加载 SQLite 歌曲主数据。"""
+    return load_songs_from_db(db_path)
 
 
-def save_songs(songs: list[dict]):
-    """保存歌曲主数据"""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with open(SONGS_FILE, "w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=SONG_FIELDS)
-        writer.writeheader()
-        writer.writerows(songs)
-
-
-def load_dance_log() -> list[dict]:
-    """加载舞蹈记录"""
-    if not DANCE_LOG_FILE.exists():
-        return []
-    with open(DANCE_LOG_FILE, encoding="utf-8-sig") as f:
-        return list(csv.DictReader(f))
-
-
-def save_dance_log(records: list[dict]):
-    """保存舞蹈记录"""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with open(DANCE_LOG_FILE, "w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=DANCE_LOG_FIELDS)
-        writer.writeheader()
-        writer.writerows(records)
+def load_dance_log(db_path: str | None = None) -> list[dict]:
+    """加载 SQLite 舞蹈事件。"""
+    return load_dance_events_from_db(db_path)
 
 
 def _playlist_seed(target_date: date) -> str:
@@ -112,33 +86,41 @@ def get_daily_playlist_ids(songs: list[dict], dance_log: list[dict],
     return {str(s["id"]) for s in playlist}
 
 
-def add_dance_record(song_id: int, source: str = SOURCE_SELF, note: str = "",
-                     timestamp: str | None = None, auto_detect: bool = True):
+def add_dance_record(
+    song_id: int,
+    source: str = SOURCE_SELF,
+    note: str = "",
+    timestamp: str | None = None,
+    auto_detect: bool = True,
+    db_path: str | None = None,
+):
     """添加一条舞蹈记录
 
     auto_detect: 若 source 为 self，检查该歌曲是否在今日推荐歌单中，
                  若在则自动改为 recommend。
     """
-    records = load_dance_log()
     if timestamp is None:
         timestamp = datetime.now(timezone.utc).astimezone().isoformat()
 
     actual_source = source
     if auto_detect and source == SOURCE_SELF:
-        songs = load_songs()
+        songs = load_songs(db_path)
         if songs:
+            records = load_dance_log(db_path)
             today = datetime.fromisoformat(timestamp).date()
             playlist_ids = get_daily_playlist_ids(songs, records, target_date=today)
             if str(song_id) in playlist_ids:
                 actual_source = SOURCE_RECOMMEND
 
-    records.append({
-        "timestamp": timestamp,
-        "song_id": str(song_id),
-        "source": actual_source,
-        "note": note,
-    })
-    save_dance_log(records)
+    add_dance_event(
+        song_id=song_id,
+        source=actual_source,
+        note=note,
+        played_at=timestamp,
+        event_source="manual",
+        confidence=1.0,
+        path=db_path,
+    )
     return actual_source
 
 

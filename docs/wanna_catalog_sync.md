@@ -30,10 +30,10 @@ Offline/cache-only sync:
 python main.py sync-wanna --offline
 ```
 
-Skip regenerated CSV/JSON artifacts and update only SQLite:
+Export CSV/JSON artifacts for inspection:
 
 ```powershell
-python main.py sync-wanna --no-files
+python main.py sync-wanna --write-files
 ```
 
 Use an explicit cache directory:
@@ -176,9 +176,12 @@ the local cache.
 
 ## Generated Files
 
-The sync refreshes local data artifacts under `data/`:
+The sync updates SQLite by default:
 
 - `data/dancing_log.sqlite3`
+
+CSV/JSON files are optional export artifacts when `--write-files` is passed:
+
 - `data/songs.csv`
 - `data/wanna_songs.csv`
 - `data/wanna_songs.json`

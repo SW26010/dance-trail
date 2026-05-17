@@ -122,13 +122,13 @@ dance_events
 
 - [x] 抓取 Wanna Dance 歌曲数据库。
 - [x] 查询网易云音乐歌曲热度和评论数。
-- [x] 初始化歌曲主数据 `songs.csv`。
-- [x] 手动记录舞蹈历史 `dance_log.csv`。
+- [x] 同步歌曲主数据到 SQLite `songs` 表。
+- [x] 手动记录舞蹈历史到 SQLite `dance_events` 表。
 - [x] 根据频次、喜好和最近跳舞时间生成每日推荐歌单。
 - [x] 从 VRCX SQLite 导入 Wanna Dance 历史播放事件到本地 SQLite。
 - [ ] 从 VRChat 日志实时采集播放事件。
 - [ ] 从 CDN 日志导入辅助信息。
-- [ ] 迁移到 SQLite 作为主存储，CSV 作为导出格式。
+- [x] 迁移到 SQLite 作为主存储，CSV 仅作为未来导出格式。
 - [ ] 管理 OBS 录像文件并关联舞蹈事件。
 - [ ] 提供 OBS overlay 本地服务。
 - [ ] 支持视频章节或元数据导出。
@@ -139,11 +139,11 @@ dance_events
 dancing-log/
 |-- dancing_log/                # 核心库
 |   |-- __init__.py
-|   `-- models.py               # 当前 CSV 数据模型和推荐权重计算
+|   `-- models.py               # 推荐权重计算和 SQLite 运行时入口
 |-- scripts/                    # 数据采集脚本
 |   |-- scrape_wanna.py         # 抓取 Wanna Dance 全部歌曲
 |   |-- match_netease.py        # 批量查询网易云音乐热度
-|   |-- init_songs.py           # 初始化歌曲主数据
+|   |-- init_songs.py           # 旧 CSV 初始化脚本，非主流程
 |   `-- test_music_apis.py      # 音乐 API 测试工具
 |-- docs/                       # 设计和调研文档
 |   |-- music_api_research.md
@@ -178,13 +178,14 @@ uv run python main.py match
 uv run python main.py match --resume
 ```
 
-### 初始化歌曲主数据
+### 同步歌曲主数据
 
 ```bash
-uv run python main.py init
+uv run python main.py sync-wanna
+uv run python main.py sync-wanna --offline
 ```
 
-合并 Wanna Dance 歌曲数据和网易云热度数据，生成 `data/songs.csv`。
+合并 Wanna Dance API 和本地缓存数据，写入 `data/dancing_log.sqlite3` 的 `songs` 表。默认不再生成 CSV/JSON 工件；如需临时导出调试文件，可运行 `uv run python main.py sync-wanna --write-files`。
 
 ### 记录舞蹈
 
@@ -196,7 +197,7 @@ uv run python main.py log 5038 --note "很好玩"
 uv run python main.py log 5038 --time "2000-01-01T12:00:00+08:00"
 ```
 
-记录保存到 `data/dance_log.csv`。当前版本会在手动记录时检查歌曲是否在当日推荐歌单中，如果在，则自动标记为 `recommend`。
+记录保存到 `data/dancing_log.sqlite3` 的 `dance_events` 表。当前版本会在手动记录时检查歌曲是否在当日推荐歌单中，如果在，则自动标记为 `recommend`。
 
 ### 生成推荐歌单
 
@@ -219,7 +220,7 @@ uv run python main.py import-vrcx "path/to/vrcx-snapshot/VRCX.sqlite3" --dry-run
 
 - `vrcx_import_events`：保留 VRCX 原始播放事件和解析结果，方便追溯与回填。
 - `dance_events`：规范化后的舞蹈时间线事件。
-- `songs`：SQLite 歌曲表；若本地存在 `data/songs.csv`，导入前会自动同步歌曲主数据。
+- `songs`：SQLite 歌曲表；VRCX 导入只会为缺失歌曲保留占位 id，歌曲元数据请通过 `sync-wanna` 同步。
 
 source 更新采用保守覆盖规则，优先级从高到低：
 
@@ -250,9 +251,9 @@ uv run python main.py sample-frames "path/to/recordings/sample.mkv" --output-dir
 
 ## 当前数据格式
 
-当前版本仍使用 CSV。后续计划迁移到 SQLite，CSV 保留为导入导出格式。
+当前版本使用 SQLite 作为主存储。CSV 不再参与运行时逻辑，后续如需要会作为导出格式实现。
 
-### songs.csv
+### songs
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
@@ -269,13 +270,13 @@ uv run python main.py sample-frames "path/to/recordings/sample.mkv" --output-dir
 | `popularity` | float | 网易云热度 |
 | `comment_count` | int | 网易云评论数 |
 
-### dance_log.csv
+### dance_events
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `timestamp` | str | ISO 8601 时间 |
-| `song_id` | int | 对应 `songs.csv` 的歌曲 id |
-| `source` | str | 当前支持 `self`、`recommend`、`other` |
+| `song_id` | int | 对应 `songs.id` 的歌曲 id |
+| `source` | str | 当前支持 `queued_self`、`self`、`recommend`、`other`、`random`、`unknown` |
 | `note` | str | 备注 |
 
 后续 source 会扩展为更细的枚举，例如：

@@ -27,7 +27,7 @@ def cmd_recommend():
 
     songs = load_songs()
     if not songs:
-        print("Error: songs data is empty. Run `uv run python main.py init` first.")
+        print("Error: songs table is empty. Run `uv run python main.py sync-wanna` first.")
         sys.exit(1)
 
     dance_log = load_dance_log()
@@ -73,15 +73,14 @@ def cmd_log():
         SOURCE_OTHER,
         SOURCE_SELF,
         add_dance_record,
-        load_songs,
     )
+    from dancing_log.storage import get_song
 
-    songs = load_songs()
-    song = next((s for s in songs if str(s.get("id")) == str(args.song_id)), None)
-    if song:
+    song = get_song(args.song_id)
+    if song and (song.get("name") or song.get("artist")):
         print(f"Recording: {song['name']} - {song['artist']}")
     else:
-        print(f"Warning: song id {args.song_id} is not in songs.csv, continuing anyway.")
+        print(f"Warning: song id {args.song_id} is not in SQLite songs table, continuing anyway.")
 
     if args.other:
         source = SOURCE_OTHER
@@ -234,7 +233,6 @@ def main():
         "scrape": ("Fetch Wanna Dance song metadata", "scripts/scrape_wanna.py"),
         "sync-wanna": ("Sync Wanna Dance songs into SQLite", "scripts/sync_wanna_songs.py"),
         "match": ("Match NetEase popularity data", "scripts/match_netease.py"),
-        "init": ("Build songs.csv from scraped data", "scripts/init_songs.py"),
         "test-apis": ("Test music APIs", "scripts/test_music_apis.py"),
     }
     builtin_commands = {
@@ -258,7 +256,7 @@ def main():
             print(f"  {name:<16} {desc}")
         print("\nExamples:")
         print("  uv run python main.py scrape")
-        print("  uv run python main.py init")
+        print("  uv run python main.py sync-wanna")
         print("  uv run python main.py log 5038")
         print("  uv run python main.py log 5038 --other")
         print("  uv run python main.py recommend -n 10")

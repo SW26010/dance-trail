@@ -1,13 +1,14 @@
 """Import dance playback events from a local VRCX SQLite database."""
 
 from dataclasses import dataclass
+from contextlib import closing
 from pathlib import Path
 import hashlib
 import re
 import sqlite3
 from urllib.parse import parse_qs, urlparse
 
-from dancing_log.storage import connect_db, sync_songs_from_csv
+from dancing_log.storage import connect_db
 
 
 SOURCE_SELF = "self"
@@ -185,7 +186,7 @@ def import_vrcx_database(
     if not vrcx_path.exists():
         raise FileNotFoundError(f"VRCX database not found: {vrcx_path}")
 
-    with sqlite3.connect(f"file:{vrcx_path}?mode=ro", uri=True) as vrcx_conn:
+    with closing(sqlite3.connect(f"file:{vrcx_path}?mode=ro", uri=True)) as vrcx_conn:
         vrcx_conn.row_factory = sqlite3.Row
         rows = _fetch_vrcx_rows(vrcx_conn, limit=limit)
 
@@ -199,8 +200,6 @@ def import_vrcx_database(
         )
 
     with connect_db(app_db_path) as app_conn:
-        sync_songs_from_csv(app_conn)
-
         staging_changed = 0
         dance_events_changed = 0
         skipped_without_song_id = 0

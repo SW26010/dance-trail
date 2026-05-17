@@ -3,6 +3,7 @@
 Usage:
     uv run python main.py sync-wanna
     uv run python main.py sync-wanna --offline
+    uv run python main.py sync-wanna --write-files
 """
 
 from __future__ import annotations
@@ -21,14 +22,15 @@ def main() -> None:
     parser.add_argument("--app-db", default=None, help="SQLite database path")
     parser.add_argument("--cache-dir", default=None, help="Local wannadance-song cache directory")
     parser.add_argument("--offline", action="store_true", help="Use local cache only; skip the public API")
-    parser.add_argument("--no-files", action="store_true", help="Do not update data/*.csv/json artifacts")
+    parser.add_argument("--write-files", action="store_true", help="Also export data/*.csv/json artifacts")
+    parser.add_argument("--no-files", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     stats = sync_wanna_catalog(
         db_path=args.app_db,
         cache_dir=args.cache_dir,
         use_api=not args.offline,
-        write_files=not args.no_files,
+        write_files=args.write_files and not args.no_files,
     )
     source = "API + cache" if stats.used_api else "cache only"
     print("Wanna Dance catalog sync complete")

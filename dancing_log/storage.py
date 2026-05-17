@@ -1,24 +1,32 @@
 """SQLite storage for dancing-log.
 
-CSV remains supported for the early CLI commands, while SQLite becomes the
-durable event store used by imports and future live capture.
+SQLite is the primary local store. CSV should be treated as an import/export
+artifact, not as runtime state.
 """
 
 from pathlib import Path
-import csv
+import hashlib
 import sqlite3
 
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DB_FILE = DATA_DIR / "dancing_log.sqlite3"
-SONGS_CSV_FILE = DATA_DIR / "songs.csv"
+
+
+class ClosingConnection(sqlite3.Connection):
+    """SQLite connection that closes when used as a context manager."""
+
+    def __exit__(self, exc_type, exc_value, traceback) -> bool:
+        suppress = super().__exit__(exc_type, exc_value, traceback)
+        self.close()
+        return suppress
 
 
 def connect_db(path: Path | str | None = None) -> sqlite3.Connection:
     """Open the local app database and ensure the schema exists."""
     db_path = Path(path) if path is not None else DB_FILE
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, factory=ClosingConnection)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     init_schema(conn)
@@ -73,6 +81,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             requester_display_name TEXT,
             requester_user_id TEXT,
             location TEXT,
+            note TEXT,
             recording_id INTEGER,
             recording_offset_seconds REAL,
             imported_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -105,6 +114,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
         """
     )
     _ensure_song_cache_columns(conn)
+    _ensure_dance_event_columns(conn)
     conn.commit()
 
 
@@ -137,87 +147,140 @@ def _ensure_song_cache_columns(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE songs ADD COLUMN {name} {column_type}")
 
 
-def sync_songs_from_csv(
-    conn: sqlite3.Connection,
-    csv_path: Path | str | None = None,
-) -> int:
-    """Upsert local songs.csv rows into SQLite when the CSV master exists."""
-    path = Path(csv_path) if csv_path is not None else SONGS_CSV_FILE
-    if not path.exists():
-        return 0
+def _ensure_dance_event_columns(conn: sqlite3.Connection) -> None:
+    """Add event columns for databases created before this schema."""
+    existing = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(dance_events)").fetchall()
+    }
+    if "note" not in existing:
+        conn.execute("ALTER TABLE dance_events ADD COLUMN note TEXT")
 
-    synced = 0
-    with open(path, encoding="utf-8-sig", newline="") as f:
-        for row in csv.DictReader(f):
-            raw_id = row.get("id")
-            if not raw_id:
-                continue
-            song_id = _to_int(raw_id)
-            if song_id is None:
-                continue
-            conn.execute(
-                """
-                INSERT INTO songs (
-                    id,
-                    name,
-                    artist,
-                    dancer,
-                    player_count,
-                    song_group,
-                    major,
-                    favorite,
-                    want_to_learn,
-                    netease_id,
-                    popularity,
-                    comment_count
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    name = excluded.name,
-                    artist = excluded.artist,
-                    dancer = excluded.dancer,
-                    player_count = excluded.player_count,
-                    song_group = excluded.song_group,
-                    major = excluded.major,
-                    favorite = excluded.favorite,
-                    want_to_learn = excluded.want_to_learn,
-                    netease_id = excluded.netease_id,
-                    popularity = excluded.popularity,
-                    comment_count = excluded.comment_count
-                """,
-                (
-                    song_id,
-                    row.get("name"),
-                    row.get("artist"),
-                    row.get("dancer"),
-                    _to_int(row.get("player_count")),
-                    row.get("group"),
-                    row.get("major"),
-                    _to_int(row.get("favorite"), default=0),
-                    _to_int(row.get("want_to_learn"), default=0),
-                    _to_int(row.get("netease_id")),
-                    _to_float(row.get("popularity")),
-                    _to_int(row.get("comment_count")),
-                ),
+
+def load_songs(path: Path | str | None = None) -> list[dict]:
+    """Load songs from SQLite using the field names expected by recommendation code."""
+    with connect_db(path) as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                id,
+                name,
+                artist,
+                dancer,
+                player_count,
+                song_group AS "group",
+                major,
+                favorite,
+                want_to_learn,
+                netease_id,
+                popularity,
+                comment_count
+            FROM songs
+            ORDER BY id
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_song(song_id: int, path: Path | str | None = None) -> dict | None:
+    """Return one song row from SQLite, or None when the song is unknown."""
+    with connect_db(path) as conn:
+        row = conn.execute(
+            """
+            SELECT
+                id,
+                name,
+                artist,
+                dancer,
+                player_count,
+                song_group AS "group",
+                major,
+                favorite,
+                want_to_learn,
+                netease_id,
+                popularity,
+                comment_count
+            FROM songs
+            WHERE id = ?
+            """,
+            (song_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def load_dance_log(path: Path | str | None = None) -> list[dict]:
+    """Load dance events from SQLite in the legacy record shape."""
+    with connect_db(path) as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                played_at AS timestamp,
+                song_id,
+                source,
+                COALESCE(note, '') AS note
+            FROM dance_events
+            WHERE song_id IS NOT NULL
+            ORDER BY played_at, id
+            """
+        ).fetchall()
+    return [
+        {
+            "timestamp": row["timestamp"],
+            "song_id": str(row["song_id"]),
+            "source": row["source"],
+            "note": row["note"],
+        }
+        for row in rows
+    ]
+
+
+def add_dance_event(
+    *,
+    song_id: int,
+    source: str,
+    played_at: str,
+    note: str = "",
+    event_source: str = "manual",
+    confidence: float = 1.0,
+    path: Path | str | None = None,
+) -> str:
+    """Insert a dance event into SQLite and return its event key."""
+    with connect_db(path) as conn:
+        conn.execute("INSERT OR IGNORE INTO songs (id) VALUES (?)", (song_id,))
+        base_key = _event_key(event_source, played_at, song_id, source, note)
+        event_key = _unique_event_key(conn, base_key)
+        conn.execute(
+            """
+            INSERT INTO dance_events (
+                played_at,
+                song_id,
+                source,
+                confidence,
+                event_source,
+                event_key,
+                note
             )
-            synced += 1
-    conn.commit()
-    return synced
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (played_at, song_id, source, confidence, event_source, event_key, note),
+        )
+        conn.commit()
+        return event_key
 
 
-def _to_int(value: object, default: int | None = None) -> int | None:
-    if value in (None, ""):
-        return default
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
+def _event_key(*parts: object) -> str:
+    return hashlib.sha256(
+        "\x1f".join(str(part or "") for part in parts).encode("utf-8")
+    ).hexdigest()
 
 
-def _to_float(value: object) -> float | None:
-    if value in (None, ""):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
+def _unique_event_key(conn: sqlite3.Connection, base_key: str) -> str:
+    event_key = base_key
+    suffix = 2
+    while conn.execute(
+        "SELECT 1 FROM dance_events WHERE event_key = ?",
+        (event_key,),
+    ).fetchone():
+        event_key = _event_key(base_key, suffix)
+        suffix += 1
+    return event_key
