@@ -312,14 +312,91 @@ Mid-play observations are excluded from delay metrics. Large PyPyDance offsets
 set `observed_mid_play` and `elapsed_at_first_seen_seconds`; WannaDance
 `Playing synced` lines set `synced_play_at`.
 
+## Live Watcher Performance and Direction
+
+The current `watch-vrc-log` implementation is lightweight enough for live use.
+It polls every 0.25 seconds, drains new lines with `readline()`, filters most
+lines with cheap token checks, and only runs the heavier parsers on candidate
+video lines.
+
+The fifth real capture, `analysis/vrc_log_capture/2026-05-17_171055`, covered
+about 7.6 minutes and observed:
+
+- 5546 raw log lines, about 12 lines per second
+- 165 candidate lines
+- 57 parsed signals
+- 9 folded playback events
+- VRCX comparison window: 9 VRCX rows, 9 watcher rows, 0 missed, 0 extra
+- candidate read latency: min 0.125 seconds, average 0.571 seconds, max 1.23
+  seconds, approximate p95 1.026 seconds
+
+Compared with VRCX, the approach is similar but narrower. VRCX's C#
+`LogWatcher.cs` also avoids `FileSystemWatcher`, polls the VRChat log directory
+on a background thread, tracks file positions, opens files with
+`FileShare.ReadWrite`, and passes normalized raw events into the frontend. The
+frontend then routes events through `gameLogCoordinator.js`, world-specific
+media parsers, and SQLite writes such as `gamelog_video_play`.
+
+The advantage of `watch-vrc-log` is not historical coverage. VRCX SQLite remains
+the best historical source. The advantage is owning a low-latency live layer
+that can keep richer playback timing fields than VRCX's video table:
+`actual_play_at`, `actual_play_method`, `observed_mid_play`,
+`elapsed_at_first_seen_seconds`, source fields, resolve/load timing, and raw
+line provenance.
+
+## Live Database and OBS Overlay Plan
+
+The next implementation step should keep the forensic JSONL capture, but add a
+live update pipeline.
+
+1. Refactor `PlaybackEventBuilder` to emit an update callback every time a
+   folded playback event changes.
+2. Add a live SQLite table, tentatively `live_playback_events`, keyed by
+   `event_key`. It should be upserted as request, resolve, load, progress,
+   sync, and actual-play signals arrive.
+3. Promote stable live rows into `dance_events` only when the record is safe
+   enough. Good initial promotion triggers are:
+   - `actual_play_at` exists and `observed_mid_play` is false
+   - or a row has been idle long enough to be considered complete
+4. Keep `playback_events.jsonl` as a session artifact. It remains useful for
+   debugging and for replaying real captures into tests.
+5. Add a local-only overlay server, for example:
+
+```bash
+uv run python main.py watch-vrc-log --live-db --overlay-port 8765
+```
+
+The server should bind to `127.0.0.1` and expose an OBS Browser Source page at:
+
+```text
+http://127.0.0.1:8765/overlay
+```
+
+The overlay should use server-sent events or WebSocket updates from the same
+live state. The first version should show:
+
+- current clock time
+- current track title
+- dance system and external id
+- requester/source, including `random` and player display names
+- elapsed / total time when duration is known
+- progress bar
+- optional small debug line for delay method, sync/mid-play, and source file
+
+The page should be self-contained and local: no external fonts, images, CDNs, or
+network calls. OBS should be able to keep it open for a whole recording session
+without depending on internet access.
+
 ## Recommended Next Steps
 
-1. Add inspection fixtures for real PyPyDance, Dudu, and VRDancing VRCX rows.
-2. Design one extension table per additional dance system only after the input
+1. Implement live playback upserts and a promotion path from
+   `live_playback_events` to `dance_events`.
+2. Implement the local OBS overlay page on top of the live state.
+3. Keep collecting inspection fixtures for real PyPyDance, Dudu, VRDancing, and
+   other dance-system VRCX rows.
+4. Design one extension table per additional dance system only after the input
    shape is known.
-3. Add a correction/backfill command for existing `unknown` source rows.
-4. Consider a direct VRChat log tailer later for live capture; VRCX SQLite should
-   remain the first source for historical imports.
+5. Add a correction/backfill command for existing `unknown` source rows.
 
 Deferred follow-up:
 

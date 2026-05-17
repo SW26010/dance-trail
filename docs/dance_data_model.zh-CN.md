@@ -229,6 +229,27 @@ PRIMARY KEY(dance_track_id, music_track_id)
 | `event_key` | TEXT NOT NULL UNIQUE | 去重键 |
 | `imported_at` | TEXT | 导入时间 |
 
+### 计划中的 `live_playback_events`
+
+计划给 `watch-vrc-log --live-db` 使用的运行时表。它保存每个进行中的 playback event
+的最新折叠状态，并在原始日志信号到来时持续 upsert。
+
+字段形状应尽量贴近取证用的 `playback_events.jsonl`，包括：
+
+- `event_key` 和 `canonical_key`
+- `first_seen_at`、`request_at`、`resolved_at`、`video_loaded_at`、
+  `actual_play_at`、`actual_play_signal_at`
+- `actual_play_method`、`actual_play_offset_seconds`、`observed_mid_play`、
+  `elapsed_at_first_seen_seconds`、`synced_play_at`
+- `dance_system_key`、`dance_external_id` 等解析后的舞蹈身份字段
+- `source_type`、`source_display_name` 等来源字段
+- `video_url`、`resolved_url`、`video_name`、`duration_seconds` 和 raw line 溯源
+- `last_updated_at`，以及类似 `promoted_dance_event_id` 的 promotion 标记
+
+当 row 已经有稳定播放时间后，可以推进到 `dance_events`。第一版 promotion 应优先选择
+存在 `actual_play_at` 且 `observed_mid_play = false` 的记录；半路观察仍然服务于 OBS
+叠加层和取证复查，但不应自动成为普通延迟或统计事件。
+
 ## 关系图
 
 ```mermaid

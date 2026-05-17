@@ -206,6 +206,69 @@ LocalLow 下的 VRChat 标准日志目录。默认从当前日志文件末尾开
 `observed_mid_play` 和 `elapsed_at_first_seen_seconds`；WannaDance 的
 `Playing synced` 会写入 `synced_play_at`。
 
+## 实时 watcher 性能和方向
+
+当前 `watch-vrc-log` 已经足够轻，可以作为实时层继续演进。它每 0.25 秒轮询一次，
+用 `readline()` 读新增日志行，先用低成本 token 过滤大部分行，只有视频相关候选行才
+进入较重的 parser。
+
+第五轮真实捕获 `analysis/vrc_log_capture/2026-05-17_171055` 约 7.6 分钟：
+
+- raw 日志 5546 行，约 12 行/秒
+- candidate 165 行
+- parsed signal 57 个
+- 折叠后 playback event 9 首
+- VRCX 同时间窗：VRCX 9 行，watcher 9 行，0 漏捕，0 多捕
+- candidate 读取延迟：min 0.125s，avg 0.571s，max 1.23s，p95 约 1.026s
+
+和 VRCX 相比，思路相似但目标更窄。VRCX 的 C# `LogWatcher.cs` 也没有依赖
+`FileSystemWatcher`，而是在后台线程轮询 VRChat 日志目录，记录文件 offset，用
+`FileShare.ReadWrite` 打开日志，再把规整后的 raw events 交给前端。前端再通过
+`gameLogCoordinator.js`、各世界的 media parser，以及 `gamelog_video_play` 等
+SQLite 写入完成持久化。
+
+`watch-vrc-log` 的优势不是历史覆盖；历史导入仍应优先使用 VRCX SQLite。它的优势是
+我们可以掌握一个低延迟实时层，并保存 VRCX video table 没有的字段：
+`actual_play_at`、`actual_play_method`、`observed_mid_play`、
+`elapsed_at_first_seen_seconds`、来源字段、resolve/load 时序和 raw line 溯源。
+
+## 实时数据库和 OBS 叠加层计划
+
+下一步应保留当前 JSONL 取证输出，同时增加实时更新管线。
+
+1. 重构 `PlaybackEventBuilder`，让折叠后的 playback event 每次变化时都能触发 update callback。
+2. 新增实时 SQLite 表，暂定 `live_playback_events`，以 `event_key` 为键。request、
+   resolve、load、progress、sync、actual-play 信号到来时持续 upsert。
+3. 只有在记录足够稳定时，再把 live row 推进 `dance_events`。第一版 promotion 条件可以是：
+   - `actual_play_at` 存在且 `observed_mid_play` 为 false
+   - 或某条 live row 已经 idle 足够久，可以视为完成
+4. 保留 `playback_events.jsonl` 作为 session artifact。它仍然适合调试，也适合把真实
+   capture 回放成测试 fixture。
+5. 增加只绑定本机的 overlay server，例如：
+
+```bash
+uv run python main.py watch-vrc-log --live-db --overlay-port 8765
+```
+
+服务只绑定 `127.0.0.1`，提供给 OBS Browser Source 的页面：
+
+```text
+http://127.0.0.1:8765/overlay
+```
+
+overlay 页面通过 server-sent events 或 WebSocket 读取同一份 live state。第一版显示：
+
+- 当前时钟时间
+- 当前曲目标题
+- 舞蹈系统和 external id
+- requester/source，包括 `random` 和玩家名
+- 已播放 / 总时长，若 duration 已知
+- 进度条
+- 可选小号 debug 行，显示 delay method、sync/mid-play、source file 等
+
+页面应完全本地自包含：不依赖外部字体、图片、CDN 或网络请求。OBS 应能在整场录制中
+保持打开，不受联网状态影响。
+
 ## 还不能完全确定的事
 
 这些来源区分仍然不能只靠 VRCX 保证：
@@ -224,10 +287,11 @@ LocalLow 下的 VRChat 标准日志目录。默认从当前日志文件末尾开
 
 ## 推荐下一步
 
-1. 收集真实 PyPyDance、Dudu、VRDancing 的 VRCX 行作为 fixture。
-2. 看到输入形状后，再为每个新舞蹈系统设计自己的扩展表。
-3. 增加一个修正或回填命令，用来处理现有 `unknown` 来源。
-4. 未来再考虑直接 tail VRChat 日志做实时捕获；历史导入仍优先用 VRCX SQLite。
+1. 实现 live playback upsert，以及从 `live_playback_events` 推进到 `dance_events` 的路径。
+2. 基于 live state 实现本地 OBS overlay 页面。
+3. 继续收集真实 PyPyDance、Dudu、VRDancing 和其他舞蹈系统的 VRCX 行作为 fixture。
+4. 看到输入形状后，再为每个新舞蹈系统设计自己的扩展表。
+5. 增加一个修正或回填命令，用来处理现有 `unknown` 来源。
 
 ## 结论
 
