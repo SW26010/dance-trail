@@ -38,6 +38,21 @@ Deferred tables:
 
 See `docs/dance_data_model.md` for the design rationale.
 
+Related docs:
+
+- `docs/dance_data_model.md`: current SQLite model and table boundaries.
+- `docs/wanna_catalog_sync.md`: WannaDance API/cache sync behavior.
+- `docs/vrcx_integration_notes.md`: VRCX source research and importer status.
+- `docs/music_api_research.md`: archived provider-matching research.
+
+Chinese docs:
+
+- `README.zh-CN.md`: Chinese project overview and daily commands.
+- `docs/dance_data_model.zh-CN.md`: Chinese data model notes.
+- `docs/wanna_catalog_sync.zh-CN.md`: Chinese WannaDance sync notes.
+- `docs/vrcx_integration_notes.zh-CN.md`: Chinese VRCX import notes.
+- `docs/music_api_research.zh-CN.md`: Chinese music API research notes.
+
 ## Quick Start
 
 Python requirement:
@@ -45,6 +60,16 @@ Python requirement:
 ```bash
 uv run python main.py
 ```
+
+If `uv` is unavailable in the current shell, use any Python environment with the
+project dependencies installed:
+
+```bash
+python main.py
+```
+
+In Codex's sandbox, `uv` may need elevated execution because the runner process
+can be blocked by sandbox permissions.
 
 Populate the local catalog from WannaDance:
 

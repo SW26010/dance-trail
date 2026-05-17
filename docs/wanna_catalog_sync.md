@@ -1,52 +1,57 @@
-# Wanna Catalog Sync
+# WannaDance Catalog Sync
 
-Date: 2026-05-16
+Date: 2026-05-17
 
 ## Purpose
 
-`dancing-log` keeps Wanna Dance song metadata in the local SQLite database so
-playback events can point at stable song ids and still show useful song names,
-artists, dance groups, and local cache file paths.
+`dancing-log` stores WannaDance catalog metadata in the local SQLite database so
+playback events can point to stable dance-track rows and still show useful song
+names, artists, dancers, groups, player counts, and local cache paths.
 
-The catalog sync now uses two complementary sources:
+The catalog sync uses two complementary sources:
 
-- Public Wanna Dance API: canonical public catalog metadata.
-- Local `wanna_cache_dir`: local downloaded song cache from `data/local_config.json`.
+- Public WannaDance API: canonical public catalog metadata.
+- Local `wanna_cache_dir`: local downloaded song cache from
+  `data/local_config.json`.
 
-The local cache is useful even when the API is unavailable because each cached
-song directory contains `metadata.json`, `download.txt`, and usually `video.mp4`.
+The local cache remains useful when the API is unavailable because each cached
+song directory can contain `metadata.json`, `download.txt`, and `video.mp4`.
 
 ## Commands
 
 Preferred online sync:
 
 ```powershell
-python main.py sync-wanna
+uv run python main.py sync-wanna
 ```
 
 Offline/cache-only sync:
 
 ```powershell
-python main.py sync-wanna --offline
+uv run python main.py sync-wanna --offline
 ```
 
 Export CSV/JSON artifacts for inspection:
 
 ```powershell
-python main.py sync-wanna --write-files
+uv run python main.py sync-wanna --write-files
 ```
 
 Use an explicit cache directory:
 
 ```powershell
-python main.py sync-wanna --cache-dir "D:\path\to\wannadance-song"
+uv run python main.py sync-wanna --cache-dir "D:\path\to\wannadance-song"
 ```
 
-The command also works through the project runner when available:
+If `uv` is not available in the current shell, the same command can be run with
+any Python environment that has the project dependencies installed:
 
 ```powershell
-uv run python main.py sync-wanna
+python main.py sync-wanna
 ```
+
+In the Codex sandbox, `uv` may require elevated execution because the runner can
+be blocked by sandbox permissions.
 
 ## Data Sources
 
@@ -116,18 +121,22 @@ The sync records local paths for `metadata.json`, `download.txt`, and
 
 ## SQLite Storage
 
-The `songs` table remains keyed by Wanna song id.
+The runtime database no longer has a `songs` table.
 
-Existing user-maintained fields are preserved during sync:
+WannaDance sync writes the generic entry fields into `dance_tracks`:
 
-- `favorite`
-- `want_to_learn`
-- `netease_id`
-- `popularity`
-- `comment_count`
+- `system_id`
+- `external_id`
+- `title`
+- `artist`
+- `dancer`
+- `player_count`
+- `group_name`
+- `major`
 
-The sync adds cache-related columns:
+WannaDance-specific fields are written into `wannadance_songs`:
 
+- `wanna_id`
 - `cache_category`
 - `cache_title`
 - `cache_title_spell`
@@ -145,34 +154,40 @@ The sync adds cache-related columns:
 - `local_download_path`
 - `cache_updated_at`
 
-For older databases, these columns are added automatically by
-`dancing_log.storage.init_schema()`.
+When both title and artist are present, the sync also creates:
+
+- a `music_tracks` row keyed by normalized title/artist
+- a `dance_track_music_links` row with `match_method = 'title_artist_auto'`
+
+Local user flags such as `favorite` and `want_to_learn` live on `dance_tracks`
+and are preserved by catalog upserts.
+
+NetEase/Kugou provider ids and popularity fields are not part of the current
+runtime schema.
 
 ## Merge Rules
 
 1. Load local cache metadata first.
-2. Use cache `title` as a fallback song `name`.
+2. Use cache `title` as a fallback song title.
 3. Overlay API metadata when available, because it has richer public catalog
    fields such as artist, dancer, player count, group, and major category.
-4. Upsert by song id into SQLite.
-5. Preserve local user flags and NetEase match fields.
-6. Keep existing rows that are referenced by playback history, even if they are
-   missing from both the latest API and local cache.
+4. Upsert generic fields into `dance_tracks` by `(system_id, external_id)`.
+5. Upsert WannaDance-only fields into `wannadance_songs` by `dance_track_id`.
+6. Upsert music rows and dance-to-music links when title and artist are present.
 
-## Current Local Result
+The sync does not delete catalog rows that are missing from the latest API or
+local cache. Existing playback history may still refer to them.
 
-The 2026-05-16 sync found:
+## Current Local Snapshot
 
-- API songs: 9782
-- cached songs: 10203
-- SQLite `songs` rows after sync: 10204
-- rows with song name: 10203
-- rows with API artist metadata: 9782
-- rows with local cache metadata: 10203
+The local database snapshot checked on 2026-05-17 contained:
 
-One legacy row, song id `10985`, was retained because it is referenced by an
-existing imported playback event, but it was not present in the latest API or
-the local cache.
+- `dance_tracks`: 10,204
+- `wannadance_songs`: 10,204
+- `music_tracks`: 7,378
+- `dance_track_music_links`: 9,782
+
+These counts are local derived data, not repository source.
 
 ## Generated Files
 
@@ -182,9 +197,10 @@ The sync updates SQLite by default:
 
 CSV/JSON files are optional export artifacts when `--write-files` is passed:
 
-- `data/songs.csv`
 - `data/wanna_songs.csv`
 - `data/wanna_songs.json`
+
+Legacy `data/songs.csv` is no longer a runtime source.
 
 These files are ignored by git. They are local derived data, not repository
 source files.
@@ -193,6 +209,6 @@ source files.
 
 - `dancing_log/wanna_catalog.py`: catalog loading, merging, export, and SQLite
   upsert logic.
+- `dancing_log/storage.py`: SQLite schema and shared upsert helpers.
 - `scripts/sync_wanna_songs.py`: command-line wrapper.
-- `dancing_log/storage.py`: SQLite schema and automatic cache-column migration.
 - `main.py`: exposes the `sync-wanna` command.

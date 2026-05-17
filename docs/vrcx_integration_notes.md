@@ -55,15 +55,15 @@ Why SQLite is the better fit now:
 - history is event-shaped, not just table-shaped
 - source inference will likely require joins, filtering, deduplication, and backfills
 - future analytics will be easier with SQL than with ad-hoc CSV mutation
-- we can still export `songs.csv` or `dance_log.csv` for inspection and sharing
+- we can still export catalog or history snapshots for inspection and sharing
 
-Suggested direction:
+Implemented direction:
 
 - primary app database: `data/dancing_log.sqlite3`
 - optional export commands:
-  - songs -> CSV
-  - dance history -> CSV
-  - recommendation snapshots -> CSV if needed
+  - WannaDance catalog -> optional CSV/JSON artifacts through `sync-wanna --write-files`
+  - dance history -> future CSV export if needed
+  - recommendation snapshots -> future CSV export if needed
 
 ## Local VRCX Findings
 
@@ -242,17 +242,47 @@ The blank `display_name` rows may represent:
 So the remaining hard problem is not "can we get play history?"
 The remaining hard problem is "can we infer source semantics with enough confidence?"
 
+## Current Implementation Status
+
+The importer described above is now implemented in `dancing_log/vrcx_importer.py`
+and exposed through:
+
+```bash
+uv run python main.py import-vrcx
+uv run python main.py import-vrcx "path/to/vrcx-snapshot/VRCX.sqlite3"
+uv run python main.py import-vrcx --dry-run
+```
+
+The VRCX database path can also be stored in `data/local_config.json` as
+`vrcx_db_path`.
+
+The importer currently:
+
+- reads `gamelog_video_play`
+- parses supported WannaDance playback URLs
+- writes provenance rows to `vrcx_import_events`
+- writes normalized timeline rows to `dance_events`
+- creates placeholder `dance_tracks` rows when a parsed id is not already in the
+  catalog
+- infers `self`, `other`, `random`, or `unknown` from requester fields
+- skips unsupported dance systems instead of misclassifying them as WannaDance
+- keeps stronger source inference when the same event is imported again
+
+Supported WannaDance URL families include documented API hosts, observed
+WannaDance-compatible API hosts, upstream Kiva hosts, and supported CDN file URL
+patterns.
+
+PyPyDance, Dudu, VRDancing, and other systems are recognized only as unsupported
+or unknown until their real metadata shapes are inspected.
+
 ## Recommended Next Steps
 
-1. Add a standalone importer that reads a copied VRCX SQLite file and extracts candidate dance events into a normalized staging table.
-2. Store local app data in SQLite, not CSV-first.
-3. Introduce the expanded source enum now, even if some imported rows initially land as `unknown`.
-4. Build source inference rules in layers:
-   - exact self-match by `user_id`
-   - exact other-match by non-self `user_id`
-   - explicit random markers if present
-   - fallback `unknown`
-5. Only later decide whether `queued_self` can be inferred from world-specific semantics or needs manual confirmation.
+1. Add inspection fixtures for real PyPyDance, Dudu, and VRDancing VRCX rows.
+2. Design one extension table per additional dance system only after the input
+   shape is known.
+3. Add a correction/backfill command for existing `unknown` source rows.
+4. Consider a direct VRChat log tailer later for live capture; VRCX SQLite should
+   remain the first source for historical imports.
 
 Deferred follow-up:
 
