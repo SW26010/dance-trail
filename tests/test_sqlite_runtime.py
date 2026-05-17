@@ -9,6 +9,7 @@ from dancing_log.models import (
     add_dance_record,
     generate_daily_playlist,
 )
+from dancing_log.favorite_importer import FavoriteImportError, import_favorites_file
 from dancing_log.queued_self_importer import sync_queued_self_manifests
 from dancing_log.rebuild import archive_existing_data
 from dancing_log.storage import (
@@ -21,6 +22,21 @@ from dancing_log.storage import (
 )
 from dancing_log.vrcx_importer import import_vrcx_database
 from dancing_log.wanna_catalog import upsert_catalog
+
+
+def favorite_map(db_path: Path | str) -> dict[tuple[str, str], int]:
+    with connect_db(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT ds.key AS system_key, dt.external_id, dt.favorite
+            FROM dance_tracks dt
+            JOIN dance_systems ds ON ds.id = dt.system_id
+            """
+        ).fetchall()
+    return {
+        (row["system_key"], row["external_id"]): int(row["favorite"])
+        for row in rows
+    }
 
 
 class SQLiteRuntimeTest(unittest.TestCase):
@@ -145,6 +161,218 @@ class SQLiteRuntimeTest(unittest.TestCase):
             self.assertEqual(playlist[0]["id"], track_id)
             self.assertEqual(playlist[0]["system_key"], WANNA_SYSTEM_KEY)
             self.assertNotIn("popularity", playlist[0])
+
+    def test_import_favorites_replaces_system_favorites_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "app.sqlite3"
+            favorites_path = root / "favorites.txt"
+            with connect_db(db_path) as conn:
+                for external_id in ("1", "2", "3"):
+                    ensure_dance_track(conn, WANNA_SYSTEM_KEY, external_id)
+                conn.execute(
+                    """
+                    UPDATE dance_tracks
+                    SET favorite = 1
+                    WHERE external_id IN ('2', '3')
+                    """
+                )
+                conn.commit()
+            favorites_path.write_text("1\n2\n1\n", encoding="utf-8")
+
+            stats = import_favorites_file(
+                system_key=WANNA_SYSTEM_KEY,
+                favorites_file=favorites_path,
+                app_db_path=db_path,
+            )
+
+            self.assertEqual(stats.input_ids, 3)
+            self.assertEqual(stats.unique_ids, 2)
+            self.assertEqual(stats.duplicate_ids, 1)
+            self.assertEqual(stats.favorites_set, 1)
+            self.assertEqual(stats.favorites_cleared, 1)
+            self.assertEqual(
+                favorite_map(db_path),
+                {
+                    (WANNA_SYSTEM_KEY, "1"): 1,
+                    (WANNA_SYSTEM_KEY, "2"): 1,
+                    (WANNA_SYSTEM_KEY, "3"): 0,
+                },
+            )
+
+    def test_import_favorites_parses_wanna_favorite_comma_list(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "app.sqlite3"
+            favorites_path = root / "liked_songs_wannadance.txt"
+            with connect_db(db_path) as conn:
+                for external_id in ("6495", "10508", "5929"):
+                    ensure_dance_track(conn, WANNA_SYSTEM_KEY, external_id)
+                conn.commit()
+            favorites_path.write_text(
+                "WannaFavorite:6495,10508,5929,6495\n",
+                encoding="utf-8",
+            )
+
+            stats = import_favorites_file(
+                system_key=WANNA_SYSTEM_KEY,
+                favorites_file=favorites_path,
+                app_db_path=db_path,
+            )
+
+            self.assertEqual(stats.input_ids, 4)
+            self.assertEqual(stats.unique_ids, 3)
+            self.assertEqual(stats.duplicate_ids, 1)
+            self.assertEqual(stats.favorites_set, 3)
+            self.assertEqual(
+                favorite_map(db_path),
+                {
+                    (WANNA_SYSTEM_KEY, "6495"): 1,
+                    (WANNA_SYSTEM_KEY, "10508"): 1,
+                    (WANNA_SYSTEM_KEY, "5929"): 1,
+                },
+            )
+
+    def test_import_favorites_additive_does_not_clear_existing_favorites(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "app.sqlite3"
+            favorites_path = root / "favorites.txt"
+            with connect_db(db_path) as conn:
+                for external_id in ("1", "2", "3"):
+                    ensure_dance_track(conn, WANNA_SYSTEM_KEY, external_id)
+                conn.execute(
+                    "UPDATE dance_tracks SET favorite = 1 WHERE external_id = '3'"
+                )
+                conn.commit()
+            favorites_path.write_text("1\n2\n", encoding="utf-8")
+
+            stats = import_favorites_file(
+                system_key=WANNA_SYSTEM_KEY,
+                favorites_file=favorites_path,
+                app_db_path=db_path,
+                additive=True,
+            )
+
+            self.assertEqual(stats.favorites_set, 2)
+            self.assertEqual(stats.favorites_cleared, 0)
+            self.assertEqual(
+                favorite_map(db_path),
+                {
+                    (WANNA_SYSTEM_KEY, "1"): 1,
+                    (WANNA_SYSTEM_KEY, "2"): 1,
+                    (WANNA_SYSTEM_KEY, "3"): 1,
+                },
+            )
+
+    def test_import_favorites_dry_run_reports_without_writing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "app.sqlite3"
+            favorites_path = root / "favorites.txt"
+            with connect_db(db_path) as conn:
+                ensure_dance_track(conn, WANNA_SYSTEM_KEY, "1")
+                ensure_dance_track(conn, WANNA_SYSTEM_KEY, "2")
+                conn.execute(
+                    "UPDATE dance_tracks SET favorite = 1 WHERE external_id = '2'"
+                )
+                conn.commit()
+            favorites_path.write_text("1\n", encoding="utf-8")
+
+            stats = import_favorites_file(
+                system_key=WANNA_SYSTEM_KEY,
+                favorites_file=favorites_path,
+                app_db_path=db_path,
+                dry_run=True,
+            )
+
+            self.assertTrue(stats.dry_run)
+            self.assertEqual(stats.favorites_set, 1)
+            self.assertEqual(stats.favorites_cleared, 1)
+            self.assertEqual(
+                favorite_map(db_path),
+                {
+                    (WANNA_SYSTEM_KEY, "1"): 0,
+                    (WANNA_SYSTEM_KEY, "2"): 1,
+                },
+            )
+
+    def test_import_favorites_unknown_id_fails_without_partial_update(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "app.sqlite3"
+            favorites_path = root / "favorites.txt"
+            with connect_db(db_path) as conn:
+                ensure_dance_track(conn, WANNA_SYSTEM_KEY, "1")
+                ensure_dance_track(conn, WANNA_SYSTEM_KEY, "2")
+                conn.execute(
+                    "UPDATE dance_tracks SET favorite = 1 WHERE external_id = '2'"
+                )
+                conn.commit()
+            favorites_path.write_text("1\n999\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(FavoriteImportError, "999"):
+                import_favorites_file(
+                    system_key=WANNA_SYSTEM_KEY,
+                    favorites_file=favorites_path,
+                    app_db_path=db_path,
+                )
+
+            self.assertEqual(
+                favorite_map(db_path),
+                {
+                    (WANNA_SYSTEM_KEY, "1"): 0,
+                    (WANNA_SYSTEM_KEY, "2"): 1,
+                },
+            )
+
+    def test_import_favorites_replace_is_scoped_to_one_system(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "app.sqlite3"
+            favorites_path = root / "favorites.txt"
+            with connect_db(db_path) as conn:
+                ensure_dance_track(conn, WANNA_SYSTEM_KEY, "1")
+                ensure_dance_track(conn, WANNA_SYSTEM_KEY, "2")
+                ensure_dance_track(conn, "otherdance", "1")
+                conn.execute("UPDATE dance_tracks SET favorite = 1")
+                conn.commit()
+            favorites_path.write_text("1\n", encoding="utf-8")
+
+            stats = import_favorites_file(
+                system_key=WANNA_SYSTEM_KEY,
+                favorites_file=favorites_path,
+                app_db_path=db_path,
+            )
+
+            self.assertEqual(stats.favorites_cleared, 1)
+            self.assertEqual(
+                favorite_map(db_path),
+                {
+                    (WANNA_SYSTEM_KEY, "1"): 1,
+                    (WANNA_SYSTEM_KEY, "2"): 0,
+                    ("otherdance", "1"): 1,
+                },
+            )
+
+    def test_import_favorites_blank_line_fails_without_update(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "app.sqlite3"
+            favorites_path = root / "favorites.txt"
+            with connect_db(db_path) as conn:
+                ensure_dance_track(conn, WANNA_SYSTEM_KEY, "1")
+                conn.commit()
+            favorites_path.write_text("1\n\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(FavoriteImportError, "line 2"):
+                import_favorites_file(
+                    system_key=WANNA_SYSTEM_KEY,
+                    favorites_file=favorites_path,
+                    app_db_path=db_path,
+                )
+
+            self.assertEqual(favorite_map(db_path), {(WANNA_SYSTEM_KEY, "1"): 0})
 
     def test_vrcx_import_writes_new_tables_and_skips_unsupported_systems(self):
         with tempfile.TemporaryDirectory() as tmp:

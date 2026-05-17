@@ -118,6 +118,19 @@ uv run python main.py recommend
 uv run python main.py recommend -n 10
 ```
 
+Import favorite song IDs from a UTF-8 text file. It can contain one external id
+per line, or a WannaDance export line such as `WannaFavorite:6495,10508`:
+
+```bash
+uv run python main.py import-favorites --system wannadance data/favorites.txt
+uv run python main.py import-favorites --system wannadance data/favorites.txt --additive
+uv run python main.py import-favorites --system wannadance data/favorites.txt --dry-run
+```
+
+By default, the import replaces the favorite list for the selected dance system.
+Use `--additive` to only mark the listed tracks as favorites. Unknown ids fail
+the import without changing the database.
+
 The current recommendation score uses:
 
 - favorite flag

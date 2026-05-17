@@ -111,6 +111,49 @@ def cmd_log():
     )
 
 
+def cmd_import_favorites():
+    """Import favorite flags from a text file."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Import favorite dance tracks from a text file")
+    parser.add_argument(
+        "favorites_file",
+        help="UTF-8 text file: one external id per line, or WannaFavorite:id,id,...",
+    )
+    parser.add_argument("--system", required=True, help="Dance system key, for example wannadance")
+    parser.add_argument("--app-db", default=None, help="SQLite path")
+    parser.add_argument(
+        "--additive",
+        action="store_true",
+        help="Only add favorites; default replaces the system's favorite list",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="Validate and report changes without writing")
+    args = parser.parse_args(sys.argv[2:])
+
+    from dancing_log.favorite_importer import FavoriteImportError, import_favorites_file
+
+    try:
+        stats = import_favorites_file(
+            system_key=args.system,
+            favorites_file=args.favorites_file,
+            app_db_path=args.app_db,
+            additive=args.additive,
+            dry_run=args.dry_run,
+        )
+    except FavoriteImportError as exc:
+        parser.error(str(exc))
+
+    print("Favorite import dry run complete" if stats.dry_run else "Favorite import complete")
+    print(f"  system: {stats.system_key}")
+    print(f"  mode: {'additive' if stats.additive else 'replace'}")
+    print(f"  dry run: {'yes' if stats.dry_run else 'no'}")
+    print(f"  input IDs: {stats.input_ids}")
+    print(f"  unique IDs: {stats.unique_ids}")
+    print(f"  duplicate IDs: {stats.duplicate_ids}")
+    print(f"  favorites set: {stats.favorites_set}")
+    print(f"  favorites cleared: {stats.favorites_cleared}")
+
+
 def cmd_import_vrcx():
     """Import historical playback rows from VRCX SQLite."""
     import argparse
@@ -304,6 +347,7 @@ def main():
     builtin_commands = {
         "recommend": ("Generate daily recommendation playlist", cmd_recommend),
         "log": ("Append one dance log record", cmd_log),
+        "import-favorites": ("Import favorite track flags from text", cmd_import_favorites),
         "import-vrcx": ("Import historical playback rows from VRCX SQLite", cmd_import_vrcx),
         "sync-queued-self": ("Sync queued_self manifests", cmd_sync_queued_self),
         "sample-frames": ("Sample overlay verification frames from a recording", cmd_sample_recording_frames),
@@ -327,6 +371,7 @@ def main():
         print("  uv run python main.py log --system wannadance 5038")
         print("  uv run python main.py log --system wannadance 5038 --other")
         print("  uv run python main.py recommend -n 10")
+        print("  uv run python main.py import-favorites --system wannadance data/favorites.txt")
         print("  uv run python main.py import-vrcx path/to/vrcx-snapshot/VRCX.sqlite3")
         print("  uv run python main.py import-vrcx")
         print("  uv run python main.py sync-queued-self --system wannadance")
