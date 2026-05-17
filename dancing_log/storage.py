@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import hashlib
+import json
 import re
 import sqlite3
 import unicodedata
@@ -155,6 +156,68 @@ def init_schema(conn: sqlite3.Connection) -> None:
             FOREIGN KEY(parsed_dance_track_id) REFERENCES dance_tracks(id)
         );
 
+        CREATE TABLE IF NOT EXISTS live_playback_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_key TEXT NOT NULL UNIQUE,
+            session_id TEXT NOT NULL,
+            playback_event_key TEXT NOT NULL,
+            canonical_key TEXT,
+            first_seen_at TEXT,
+            request_at TEXT,
+            load_started_at TEXT,
+            resolve_attempt_at TEXT,
+            resolved_at TEXT,
+            video_loaded_at TEXT,
+            expected_ready_at TEXT,
+            last_seen_at TEXT,
+            actual_play_at TEXT,
+            actual_play_signal_at TEXT,
+            actual_play_offset_seconds REAL,
+            actual_play_method TEXT,
+            on_video_start_at TEXT,
+            synced_play_at TEXT,
+            observed_mid_play INTEGER NOT NULL DEFAULT 0,
+            elapsed_at_first_seen_seconds REAL,
+            delay_to_actual_seconds REAL,
+            load_to_actual_seconds REAL,
+            request_to_resolve_seconds REAL,
+            video_url TEXT,
+            routed_url TEXT,
+            resolved_url TEXT,
+            dance_system_key TEXT,
+            dance_external_id TEXT,
+            url_kind TEXT,
+            video_name TEXT,
+            video_id TEXT,
+            display_name TEXT,
+            requester_marker TEXT,
+            source_hint TEXT,
+            source_type TEXT,
+            source_display_name TEXT,
+            world_parser TEXT,
+            duration_seconds REAL,
+            load_seconds REAL,
+            wait_seconds REAL,
+            source_file TEXT,
+            first_line_number INTEGER,
+            last_line_number INTEGER,
+            signal_count INTEGER NOT NULL DEFAULT 0,
+            parser_names_json TEXT NOT NULL DEFAULT '[]',
+            raw_event_types_json TEXT NOT NULL DEFAULT '[]',
+            event_json TEXT NOT NULL DEFAULT '{}',
+            completion_status TEXT NOT NULL DEFAULT 'pending',
+            completion_reason TEXT,
+            completed_at TEXT,
+            interrupted_at TEXT,
+            played_seconds REAL,
+            required_played_seconds REAL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            last_updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            promoted_dance_event_id INTEGER,
+            promoted_at TEXT,
+            FOREIGN KEY(promoted_dance_event_id) REFERENCES dance_events(id)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_dance_tracks_system_external
             ON dance_tracks(system_id, external_id);
         CREATE INDEX IF NOT EXISTS idx_dance_events_played_at
@@ -163,8 +226,15 @@ def init_schema(conn: sqlite3.Connection) -> None:
             ON dance_events(dance_track_id);
         CREATE INDEX IF NOT EXISTS idx_vrcx_import_events_track
             ON vrcx_import_events(parsed_dance_track_id);
+        CREATE INDEX IF NOT EXISTS idx_live_playback_events_session
+            ON live_playback_events(session_id, first_seen_at);
+        CREATE INDEX IF NOT EXISTS idx_live_playback_events_actual_play
+            ON live_playback_events(actual_play_at);
+        CREATE INDEX IF NOT EXISTS idx_live_playback_events_completion
+            ON live_playback_events(completion_status);
         """
     )
+    _ensure_live_playback_columns(conn)
     ensure_dance_system(conn, WANNA_SYSTEM_KEY, WANNA_SYSTEM_NAME)
     conn.commit()
 
@@ -414,6 +484,353 @@ def add_dance_event(
         return event_key
 
 
+def make_live_playback_event_key(session_id: str, playback_event_key: str) -> str:
+    """Return the persistent SQLite key for one live playback occurrence."""
+    return _event_key("live-vrc-log", session_id, playback_event_key)
+
+
+def upsert_live_playback_event(
+    conn: sqlite3.Connection,
+    event: dict,
+    *,
+    session_id: str,
+    event_key: str | None = None,
+) -> int:
+    """Insert or update the latest folded live playback state."""
+    playback_event_key = str(event.get("event_key") or "")
+    if not playback_event_key:
+        raise ValueError("live playback event must include event_key")
+    persistent_key = event_key or make_live_playback_event_key(session_id, playback_event_key)
+    parser_names_json = _json_text(event.get("parser_names") or [])
+    raw_event_types_json = _json_text(event.get("raw_event_types") or [])
+    event_json = _json_text(event)
+
+    conn.execute(
+        """
+        INSERT INTO live_playback_events (
+            event_key,
+            session_id,
+            playback_event_key,
+            canonical_key,
+            first_seen_at,
+            request_at,
+            load_started_at,
+            resolve_attempt_at,
+            resolved_at,
+            video_loaded_at,
+            expected_ready_at,
+            last_seen_at,
+            actual_play_at,
+            actual_play_signal_at,
+            actual_play_offset_seconds,
+            actual_play_method,
+            on_video_start_at,
+            synced_play_at,
+            observed_mid_play,
+            elapsed_at_first_seen_seconds,
+            delay_to_actual_seconds,
+            load_to_actual_seconds,
+            request_to_resolve_seconds,
+            video_url,
+            routed_url,
+            resolved_url,
+            dance_system_key,
+            dance_external_id,
+            url_kind,
+            video_name,
+            video_id,
+            display_name,
+            requester_marker,
+            source_hint,
+            source_type,
+            source_display_name,
+            world_parser,
+            duration_seconds,
+            load_seconds,
+            wait_seconds,
+            source_file,
+            first_line_number,
+            last_line_number,
+            signal_count,
+            parser_names_json,
+            raw_event_types_json,
+            event_json
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(event_key) DO UPDATE SET
+            session_id = excluded.session_id,
+            playback_event_key = excluded.playback_event_key,
+            canonical_key = excluded.canonical_key,
+            first_seen_at = excluded.first_seen_at,
+            request_at = excluded.request_at,
+            load_started_at = excluded.load_started_at,
+            resolve_attempt_at = excluded.resolve_attempt_at,
+            resolved_at = excluded.resolved_at,
+            video_loaded_at = excluded.video_loaded_at,
+            expected_ready_at = excluded.expected_ready_at,
+            last_seen_at = excluded.last_seen_at,
+            actual_play_at = excluded.actual_play_at,
+            actual_play_signal_at = excluded.actual_play_signal_at,
+            actual_play_offset_seconds = excluded.actual_play_offset_seconds,
+            actual_play_method = excluded.actual_play_method,
+            on_video_start_at = excluded.on_video_start_at,
+            synced_play_at = excluded.synced_play_at,
+            observed_mid_play = excluded.observed_mid_play,
+            elapsed_at_first_seen_seconds = excluded.elapsed_at_first_seen_seconds,
+            delay_to_actual_seconds = excluded.delay_to_actual_seconds,
+            load_to_actual_seconds = excluded.load_to_actual_seconds,
+            request_to_resolve_seconds = excluded.request_to_resolve_seconds,
+            video_url = excluded.video_url,
+            routed_url = excluded.routed_url,
+            resolved_url = excluded.resolved_url,
+            dance_system_key = excluded.dance_system_key,
+            dance_external_id = excluded.dance_external_id,
+            url_kind = excluded.url_kind,
+            video_name = excluded.video_name,
+            video_id = excluded.video_id,
+            display_name = excluded.display_name,
+            requester_marker = excluded.requester_marker,
+            source_hint = excluded.source_hint,
+            source_type = excluded.source_type,
+            source_display_name = excluded.source_display_name,
+            world_parser = excluded.world_parser,
+            duration_seconds = excluded.duration_seconds,
+            load_seconds = excluded.load_seconds,
+            wait_seconds = excluded.wait_seconds,
+            source_file = excluded.source_file,
+            first_line_number = excluded.first_line_number,
+            last_line_number = excluded.last_line_number,
+            signal_count = excluded.signal_count,
+            parser_names_json = excluded.parser_names_json,
+            raw_event_types_json = excluded.raw_event_types_json,
+            event_json = excluded.event_json,
+            last_updated_at = datetime('now')
+        """,
+        (
+            persistent_key,
+            session_id,
+            playback_event_key,
+            event.get("canonical_key"),
+            event.get("first_seen_at"),
+            event.get("request_at"),
+            event.get("load_started_at"),
+            event.get("resolve_attempt_at"),
+            event.get("resolved_at"),
+            event.get("video_loaded_at"),
+            event.get("expected_ready_at"),
+            event.get("last_seen_at"),
+            event.get("actual_play_at"),
+            event.get("actual_play_signal_at"),
+            event.get("actual_play_offset_seconds"),
+            event.get("actual_play_method"),
+            event.get("on_video_start_at"),
+            event.get("synced_play_at"),
+            _bool_int(event.get("observed_mid_play")),
+            event.get("elapsed_at_first_seen_seconds"),
+            event.get("delay_to_actual_seconds"),
+            event.get("load_to_actual_seconds"),
+            event.get("request_to_resolve_seconds"),
+            event.get("video_url"),
+            event.get("routed_url"),
+            event.get("resolved_url"),
+            event.get("dance_system_key"),
+            event.get("dance_external_id"),
+            event.get("url_kind"),
+            event.get("video_name"),
+            event.get("video_id"),
+            event.get("display_name"),
+            event.get("requester_marker"),
+            event.get("source_hint"),
+            event.get("source_type"),
+            event.get("source_display_name"),
+            event.get("world_parser"),
+            event.get("duration_seconds"),
+            event.get("load_seconds"),
+            event.get("wait_seconds"),
+            event.get("source_file"),
+            event.get("first_line_number"),
+            event.get("last_line_number"),
+            event.get("signal_count") or 0,
+            parser_names_json,
+            raw_event_types_json,
+            event_json,
+        ),
+    )
+    row = conn.execute(
+        "SELECT id FROM live_playback_events WHERE event_key = ?",
+        (persistent_key,),
+    ).fetchone()
+    return int(row["id"])
+
+
+def promote_live_playback_event(
+    conn: sqlite3.Connection,
+    event_key: str,
+) -> int | None:
+    """Promote one eligible live event into the official dance timeline."""
+    row = conn.execute(
+        "SELECT * FROM live_playback_events WHERE event_key = ?",
+        (event_key,),
+    ).fetchone()
+    if row is None:
+        return None
+    if row["promoted_dance_event_id"] is not None:
+        return int(row["promoted_dance_event_id"])
+    if not _live_event_is_promotable(row):
+        return None
+
+    dance_track_id = ensure_dance_track(
+        conn,
+        row["dance_system_key"],
+        row["dance_external_id"],
+        {"title": row["video_name"]},
+    )
+    source, confidence = _live_dance_source(row["source_type"])
+    conn.execute(
+        """
+        INSERT INTO dance_events (
+            played_at,
+            dance_track_id,
+            source,
+            confidence,
+            event_source,
+            event_key,
+            video_url,
+            video_name,
+            requester_display_name
+        )
+        VALUES (?, ?, ?, ?, 'vrc_log_live', ?, ?, ?, ?)
+        ON CONFLICT(event_key) DO UPDATE SET
+            dance_track_id = excluded.dance_track_id,
+            source = excluded.source,
+            confidence = excluded.confidence,
+            video_url = excluded.video_url,
+            video_name = excluded.video_name,
+            requester_display_name = excluded.requester_display_name
+        """,
+        (
+            row["actual_play_at"],
+            dance_track_id,
+            source,
+            confidence,
+            event_key,
+            row["video_url"] or row["resolved_url"] or row["routed_url"],
+            row["video_name"],
+            row["source_display_name"] or row["display_name"],
+        ),
+    )
+    event_row = conn.execute(
+        "SELECT id FROM dance_events WHERE event_key = ?",
+        (event_key,),
+    ).fetchone()
+    dance_event_id = int(event_row["id"])
+    conn.execute(
+        """
+        UPDATE live_playback_events
+        SET promoted_dance_event_id = ?, promoted_at = COALESCE(promoted_at, datetime('now'))
+        WHERE event_key = ?
+        """,
+        (dance_event_id, event_key),
+    )
+    return dance_event_id
+
+
+def mark_live_playback_event_completed(
+    conn: sqlite3.Connection,
+    event_key: str,
+    *,
+    completed_at: str,
+    played_seconds: float,
+    required_played_seconds: float,
+    reason: str,
+) -> bool:
+    """Mark a live playback row as complete enough for strict promotion."""
+    cursor = conn.execute(
+        """
+        UPDATE live_playback_events
+        SET
+            completion_status = 'completed',
+            completion_reason = ?,
+            completed_at = ?,
+            interrupted_at = NULL,
+            played_seconds = ?,
+            required_played_seconds = ?,
+            last_updated_at = datetime('now')
+        WHERE event_key = ?
+            AND completion_status = 'pending'
+            AND promoted_dance_event_id IS NULL
+        """,
+        (
+            reason,
+            completed_at,
+            round(float(played_seconds), 3),
+            round(float(required_played_seconds), 3),
+            event_key,
+        ),
+    )
+    return cursor.rowcount > 0
+
+
+def mark_live_playback_event_interrupted(
+    conn: sqlite3.Connection,
+    event_key: str,
+    *,
+    interrupted_at: str,
+    played_seconds: float | None,
+    required_played_seconds: float | None,
+    reason: str,
+) -> bool:
+    """Mark a live playback row as ineligible for official history."""
+    cursor = conn.execute(
+        """
+        UPDATE live_playback_events
+        SET
+            completion_status = 'interrupted',
+            completion_reason = ?,
+            interrupted_at = ?,
+            played_seconds = ?,
+            required_played_seconds = ?,
+            last_updated_at = datetime('now')
+        WHERE event_key = ?
+            AND completion_status = 'pending'
+            AND promoted_dance_event_id IS NULL
+        """,
+        (
+            reason,
+            interrupted_at,
+            round(float(played_seconds), 3) if played_seconds is not None else None,
+            round(float(required_played_seconds), 3) if required_played_seconds is not None else None,
+            event_key,
+        ),
+    )
+    return cursor.rowcount > 0
+
+
+def load_recent_live_playback_events(
+    path: Path | str | None = None,
+    *,
+    limit: int = 20,
+) -> list[dict]:
+    """Return recent live playback rows with decoded JSON fields."""
+    with connect_db(path) as conn:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM live_playback_events
+            ORDER BY COALESCE(actual_play_at, first_seen_at, last_updated_at) DESC, id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [_live_row_to_dict(row) for row in rows]
+
+
+def load_current_live_playback_event(path: Path | str | None = None) -> dict | None:
+    """Return the newest live playback row, if one exists."""
+    events = load_recent_live_playback_events(path, limit=1)
+    return events[0] if events else None
+
+
 def ensure_music_track(conn: sqlite3.Connection, title: str, artist: str | None) -> int:
     """Create or return a canonical music track row."""
     normalized_title = normalize_music_text(title)
@@ -493,6 +910,73 @@ def _external_id_text(value: object) -> str:
     if not text:
         raise ValueError("external id must not be empty")
     return text
+
+
+def _live_event_is_promotable(row: sqlite3.Row) -> bool:
+    return bool(
+        row["completion_status"] == "completed"
+        and row["actual_play_at"]
+        and row["dance_system_key"]
+        and row["dance_external_id"]
+        and row["duration_seconds"] is not None
+        and not bool(row["observed_mid_play"])
+    )
+
+
+def _live_dance_source(source_type: str | None) -> tuple[str, float]:
+    if source_type == "random":
+        return "random", 0.8
+    if source_type == "player":
+        return "other", 0.8
+    return "unknown", 0.5
+
+
+def _live_row_to_dict(row: sqlite3.Row) -> dict:
+    value = dict(row)
+    value["observed_mid_play"] = bool(value.get("observed_mid_play"))
+    value["parser_names"] = _json_list(value.pop("parser_names_json", "[]"))
+    value["raw_event_types"] = _json_list(value.pop("raw_event_types_json", "[]"))
+    value["event"] = _json_object(value.pop("event_json", "{}"))
+    return value
+
+
+def _json_text(value) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _json_list(value: str | None) -> list:
+    parsed = _json_object(value or "[]")
+    return parsed if isinstance(parsed, list) else []
+
+
+def _json_object(value: str | None):
+    try:
+        return json.loads(value or "{}")
+    except json.JSONDecodeError:
+        return {}
+
+
+def _bool_int(value: object) -> int:
+    return 1 if bool(value) else 0
+
+
+def _ensure_live_playback_columns(conn: sqlite3.Connection) -> None:
+    columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(live_playback_events)").fetchall()
+    }
+    additions = {
+        "last_seen_at": "TEXT",
+        "completion_status": "TEXT NOT NULL DEFAULT 'pending'",
+        "completion_reason": "TEXT",
+        "completed_at": "TEXT",
+        "interrupted_at": "TEXT",
+        "played_seconds": "REAL",
+        "required_played_seconds": "REAL",
+    }
+    for column, definition in additions.items():
+        if column not in columns:
+            conn.execute(f"ALTER TABLE live_playback_events ADD COLUMN {column} {definition}")
 
 
 def _event_key(*parts: object) -> str:

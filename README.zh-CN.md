@@ -131,6 +131,35 @@ uv run python main.py import-vrcx
 当前 importer 支持 WannaDance URL。PyPyDance、Dudu 和其他系统会被统计为
 unsupported，不会误判成 WannaDance。
 
+## 实时 VRChat 日志和 OBS Overlay
+
+捕获 VRChat Unity 输出日志：
+
+```bash
+uv run python main.py watch-vrc-log
+```
+
+启用实时 SQLite 状态和本地 OBS overlay：
+
+```bash
+uv run python main.py watch-vrc-log --live-db --overlay-port 8765
+```
+
+overlay 地址是 `http://127.0.0.1:8765/overlay`。它只绑定本机，通过
+server-sent events 更新，不依赖外部字体、图片、CDN 或网络请求。
+
+`live_playback_events` 会随着日志信号即时更新；`dance_events` 只有在显式传入
+`--promote-live` 且 live row 严格完整播放已知 `duration_seconds` 后才会写入。
+半路进房、mid-play sync、未播完离开、未播完切歌、两次播放间隔小于曲目时长的记录
+都不会进入正式历史。
+
+watcher 会识别离开房间和 VRChat 退出/视频系统关闭日志，用它们清空 overlay 当前播放，
+并把尚未完成的 live row 标记为 `interrupted`。
+
+已知限制：PyPyDance 半路进房且歌曲已经播放一半时，overlay 可能短暂显示 URL 后回到
+“Waiting for playback”，即使房间里仍在正常播放。先把它作为后续 fixture/bug 处理，
+不要依赖它做 promotion。
+
 ## Queued-Self 清单
 
 queued-self 清单可以直接写外部 id。同步时通过命令行指定默认舞蹈系统：
@@ -163,6 +192,7 @@ uv run python main.py sync-queued-self --system wannadance
 {
   "self_user_id": null,
   "vrcx_db_path": null,
+  "vrc_log_dir": null,
   "wanna_cache_dir": null,
   "recordings_dir": null
 }

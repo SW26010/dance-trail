@@ -237,14 +237,12 @@ Stores VRCX import provenance and parse results.
 | `event_key` | TEXT NOT NULL UNIQUE | Deduplication key |
 | `imported_at` | TEXT | Import timestamp |
 
-### Planned `live_playback_events`
+### `live_playback_events`
 
-Planned runtime table for `watch-vrc-log --live-db`. This table should hold the
-latest folded state for each in-progress playback event and be upserted as raw
-log signals arrive.
+Runtime table for `watch-vrc-log --live-db`. This table holds the latest folded
+state for each live playback event and is upserted as raw log signals arrive.
 
-Expected columns should mirror the forensic `playback_events.jsonl` shape,
-including:
+Columns mirror the forensic `playback_events.jsonl` shape, including:
 
 - `event_key` and `canonical_key`
 - `first_seen_at`, `request_at`, `resolved_at`, `video_loaded_at`,
@@ -256,13 +254,17 @@ including:
 - source fields such as `source_type` and `source_display_name`
 - `video_url`, `resolved_url`, `video_name`, `duration_seconds`, and raw-line
   provenance
-- `last_updated_at` and a promotion marker such as `promoted_dance_event_id`
+- completion fields such as `completion_status`, `completion_reason`,
+  `completed_at`, `interrupted_at`, `played_seconds`, and
+  `required_played_seconds`
+- `last_updated_at`, `promoted_dance_event_id`, and `promoted_at`
 
-Rows from this table can be promoted into `dance_events` once they have a stable
-playback time. Initial promotion should prefer rows with `actual_play_at` and
-`observed_mid_play = false`; mid-play observations should remain useful for the
-OBS overlay and forensic review but should not automatically become normal
-delay/statistics events.
+Rows from this table can be promoted into `dance_events` only through the
+explicit live promotion path. Promotion requires `completion_status =
+completed`, `actual_play_at`, known `duration_seconds`,
+`observed_mid_play = false`, and parsed dance identity fields. Mid-play
+observations and interrupted rows remain useful for the OBS overlay and forensic
+review but must not automatically become normal delay/statistics events.
 
 ## Relationship Diagram
 

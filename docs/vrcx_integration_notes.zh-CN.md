@@ -181,10 +181,10 @@ Dudu、VRDancing 和其他系统目前只识别为 unsupported 或 unknown，等
 uv run python main.py watch-vrc-log
 ```
 
-这个命令目前定位为取证工具。它会 tail VRChat `output_log_*.txt`，在启用时镜像
+基础命令仍然是取证捕获路径。它会 tail VRChat `output_log_*.txt`，在启用时镜像
 原始行，把视频相关候选行写入 `candidates.jsonl`，把解析后的信号写入
 `parsed_events.jsonl`，把按歌曲折叠后的记录写入 `playback_events.jsonl`，并把
-session 存到 `analysis/vrc_log_capture/`。它暂不写入 `dance_events`。
+session 存到 `analysis/vrc_log_capture/`。
 
 watcher 默认读取 `data/local_config.json` 的 `vrc_log_dir`，否则回退到 Windows
 LocalLow 下的 VRChat 标准日志目录。默认从当前日志文件末尾开始，避免游玩时重扫旧
@@ -232,19 +232,16 @@ SQLite 写入完成持久化。
 `actual_play_at`、`actual_play_method`、`observed_mid_play`、
 `elapsed_at_first_seen_seconds`、来源字段、resolve/load 时序和 raw line 溯源。
 
-## 实时数据库和 OBS 叠加层计划
+## 实时数据库和 OBS 叠加层
 
-下一步应保留当前 JSONL 取证输出，同时增加实时更新管线。
+实时更新管线保留 JSONL 取证输出，同时增加可选运行时状态：
 
-1. 重构 `PlaybackEventBuilder`，让折叠后的 playback event 每次变化时都能触发 update callback。
-2. 新增实时 SQLite 表，暂定 `live_playback_events`，以 `event_key` 为键。request、
-   resolve、load、progress、sync、actual-play 信号到来时持续 upsert。
-3. 只有在记录足够稳定时，再把 live row 推进 `dance_events`。第一版 promotion 条件可以是：
-   - `actual_play_at` 存在且 `observed_mid_play` 为 false
-   - 或某条 live row 已经 idle 足够久，可以视为完成
-4. 保留 `playback_events.jsonl` 作为 session artifact。它仍然适合调试，也适合把真实
-   capture 回放成测试 fixture。
-5. 增加只绑定本机的 overlay server，例如：
+- `PlaybackEventBuilder` 会在折叠后的 playback event 每次变化时触发 update callback。
+- `live_playback_events` 会在 request、resolve、load、progress、sync、actual-play
+  信号到来时持续 upsert。
+- `playback_events.jsonl` 仍然作为 session artifact，适合调试，也适合把真实 capture
+  回放成测试 fixture。
+- 本地 overlay server 可以这样启动：
 
 ```bash
 uv run python main.py watch-vrc-log --live-db --overlay-port 8765
@@ -256,7 +253,7 @@ uv run python main.py watch-vrc-log --live-db --overlay-port 8765
 http://127.0.0.1:8765/overlay
 ```
 
-overlay 页面通过 server-sent events 或 WebSocket 读取同一份 live state。第一版显示：
+overlay 页面通过 server-sent events 读取同一份 live state。它显示：
 
 - 当前时钟时间
 - 当前曲目标题
@@ -268,6 +265,16 @@ overlay 页面通过 server-sent events 或 WebSocket 读取同一份 live state
 
 页面应完全本地自包含：不依赖外部字体、图片、CDN 或网络请求。OBS 应能在整场录制中
 保持打开，不受联网状态影响。
+
+严格 promotion 到 `dance_events` 需要显式传入 `--promote-live`。promotion 要求 live row
+已经 `completion_status = completed`，存在 `actual_play_at`，有已知 `duration_seconds`，
+没有 `observed_mid_play`，并且有解析出的 dance system/external id。watcher 只有在观察到
+完整时长后才标记完成。下一首过早出现、离开房间、退出 VRChat 或视频系统关闭时，尚未
+完成的 live row 会标记为 `interrupted`，不会推进正式历史。
+
+已知限制：PyPyDance 半路进房且歌曲已经播放一半时，overlay 仍可能无法保持当前播放。
+手测表现是短暂显示 URL 后回到 “Waiting for playback”，但房间里仍在正常播放。修复前
+需要先保存真实 fixture，不应为它放宽 promotion 语义。
 
 ## 还不能完全确定的事
 
@@ -287,11 +294,10 @@ overlay 页面通过 server-sent events 或 WebSocket 读取同一份 live state
 
 ## 推荐下一步
 
-1. 实现 live playback upsert，以及从 `live_playback_events` 推进到 `dance_events` 的路径。
-2. 基于 live state 实现本地 OBS overlay 页面。
-3. 继续收集真实 PyPyDance、Dudu、VRDancing 和其他舞蹈系统的 VRCX 行作为 fixture。
-4. 看到输入形状后，再为每个新舞蹈系统设计自己的扩展表。
-5. 增加一个修正或回填命令，用来处理现有 `unknown` 来源。
+1. 继续收集真实 PyPyDance、Dudu、VRDancing 和其他舞蹈系统的 VRCX 行作为 fixture。
+2. 为 PyPyDance 半路进房 overlay 重置问题增加 fixture。
+3. 看到输入形状后，再为每个新舞蹈系统设计自己的扩展表。
+4. 增加一个修正或回填命令，用来处理现有 `unknown` 来源。
 
 ## 结论
 

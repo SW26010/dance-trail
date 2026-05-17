@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -18,7 +19,12 @@ from dancing_log.storage import (
     connect_db,
     ensure_dance_track,
     load_dance_log,
+    load_current_live_playback_event,
     load_dance_tracks,
+    mark_live_playback_event_completed,
+    make_live_playback_event_key,
+    promote_live_playback_event,
+    upsert_live_playback_event,
 )
 from dancing_log.vrcx_importer import import_vrcx_database
 from dancing_log.wanna_catalog import upsert_catalog
@@ -60,9 +66,128 @@ class SQLiteRuntimeTest(unittest.TestCase):
             self.assertIn("wannadance_songs", tables)
             self.assertIn("music_tracks", tables)
             self.assertIn("dance_track_music_links", tables)
+            self.assertIn("live_playback_events", tables)
             self.assertNotIn("songs", tables)
             self.assertIn("dance_track_id", dance_event_columns)
             self.assertNotIn("song_id", dance_event_columns)
+
+    def test_live_playback_upsert_is_idempotent_and_session_scoped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "app.sqlite3"
+            event = {
+                "event_key": "wannadance:3114#1",
+                "canonical_key": "wannadance:3114",
+                "first_seen_at": "2026.05.17 15:30:00",
+                "actual_play_at": None,
+                "observed_mid_play": False,
+                "video_url": "https://api.udon.dance/Api/Songs/play?id=3114",
+                "dance_system_key": WANNA_SYSTEM_KEY,
+                "dance_external_id": "3114",
+                "video_name": "First Title",
+                "source_type": "player",
+                "source_display_name": "Alice",
+                "signal_count": 1,
+                "parser_names": ["video_playback_resolve"],
+                "raw_event_types": ["resolve-attempt"],
+            }
+
+            key_one = make_live_playback_event_key("session-one", event["event_key"])
+            key_two = make_live_playback_event_key("session-two", event["event_key"])
+            self.assertNotEqual(key_one, key_two)
+
+            with connect_db(db_path) as conn:
+                row_id = upsert_live_playback_event(conn, event, session_id="session-one")
+                event["video_name"] = "Updated Title"
+                event["signal_count"] = 2
+                self.assertEqual(
+                    upsert_live_playback_event(conn, event, session_id="session-one"),
+                    row_id,
+                )
+                conn.commit()
+                rows = conn.execute("SELECT * FROM live_playback_events").fetchall()
+
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["video_name"], "Updated Title")
+            self.assertEqual(rows[0]["signal_count"], 2)
+            self.assertEqual(json.loads(rows[0]["parser_names_json"]), ["video_playback_resolve"])
+            current = load_current_live_playback_event(db_path)
+            self.assertEqual(current["event"]["video_name"], "Updated Title")
+            self.assertFalse(current["observed_mid_play"])
+
+    def test_promote_live_playback_event_is_explicit_and_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "app.sqlite3"
+            event = {
+                "event_key": "wannadance:3114#1",
+                "canonical_key": "wannadance:3114",
+                "first_seen_at": "2026.05.17 15:30:00",
+                "actual_play_at": "2026.05.17 15:30:10",
+                "observed_mid_play": False,
+                "duration_seconds": 2,
+                "video_url": "https://api.udon.dance/Api/Songs/play?id=3114",
+                "dance_system_key": WANNA_SYSTEM_KEY,
+                "dance_external_id": "3114",
+                "video_name": "Promoted Title",
+                "source_type": "player",
+                "source_display_name": "Alice",
+                "signal_count": 3,
+                "parser_names": ["usharp_delayed_video_ready"],
+                "raw_event_types": ["actual-play"],
+            }
+
+            with connect_db(db_path) as conn:
+                upsert_live_playback_event(conn, event, session_id="session-one")
+                self.assertEqual(conn.execute("SELECT count(*) FROM dance_events").fetchone()[0], 0)
+                live_key = make_live_playback_event_key("session-one", event["event_key"])
+                self.assertIsNone(promote_live_playback_event(conn, live_key))
+                self.assertTrue(
+                    mark_live_playback_event_completed(
+                        conn,
+                        live_key,
+                        completed_at="2026.05.17 15:30:12",
+                        played_seconds=2,
+                        required_played_seconds=2,
+                        reason="test_complete",
+                    )
+                )
+                first_id = promote_live_playback_event(conn, live_key)
+                second_id = promote_live_playback_event(conn, live_key)
+                conn.commit()
+                dance_rows = conn.execute("SELECT * FROM dance_events").fetchall()
+                live_row = conn.execute("SELECT * FROM live_playback_events").fetchone()
+
+            self.assertEqual(first_id, second_id)
+            self.assertEqual(len(dance_rows), 1)
+            self.assertEqual(dance_rows[0]["source"], "other")
+            self.assertEqual(dance_rows[0]["requester_display_name"], "Alice")
+            self.assertEqual(live_row["promoted_dance_event_id"], first_id)
+            self.assertEqual(live_row["completion_status"], "completed")
+
+    def test_promote_live_playback_event_skips_mid_play(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "app.sqlite3"
+            event = {
+                "event_key": "pypydance:4678#1",
+                "canonical_key": "pypydance:4678",
+                "first_seen_at": "2026.05.17 17:15:30",
+                "actual_play_at": "2026.05.17 17:14:12.67008",
+                "observed_mid_play": True,
+                "dance_system_key": "pypydance",
+                "dance_external_id": "4678",
+                "source_type": "player",
+                "signal_count": 2,
+                "parser_names": ["vrcx_video_play"],
+                "raw_event_types": ["playback-progress"],
+            }
+
+            with connect_db(db_path) as conn:
+                upsert_live_playback_event(conn, event, session_id="session-one")
+                live_key = make_live_playback_event_key("session-one", event["event_key"])
+                self.assertIsNone(promote_live_playback_event(conn, live_key))
+                conn.commit()
+                event_count = conn.execute("SELECT count(*) FROM dance_events").fetchone()[0]
+
+            self.assertEqual(event_count, 0)
 
     def test_wanna_catalog_writes_tracks_specific_fields_and_music_links(self):
         with tempfile.TemporaryDirectory() as tmp:

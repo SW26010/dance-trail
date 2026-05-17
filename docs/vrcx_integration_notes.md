@@ -282,12 +282,11 @@ and exposed through:
 uv run python main.py watch-vrc-log
 ```
 
-This command is intentionally forensic-only for the first iterations. It tails
-VRChat `output_log_*.txt` files, mirrors raw lines when enabled, writes
-video-related candidates to `candidates.jsonl`, writes parsed playback-like
-signals to `parsed_events.jsonl`, writes folded per-song rows to
-`playback_events.jsonl`, and stores the session under `analysis/vrc_log_capture/`.
-It does not write `dance_events`.
+The base command remains a forensic capture path. It tails VRChat
+`output_log_*.txt` files, mirrors raw lines when enabled, writes video-related
+candidates to `candidates.jsonl`, writes parsed playback-like signals to
+`parsed_events.jsonl`, writes folded per-song rows to `playback_events.jsonl`,
+and stores the session under `analysis/vrc_log_capture/`.
 
 The watcher defaults to `data/local_config.json` key `vrc_log_dir`, falling back
 to the standard Windows LocalLow VRChat log directory. It starts from the current
@@ -344,23 +343,18 @@ that can keep richer playback timing fields than VRCX's video table:
 `elapsed_at_first_seen_seconds`, source fields, resolve/load timing, and raw
 line provenance.
 
-## Live Database and OBS Overlay Plan
+## Live Database and OBS Overlay
 
-The next implementation step should keep the forensic JSONL capture, but add a
-live update pipeline.
+The live update pipeline keeps the forensic JSONL capture and adds optional
+runtime state:
 
-1. Refactor `PlaybackEventBuilder` to emit an update callback every time a
-   folded playback event changes.
-2. Add a live SQLite table, tentatively `live_playback_events`, keyed by
-   `event_key`. It should be upserted as request, resolve, load, progress,
-   sync, and actual-play signals arrive.
-3. Promote stable live rows into `dance_events` only when the record is safe
-   enough. Good initial promotion triggers are:
-   - `actual_play_at` exists and `observed_mid_play` is false
-   - or a row has been idle long enough to be considered complete
-4. Keep `playback_events.jsonl` as a session artifact. It remains useful for
-   debugging and for replaying real captures into tests.
-5. Add a local-only overlay server, for example:
+- `PlaybackEventBuilder` emits an update callback whenever a folded playback
+  event changes.
+- `live_playback_events` is upserted as request, resolve, load, progress, sync,
+  and actual-play signals arrive.
+- `playback_events.jsonl` remains a session artifact for debugging and for
+  replaying real captures into tests.
+- A local-only overlay server can be started with:
 
 ```bash
 uv run python main.py watch-vrc-log --live-db --overlay-port 8765
@@ -372,8 +366,7 @@ The server should bind to `127.0.0.1` and expose an OBS Browser Source page at:
 http://127.0.0.1:8765/overlay
 ```
 
-The overlay should use server-sent events or WebSocket updates from the same
-live state. The first version should show:
+The overlay uses server-sent events from the same live state. It shows:
 
 - current clock time
 - current track title
@@ -387,16 +380,27 @@ The page should be self-contained and local: no external fonts, images, CDNs, or
 network calls. OBS should be able to keep it open for a whole recording session
 without depending on internet access.
 
+Strict promotion into `dance_events` is explicit behind `--promote-live`.
+Promotion requires a completed live row with `completion_status = completed`,
+`actual_play_at`, known `duration_seconds`, no `observed_mid_play`, and a parsed
+dance system/external id. The watcher marks completion only after observing the
+full duration. If a next song appears too early, or a room leave / VRChat quit /
+video shutdown appears before completion, the pending live row is marked
+`interrupted` and is not promoted.
+
+Known limitation: joining a PyPyDance room mid-song can still fail to keep the
+overlay current. In manual testing the overlay briefly showed the URL, then
+returned to "Waiting for playback" even though the room continued playing. This
+needs a real fixture before changing promotion behavior.
+
 ## Recommended Next Steps
 
-1. Implement live playback upserts and a promotion path from
-   `live_playback_events` to `dance_events`.
-2. Implement the local OBS overlay page on top of the live state.
-3. Keep collecting inspection fixtures for real PyPyDance, Dudu, VRDancing, and
+1. Keep collecting inspection fixtures for real PyPyDance, Dudu, VRDancing, and
    other dance-system VRCX rows.
-4. Design one extension table per additional dance system only after the input
+2. Add a fixture for the PyPyDance mid-room-join overlay reset case.
+3. Design one extension table per additional dance system only after the input
    shape is known.
-5. Add a correction/backfill command for existing `unknown` source rows.
+4. Add a correction/backfill command for existing `unknown` source rows.
 
 Deferred follow-up:
 

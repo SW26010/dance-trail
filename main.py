@@ -309,6 +309,23 @@ def cmd_watch_vrc_log():
         action="store_true",
         help="Do not mirror all raw log lines; candidate and parsed JSONL files are still written",
     )
+    parser.add_argument("--app-db", default=None, help="SQLite path for live DB writes")
+    parser.add_argument(
+        "--live-db",
+        action="store_true",
+        help="Upsert folded playback state into live_playback_events",
+    )
+    parser.add_argument(
+        "--promote-live",
+        action="store_true",
+        help="Promote eligible live events into dance_events; implies --live-db",
+    )
+    parser.add_argument(
+        "--overlay-port",
+        type=int,
+        default=None,
+        help="Start a local OBS overlay server on 127.0.0.1 at this port",
+    )
     parser.add_argument(
         "--poll-seconds",
         type=float,
@@ -333,8 +350,12 @@ def cmd_watch_vrc_log():
         log_dir=log_dir,
         output_dir=args.output_dir,
         session_name=args.session_name,
+        app_db_path=args.app_db,
         from_start=args.from_start,
         include_raw=not args.no_raw,
+        live_db=args.live_db,
+        promote_live=args.promote_live,
+        overlay_port=args.overlay_port,
         poll_seconds=args.poll_seconds,
         stop_after_idle_seconds=args.stop_after_idle_seconds,
     )
@@ -345,6 +366,12 @@ def cmd_watch_vrc_log():
     print(f"  candidate lines: {stats.candidate_lines}")
     print(f"  parsed events: {stats.parsed_events}")
     print(f"  playback events: {stats.playback_events}")
+    if stats.live_db_updates:
+        print(f"  live DB updates: {stats.live_db_updates}")
+    if args.promote_live:
+        print(f"  live promotions: {stats.live_promotions}")
+    if stats.overlay_url:
+        print(f"  overlay URL: {stats.overlay_url}")
     if stats.delay_metrics:
         print(
             "  delay to actual play: "

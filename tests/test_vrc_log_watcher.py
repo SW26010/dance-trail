@@ -5,8 +5,8 @@ import time
 import unittest
 from pathlib import Path
 
-from dancing_log.storage import WANNA_SYSTEM_KEY
-from dancing_log.vrc_log_watcher import parse_vrc_log_line, watch_vrc_logs
+from dancing_log.storage import WANNA_SYSTEM_KEY, connect_db
+from dancing_log.vrc_log_watcher import parse_vrc_lifecycle_event, parse_vrc_log_line, watch_vrc_logs
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -120,6 +120,25 @@ class VrcLogParserTest(unittest.TestCase):
         self.assertEqual(events[0].event_type, "playback-sync")
         self.assertEqual(events[0].parser_name, "usharp_playing_synced")
         self.assertEqual(events[0].to_capture_record()["dance_external_id"], "3823")
+
+    def test_parses_room_and_application_lifecycle_events(self):
+        entering = parse_vrc_lifecycle_event(
+            "2026.05.17 15:30:00 Debug - [Behaviour] Entering Room: PyPyDance"
+        )
+        left = parse_vrc_lifecycle_event(
+            "2026.05.17 15:30:05 Debug - [Behaviour] OnLeftRoom"
+        )
+        quit_event = parse_vrc_lifecycle_event(
+            "2026.05.17 15:30:06 Debug - VRCApplication: HandleApplicationQuit at 313.2613"
+        )
+
+        self.assertEqual(entering["event_type"], "room-entering")
+        self.assertEqual(entering["room_name"], "PyPyDance")
+        self.assertFalse(entering["clear_current"])
+        self.assertEqual(left["event_type"], "room-left")
+        self.assertTrue(left["clear_current"])
+        self.assertEqual(quit_event["event_type"], "application-quit")
+        self.assertEqual(quit_event["message"], "VRChat ended")
 
     def test_ignores_unrelated_lines(self):
         self.assertEqual(parse_vrc_log_line("2026.05.17 15:30:05 Log - Joined room"), [])
@@ -409,6 +428,271 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertEqual(playback[0]["synced_play_at"], "2026.05.17 15:30:00")
             self.assertIsNone(playback[0]["delay_to_actual_seconds"])
             self.assertIn("playback-sync", playback[0]["raw_event_types"])
+
+    def test_watcher_live_db_updates_without_promoting_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            db_path = root / "app.sqlite3"
+            (log_dir / "output_log_0001.txt").write_text(
+                "2026.05.17 15:30:00 Debug - [Video Playback] "
+                "Resolving URL 'https://api.udon.dance/Api/Songs/play?id=3114'\n"
+                "2026.05.17 15:30:10 Debug - "
+                "[<color=#9C6994>USharpVideo (WannaDance)</color>] "
+                "DelayedVideoReady: Time's up, let's play\n",
+                encoding="utf-8",
+            )
+
+            stats = watch_vrc_logs(
+                log_dir=log_dir,
+                output_dir=root / "capture",
+                session_name="live-db",
+                app_db_path=db_path,
+                from_start=True,
+                live_db=True,
+                poll_seconds=0.01,
+                stop_after_idle_seconds=0.05,
+            )
+
+            self.assertGreaterEqual(stats.live_db_updates, 2)
+            self.assertEqual(stats.live_promotions, 0)
+            self.assertTrue((stats.session_dir / "playback_events.jsonl").exists())
+            with connect_db(db_path) as conn:
+                live_count = conn.execute("SELECT count(*) FROM live_playback_events").fetchone()[0]
+                event_count = conn.execute("SELECT count(*) FROM dance_events").fetchone()[0]
+                row = conn.execute("SELECT * FROM live_playback_events").fetchone()
+            self.assertEqual(live_count, 1)
+            self.assertEqual(event_count, 0)
+            self.assertEqual(row["dance_external_id"], "3114")
+            self.assertEqual(row["actual_play_at"], "2026.05.17 15:30:10")
+
+    def test_watcher_promotes_actual_play_when_explicitly_enabled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            db_path = root / "app.sqlite3"
+            (log_dir / "output_log_0001.txt").write_text(
+                '2026.05.17 15:30:00 Debug - [VRCX] VideoPlay(PyPyDance) '
+                '"https://api.udon.dance/Api/Songs/play?id=3114",0,2,'
+                '"$3114. Promoted Title (Alice)"\n'
+                "2026.05.17 15:30:00 Debug - "
+                "[<color=#9C6994>USharpVideo (WannaDance)</color>] "
+                "Started video load for URL: https://api.udon.dance/Api/Songs/play?id=3114, "
+                "requested by Alice\n"
+                "2026.05.17 15:30:10 Debug - "
+                "[<color=#9C6994>USharpVideo (WannaDance)</color>] "
+                "DelayedVideoReady: Time's up, let's play\n"
+                "2026.05.17 15:30:12 Log - Still dancing\n",
+                encoding="utf-8",
+            )
+
+            stats = watch_vrc_logs(
+                log_dir=log_dir,
+                output_dir=root / "capture",
+                session_name="promote",
+                app_db_path=db_path,
+                from_start=True,
+                promote_live=True,
+                poll_seconds=0.01,
+                stop_after_idle_seconds=0.05,
+            )
+
+            self.assertEqual(stats.live_promotions, 1)
+            with connect_db(db_path) as conn:
+                event_rows = conn.execute("SELECT * FROM dance_events").fetchall()
+                live_row = conn.execute("SELECT * FROM live_playback_events").fetchone()
+            self.assertEqual(len(event_rows), 1)
+            self.assertEqual(event_rows[0]["source"], "other")
+            self.assertEqual(event_rows[0]["requester_display_name"], "Alice")
+            self.assertEqual(live_row["promoted_dance_event_id"], event_rows[0]["id"])
+            self.assertEqual(live_row["completion_status"], "completed")
+
+    def test_watcher_does_not_promote_when_playback_has_not_completed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            db_path = root / "app.sqlite3"
+            (log_dir / "output_log_0001.txt").write_text(
+                '2026.05.17 15:30:00 Debug - [VRCX] VideoPlay(PyPyDance) '
+                '"https://api.udon.dance/Api/Songs/play?id=3114",0,10,'
+                '"$3114. Long Song (Alice)"\n'
+                "2026.05.17 15:30:00 Debug - "
+                "[<color=#9C6994>USharpVideo (WannaDance)</color>] "
+                "DelayedVideoReady: Time's up, let's play\n"
+                "2026.05.17 15:30:05 Log - Leaving before the dance is done\n",
+                encoding="utf-8",
+            )
+
+            stats = watch_vrc_logs(
+                log_dir=log_dir,
+                output_dir=root / "capture",
+                session_name="early-stop-no-promote",
+                app_db_path=db_path,
+                from_start=True,
+                promote_live=True,
+                poll_seconds=0.01,
+                stop_after_idle_seconds=0.05,
+            )
+
+            self.assertEqual(stats.live_promotions, 0)
+            with connect_db(db_path) as conn:
+                event_count = conn.execute("SELECT count(*) FROM dance_events").fetchone()[0]
+                live_row = conn.execute("SELECT * FROM live_playback_events").fetchone()
+            self.assertEqual(event_count, 0)
+            self.assertEqual(live_row["completion_status"], "pending")
+
+    def test_watcher_marks_room_leave_interrupted_without_promoting(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            db_path = root / "app.sqlite3"
+            (log_dir / "output_log_0001.txt").write_text(
+                '2026.05.17 15:30:00 Debug - [VRCX] VideoPlay(PyPyDance) '
+                '"https://api.udon.dance/Api/Songs/play?id=3114",0,10,'
+                '"$3114. Long Song (Alice)"\n'
+                "2026.05.17 15:30:00 Debug - "
+                "[<color=#9C6994>USharpVideo (WannaDance)</color>] "
+                "DelayedVideoReady: Time's up, let's play\n"
+                "2026.05.17 15:30:05 Debug - [Behaviour] OnLeftRoom\n",
+                encoding="utf-8",
+            )
+
+            stats = watch_vrc_logs(
+                log_dir=log_dir,
+                output_dir=root / "capture",
+                session_name="room-left-interrupted",
+                app_db_path=db_path,
+                from_start=True,
+                live_db=True,
+                poll_seconds=0.01,
+                stop_after_idle_seconds=0.05,
+            )
+
+            self.assertEqual(stats.live_promotions, 0)
+            self.assertEqual(stats.lifecycle_events, 1)
+            with connect_db(db_path) as conn:
+                event_count = conn.execute("SELECT count(*) FROM dance_events").fetchone()[0]
+                live_row = conn.execute("SELECT * FROM live_playback_events").fetchone()
+            self.assertEqual(event_count, 0)
+            self.assertEqual(live_row["completion_status"], "interrupted")
+            self.assertEqual(live_row["completion_reason"], "room_left")
+            self.assertEqual(live_row["played_seconds"], 5.0)
+
+    def test_watcher_marks_application_quit_interrupted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            db_path = root / "app.sqlite3"
+            (log_dir / "output_log_0001.txt").write_text(
+                '2026.05.17 15:30:00 Debug - [VRCX] VideoPlay(PyPyDance) '
+                '"http://api.pypy.dance/video?id=4666",0,10,'
+                '"4666 : Example Song (Alice)"\n'
+                "2026.05.17 15:30:00 Debug - "
+                "[<color=#9C6994>USharpVideo (WannaDance)</color>] "
+                "DelayedVideoReady: Time's up, let's play\n"
+                "2026.05.17 15:30:04 Debug - VRCApplication: HandleApplicationQuit at 313.2613\n",
+                encoding="utf-8",
+            )
+
+            watch_vrc_logs(
+                log_dir=log_dir,
+                output_dir=root / "capture",
+                session_name="quit-interrupted",
+                app_db_path=db_path,
+                from_start=True,
+                live_db=True,
+                poll_seconds=0.01,
+                stop_after_idle_seconds=0.05,
+            )
+
+            with connect_db(db_path) as conn:
+                live_row = conn.execute("SELECT * FROM live_playback_events").fetchone()
+            self.assertEqual(live_row["completion_status"], "interrupted")
+            self.assertEqual(live_row["completion_reason"], "application_quit")
+
+    def test_watcher_marks_cut_song_interrupted_instead_of_promoting(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            db_path = root / "app.sqlite3"
+            (log_dir / "output_log_0001.txt").write_text(
+                '2026.05.17 15:30:00 Debug - [VRCX] VideoPlay(PyPyDance) '
+                '"https://api.udon.dance/Api/Songs/play?id=3114",0,10,'
+                '"$3114. First Song (Alice)"\n'
+                "2026.05.17 15:30:00 Debug - "
+                "[<color=#9C6994>USharpVideo (WannaDance)</color>] "
+                "DelayedVideoReady: Time's up, let's play\n"
+                '2026.05.17 15:30:05 Debug - [VRCX] VideoPlay(PyPyDance) '
+                '"https://api.udon.dance/Api/Songs/play?id=5038",0,10,'
+                '"$5038. Next Song (Bob)"\n',
+                encoding="utf-8",
+            )
+
+            stats = watch_vrc_logs(
+                log_dir=log_dir,
+                output_dir=root / "capture",
+                session_name="cut-song-no-promote",
+                app_db_path=db_path,
+                from_start=True,
+                promote_live=True,
+                poll_seconds=0.01,
+                stop_after_idle_seconds=0.05,
+            )
+
+            self.assertEqual(stats.live_promotions, 0)
+            with connect_db(db_path) as conn:
+                event_count = conn.execute("SELECT count(*) FROM dance_events").fetchone()[0]
+                rows = conn.execute(
+                    """
+                    SELECT dance_external_id, completion_status, completion_reason
+                    FROM live_playback_events
+                    ORDER BY dance_external_id
+                    """
+                ).fetchall()
+            self.assertEqual(event_count, 0)
+            by_id = {row["dance_external_id"]: row for row in rows}
+            self.assertEqual(by_id["3114"]["completion_status"], "interrupted")
+            self.assertEqual(by_id["3114"]["completion_reason"], "superseded_before_completion")
+            self.assertEqual(by_id["5038"]["completion_status"], "pending")
+
+    def test_watcher_does_not_promote_mid_play(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            db_path = root / "app.sqlite3"
+            (log_dir / "output_log_0001.txt").write_text(
+                "2026.05.17 15:30:00 Debug - [Video Playback] "
+                "Attempting to resolve URL 'http://api.pypy.dance/video?id=4603'\n"
+                '2026.05.17 15:30:00 Debug - [VRCX] VideoPlay(PyPyDance) '
+                '"http://api.pypy.dance/video?id=4603",153.3415,177,'
+                '"4603 : Spice Girls - Wannabe (Nanashi Neko)"\n',
+                encoding="utf-8",
+            )
+
+            stats = watch_vrc_logs(
+                log_dir=log_dir,
+                output_dir=root / "capture",
+                session_name="mid-play-no-promote",
+                app_db_path=db_path,
+                from_start=True,
+                promote_live=True,
+                poll_seconds=0.01,
+                stop_after_idle_seconds=0.05,
+            )
+
+            self.assertEqual(stats.live_promotions, 0)
+            with connect_db(db_path) as conn:
+                event_count = conn.execute("SELECT count(*) FROM dance_events").fetchone()[0]
+                live_row = conn.execute("SELECT * FROM live_playback_events").fetchone()
+            self.assertEqual(event_count, 0)
+            self.assertEqual(live_row["observed_mid_play"], 1)
 
 
 if __name__ == "__main__":

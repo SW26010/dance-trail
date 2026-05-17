@@ -187,6 +187,24 @@ event view is `playback_events.jsonl`, which tracks request, resolve, load,
 actual-play, source, mid-play sync, and delay fields when those signals appear
 in the VRChat log.
 
+For live local state and OBS overlay output:
+
+```bash
+uv run python main.py watch-vrc-log --live-db --overlay-port 8765
+```
+
+The local overlay page is available at `http://127.0.0.1:8765/overlay`. It is
+self-contained, binds only to localhost, and updates through server-sent events.
+`live_playback_events` is updated immediately as log signals arrive; official
+`dance_events` are written only when `--promote-live` is passed and the live row
+strictly completed the full known duration.
+
+Room leave and VRChat quit/shutdown log events clear the overlay's current
+playback and mark pending live rows as interrupted. One known limitation remains:
+joining a PyPyDance room mid-song can briefly show the URL and then return the
+overlay to "Waiting for playback" even though the room is still playing. Keep
+that as a fixture target rather than relying on it for promotion.
+
 ## Queued-Self Manifests
 
 Queued-self manifests can use bare external ids. Pass the dance system on the
