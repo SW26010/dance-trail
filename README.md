@@ -187,6 +187,19 @@ event view is `playback_events.jsonl`, which tracks request, resolve, load,
 actual-play, source, mid-play progress, and delay fields when those signals appear
 in the VRChat log.
 
+For deterministic offline replay of a fixed corpus, use the replay helper
+instead of `watch-vrc-log --from-start`:
+
+```bash
+python scripts/replay_vrc_logs.py baseline --log-dir analysis/vrc_logs --output analysis/replay_gt/current-head
+python scripts/replay_vrc_logs.py compare --baseline analysis/replay_gt/current-head --output analysis/replay_runs/post-refactor --manual-gt analysis/promote_GT/sample-history.txt --vrcx-db "path/to/vrcx-snapshot/VRCX.sqlite3"
+```
+
+`baseline` and `compare` replay every matched log file in filename order and
+write ignored artifacts under `analysis/`. `diff_report.md` compares folded
+playback events, live SQLite promotion results, the optional manual GT file, and
+an optional read-only VRCX row count for the manual window.
+
 For live local state and OBS overlay output:
 
 ```bash
@@ -197,7 +210,7 @@ The local overlay page is available at `http://127.0.0.1:8765/overlay`. It is
 self-contained, binds only to localhost, and updates through server-sent events.
 `live_playback_events` is updated immediately as log signals arrive; official
 `dance_events` are written only when `--promote-live` is passed and the live row
-strictly completed the full known duration.
+has played at least 80% of the known `duration_seconds`.
 
 Room leave and VRChat quit/shutdown log events clear the overlay's current
 playback and mark pending live rows as interrupted. Entering-room status is
@@ -208,6 +221,11 @@ WannaDance `PreviewVideo` lines suppress the preview player's load/resolve/start
 noise, but a later real VRCX `VideoPlay` for the same song is still accepted.
 Same-song retry/resolve signals are folded back into the active playback event,
 so the overlay keeps the VRCX title instead of falling back to a raw URL.
+
+WannaDance `VideoQueueManager` queue JSON and `DeserializeVideoUserData` lines
+are parsed as metadata only. They can fill `songId`, title, player name,
+duration, and `duration_source = wanna_queue_json` on a real playback event, but
+they do not create playback by themselves and do not depend on the catalog DB.
 
 WannaDance/PyPyDance `Playing synced` lines are recorded as `synced_play_at`
 only; they do not by themselves clear the overlay or mark a row as mid-play.

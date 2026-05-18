@@ -252,8 +252,8 @@ Columns mirror the forensic `playback_events.jsonl` shape, including:
 - parsed dance identity fields such as `dance_system_key` and
   `dance_external_id`
 - source fields such as `source_type` and `source_display_name`
-- `video_url`, `resolved_url`, `video_name`, `duration_seconds`, and raw-line
-  provenance
+- `video_url`, `resolved_url`, `video_name`, `duration_seconds`,
+  `duration_source`, and raw-line provenance
 - completion fields such as `completion_status`, `completion_reason`,
   `completed_at`, `interrupted_at`, `played_seconds`, and
   `required_played_seconds`
@@ -262,10 +262,14 @@ Columns mirror the forensic `playback_events.jsonl` shape, including:
 Rows from this table can be promoted into `dance_events` only through the
 explicit live promotion path. Promotion requires `completion_status =
 completed`, `actual_play_at`, known `duration_seconds`,
-`observed_mid_play = false`, and parsed dance identity fields. Mid-play
-observations may remain `pending` so the OBS overlay can show the current track
-after a mid-room join, and interrupted rows remain useful for forensic review.
-Neither case should automatically become a normal delay/statistics event.
+`played_seconds >= 80% * duration_seconds`, `observed_mid_play = false`, and
+parsed dance identity fields. Mid-play observations may remain `pending` so the
+OBS overlay can show the current track after a mid-room join, and interrupted
+rows remain useful for forensic review. Neither case should automatically
+become a normal delay/statistics event.
+`duration_source` records where the runtime duration came from, such as a VRCX
+payload or WannaDance queue JSON; it is runtime provenance only and is not added
+to `dance_events`.
 
 ## Relationship Diagram
 

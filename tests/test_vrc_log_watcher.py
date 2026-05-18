@@ -6,7 +6,12 @@ import unittest
 from pathlib import Path
 
 from dancing_log.storage import WANNA_SYSTEM_KEY, connect_db
-from dancing_log.vrc_log_watcher import parse_vrc_lifecycle_event, parse_vrc_log_line, watch_vrc_logs
+from dancing_log.vrc_log_watcher import (
+    parse_vrc_lifecycle_event,
+    parse_vrc_log_line,
+    replay_vrc_log_files,
+    watch_vrc_logs,
+)
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -65,6 +70,38 @@ class VrcLogParserTest(unittest.TestCase):
         self.assertEqual(colored_events[0].display_name, "示例玩家乙")
         self.assertEqual(colored_events[0].to_capture_record()["dance_external_id"], "3881")
 
+    def test_parses_wannadance_queue_metadata_duration(self):
+        events = parse_vrc_log_line(
+            '2026.05.17 19:46:33 Debug - [VideoQueueManager] [19:46:33] : '
+            'OnPreSerialization: queue info serialized: '
+            '[{"playerNames":["Alice"],"title":"8385. Poker Face","songId":8385,'
+            '"duration":254,"group":"Just Dance Solo"}]'
+        )
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].event_type, "metadata")
+        self.assertEqual(events[0].parser_name, "wannadance_queue_info")
+        self.assertEqual(events[0].duration_seconds, 254.0)
+        self.assertEqual(events[0].duration_source, "wanna_queue_json")
+        record = events[0].to_capture_record()
+        self.assertEqual(record["dance_system_key"], WANNA_SYSTEM_KEY)
+        self.assertEqual(record["dance_external_id"], "8385")
+        self.assertEqual(record["video_name"], "Poker Face")
+
+    def test_parses_wannadance_user_data_metadata(self):
+        events = parse_vrc_log_line(
+            '2026.05.17 19:50:28 Debug - [VideoQueueManager] [19:50:28] : '
+            'DeserializeVideoUserData: userData = '
+            '{"songId":8385,"isRandom":false,"playerName":"Alice",'
+            '"videoUrl":"http://api.udon.dance/Api/Songs/play?id=8385",'
+            '"videoTitle":"8385. Poker Face","duration":254}'
+        )
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].event_type, "metadata")
+        self.assertEqual(events[0].display_name, "Alice")
+        self.assertEqual(events[0].duration_seconds, 254.0)
+
     def test_parses_vrcx_video_play_payloads(self):
         pypy_events = parse_vrc_log_line(
             '2026.05.17 15:30:03 Log - [VRCX] VideoPlay(PyPyDance) '
@@ -94,6 +131,7 @@ class VrcLogParserTest(unittest.TestCase):
         self.assertEqual(events[0].requester_marker, "示例玩家乙")
         self.assertEqual(events[0].video_offset_seconds, 0.0)
         self.assertEqual(events[0].duration_seconds, 150.0)
+        self.assertEqual(events[0].duration_source, "vrcx_payload")
         self.assertEqual(events[0].video_id, "4666")
         self.assertEqual(events[0].video_name, "[MIRRORED] NewJeans - ETA dance cover")
         self.assertEqual(events[0].to_capture_record()["dance_system_key"], "pypydance")
@@ -712,6 +750,200 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertEqual(by_id["5723"]["completion_reason"], "superseded_before_completion")
             self.assertEqual(by_id["8619"]["completion_status"], "pending")
             self.assertEqual(by_id["8619"]["actual_play_at"], "2026.05.18 00:22:59")
+
+    def test_replay_vrc_log_files_replays_multiple_logs_in_name_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            (log_dir / "output_log_0002.txt").write_text(
+                "2026.05.17 15:31:00 Debug - [Video Playback] "
+                "Resolving URL 'https://api.udon.dance/Api/Songs/play?id=5038'\n",
+                encoding="utf-8",
+            )
+            (log_dir / "output_log_0001.txt").write_text(
+                "2026.05.17 15:30:00 Debug - [Video Playback] "
+                "Resolving URL 'https://api.udon.dance/Api/Songs/play?id=3114'\n",
+                encoding="utf-8",
+            )
+
+            stats = replay_vrc_log_files(
+                log_files=list(log_dir.glob("output_log_*.txt")),
+                output_dir=root / "replay",
+                live_db=False,
+            )
+
+            playback = read_jsonl(stats.session_dir / "playback_events.jsonl")
+            self.assertEqual([event["dance_external_id"] for event in playback], ["3114", "5038"])
+            self.assertEqual(len(stats.replayed_files), 2)
+
+    def test_watcher_does_not_create_playback_from_wanna_metadata_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            db_path = root / "app.sqlite3"
+            (log_dir / "output_log_0001.txt").write_text(
+                '2026.05.17 19:46:33 Debug - [VideoQueueManager] [19:46:33] : '
+                'OnPreSerialization: queue info serialized: '
+                '[{"playerNames":["Alice"],"title":"8385. Poker Face","songId":8385,'
+                '"duration":254,"group":"Just Dance Solo"}]\n',
+                encoding="utf-8",
+            )
+
+            stats = watch_vrc_logs(
+                log_dir=log_dir,
+                output_dir=root / "capture",
+                session_name="metadata-only",
+                app_db_path=db_path,
+                from_start=True,
+                live_db=True,
+                poll_seconds=0.01,
+                stop_after_idle_seconds=0.05,
+            )
+
+            self.assertEqual(stats.parsed_events, 1)
+            self.assertEqual(stats.playback_events, 0)
+            with connect_db(db_path) as conn:
+                live_count = conn.execute("SELECT count(*) FROM live_playback_events").fetchone()[0]
+            self.assertEqual(live_count, 0)
+
+    def test_watcher_promotes_wanna_after_duration_from_log_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            db_path = root / "app.sqlite3"
+            (log_dir / "output_log_0001.txt").write_text(
+                '2026.05.17 15:29:58 Debug - [VideoQueueManager] [15:29:58] : '
+                'OnPreSerialization: queue info serialized: '
+                '[{"playerNames":["Alice"],"title":"3114. First Song","songId":3114,'
+                '"duration":2}]\n'
+                '2026.05.17 15:30:00 Debug - [VRCX] VideoPlay(PyPyDance) '
+                '"https://api.udon.dance/Api/Songs/play?id=3114",0,114514,'
+                '"$3114. First Song (Alice)"\n'
+                "2026.05.17 15:30:00 Debug - "
+                "[<color=#9C6994>USharpVideo (WannaDance)</color>] "
+                "DelayedVideoReady: Time's up, let's play\n"
+                '2026.05.17 15:30:03 Debug - [VRCX] VideoPlay(PyPyDance) '
+                '"https://api.udon.dance/Api/Songs/play?id=5038",0,114514,'
+                '"$5038. Next Song (Bob)"\n',
+                encoding="utf-8",
+            )
+
+            stats = watch_vrc_logs(
+                log_dir=log_dir,
+                output_dir=root / "capture",
+                session_name="wanna-duration-promote",
+                app_db_path=db_path,
+                from_start=True,
+                promote_live=True,
+                poll_seconds=0.01,
+                stop_after_idle_seconds=0.05,
+            )
+
+            self.assertEqual(stats.live_promotions, 1)
+            playback = read_jsonl(stats.session_dir / "playback_events.jsonl")
+            first = next(event for event in playback if event["dance_external_id"] == "3114")
+            self.assertEqual(first["duration_seconds"], 2.0)
+            self.assertEqual(first["duration_source"], "wanna_queue_json")
+            with connect_db(db_path) as conn:
+                event_count = conn.execute("SELECT count(*) FROM dance_events").fetchone()[0]
+                live_row = conn.execute(
+                    "SELECT * FROM live_playback_events WHERE dance_external_id = '3114'"
+                ).fetchone()
+            self.assertEqual(event_count, 1)
+            self.assertEqual(live_row["completion_status"], "completed")
+            self.assertEqual(live_row["duration_source"], "wanna_queue_json")
+
+    def test_watcher_promotes_wanna_before_late_manual_cut(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            db_path = root / "app.sqlite3"
+            (log_dir / "output_log_0001.txt").write_text(
+                '2026.05.17 15:29:58 Debug - [VideoQueueManager] [15:29:58] : '
+                'OnPreSerialization: queue info serialized: '
+                '[{"playerNames":["Alice"],"title":"3919. First Song","songId":3919,'
+                '"duration":10}]\n'
+                '2026.05.17 15:30:00 Debug - [VRCX] VideoPlay(PyPyDance) '
+                '"https://api.udon.dance/Api/Songs/play?id=3919",0,114514,'
+                '"$3919. First Song (Alice)"\n'
+                "2026.05.17 15:30:00 Debug - "
+                "[<color=#9C6994>USharpVideo (WannaDance)</color>] "
+                "DelayedVideoReady: Time's up, let's play\n"
+                "2026.05.17 15:30:09 Debug - "
+                "[VideoQueueManager] [15:30:09] : ForciblyPlayNextVideo: "
+                "I am ready, but video owner Alice is not, wait 5 seconds\n"
+                '2026.05.17 15:30:09 Debug - [VRCX] VideoPlay(PyPyDance) '
+                '"https://api.udon.dance/Api/Songs/play?id=5038",0,114514,'
+                '"$5038. Next Song (Bob)"\n',
+                encoding="utf-8",
+            )
+
+            stats = watch_vrc_logs(
+                log_dir=log_dir,
+                output_dir=root / "capture",
+                session_name="wanna-late-manual-cut",
+                app_db_path=db_path,
+                from_start=True,
+                promote_live=True,
+                poll_seconds=0.01,
+                stop_after_idle_seconds=0.05,
+            )
+
+            self.assertEqual(stats.live_promotions, 1)
+            with connect_db(db_path) as conn:
+                live_row = conn.execute(
+                    "SELECT * FROM live_playback_events WHERE dance_external_id = '3919'"
+                ).fetchone()
+                event_count = conn.execute("SELECT count(*) FROM dance_events").fetchone()[0]
+            self.assertEqual(event_count, 1)
+            self.assertEqual(live_row["completion_status"], "completed")
+            self.assertEqual(live_row["completion_reason"], "observed_completion_threshold")
+            self.assertEqual(live_row["played_seconds"], 9.0)
+            self.assertEqual(live_row["required_played_seconds"], 8.0)
+
+    def test_watcher_does_not_promote_wanna_room_leave_before_metadata_duration(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            db_path = root / "app.sqlite3"
+            (log_dir / "output_log_0001.txt").write_text(
+                '2026.05.17 15:29:58 Debug - [VideoQueueManager] [15:29:58] : '
+                'OnPreSerialization: queue info serialized: '
+                '[{"playerNames":["Alice"],"title":"3114. First Song","songId":3114,'
+                '"duration":10}]\n'
+                '2026.05.17 15:30:00 Debug - [VRCX] VideoPlay(PyPyDance) '
+                '"https://api.udon.dance/Api/Songs/play?id=3114",0,114514,'
+                '"$3114. First Song (Alice)"\n'
+                "2026.05.17 15:30:00 Debug - "
+                "[<color=#9C6994>USharpVideo (WannaDance)</color>] "
+                "DelayedVideoReady: Time's up, let's play\n"
+                "2026.05.17 15:30:05 Debug - [Behaviour] OnLeftRoom\n",
+                encoding="utf-8",
+            )
+
+            stats = watch_vrc_logs(
+                log_dir=log_dir,
+                output_dir=root / "capture",
+                session_name="wanna-duration-room-left",
+                app_db_path=db_path,
+                from_start=True,
+                promote_live=True,
+                poll_seconds=0.01,
+                stop_after_idle_seconds=0.05,
+            )
+
+            self.assertEqual(stats.live_promotions, 0)
+            with connect_db(db_path) as conn:
+                event_count = conn.execute("SELECT count(*) FROM dance_events").fetchone()[0]
+                live_row = conn.execute("SELECT * FROM live_playback_events").fetchone()
+            self.assertEqual(event_count, 0)
+            self.assertEqual(live_row["completion_status"], "interrupted")
+            self.assertEqual(live_row["completion_reason"], "room_left")
 
     def test_watcher_live_db_updates_without_promoting_by_default(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -196,6 +196,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             source_display_name TEXT,
             world_parser TEXT,
             duration_seconds REAL,
+            duration_source TEXT,
             load_seconds REAL,
             wait_seconds REAL,
             source_file TEXT,
@@ -546,6 +547,7 @@ def upsert_live_playback_event(
             source_display_name,
             world_parser,
             duration_seconds,
+            duration_source,
             load_seconds,
             wait_seconds,
             source_file,
@@ -556,7 +558,7 @@ def upsert_live_playback_event(
             raw_event_types_json,
             event_json
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(event_key) DO UPDATE SET
             session_id = excluded.session_id,
             playback_event_key = excluded.playback_event_key,
@@ -595,6 +597,7 @@ def upsert_live_playback_event(
             source_display_name = excluded.source_display_name,
             world_parser = excluded.world_parser,
             duration_seconds = excluded.duration_seconds,
+            duration_source = excluded.duration_source,
             load_seconds = excluded.load_seconds,
             wait_seconds = excluded.wait_seconds,
             source_file = excluded.source_file,
@@ -645,6 +648,7 @@ def upsert_live_playback_event(
             event.get("source_display_name"),
             event.get("world_parser"),
             event.get("duration_seconds"),
+            event.get("duration_source"),
             event.get("load_seconds"),
             event.get("wait_seconds"),
             event.get("source_file"),
@@ -973,6 +977,7 @@ def _ensure_live_playback_columns(conn: sqlite3.Connection) -> None:
         "interrupted_at": "TEXT",
         "played_seconds": "REAL",
         "required_played_seconds": "REAL",
+        "duration_source": "TEXT",
     }
     for column, definition in additions.items():
         if column not in columns:

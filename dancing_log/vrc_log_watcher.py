@@ -18,7 +18,7 @@ from dancing_log.vrcx_importer import parse_dance_url
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CAPTURE_ROOT = PROJECT_ROOT / "analysis" / "vrc_log_capture"
 LOG_FILE_PATTERN = "output_log_*.txt"
-STRICT_PROMOTION_COMPLETION_RATIO = 1.0
+PROMOTION_COMPLETION_RATIO = 0.8
 COMPLETION_EPSILON_SECONDS = 0.001
 PREVIEW_SUPPRESSION_SECONDS = 90.0
 RETRY_MERGE_SECONDS = 30.0
@@ -29,6 +29,9 @@ VIDEO_TOKENS = (
     "videoplay",
     "lsmedia",
     "previewvideo",
+    "queue info serialized",
+    "syncedqueuedinfojson",
+    "deserializevideouserdata",
     "added url",
     "resolving url",
     "resolve url",
@@ -109,6 +112,18 @@ WANNADANCE_PREVIEW_RE = re.compile(
     r"(?:,\s*time\s+(?P<preview_start>[\d.]+)\s*-\s*(?P<preview_end>[\d.]+))?",
     re.IGNORECASE,
 )
+WANNADANCE_QUEUE_INFO_RE = re.compile(
+    r"\[VideoQueueManager\].*?:\s+"
+    r"(?:OnPreSerialization:\s+queue info serialized:\s*|"
+    r"OnDeserialization:\s+syncedQueuedInfoJson\s*=\s*)"
+    r"(?P<payload>\[.*\])",
+    re.IGNORECASE,
+)
+WANNADANCE_USER_DATA_RE = re.compile(
+    r"\[VideoQueueManager\].*?:\s+DeserializeVideoUserData:\s+userData\s*=\s*"
+    r"(?P<payload>\{.*\})",
+    re.IGNORECASE,
+)
 VRCX_VIDEO_PLAY_RE = re.compile(
     r"\[VRCX\]\s+VideoPlay\((?P<world>[^)]+)\)\s*(?P<payload>.*)",
     re.IGNORECASE,
@@ -149,6 +164,7 @@ class ParsedVrcLogEvent:
     resolved_url: str | None = None
     video_offset_seconds: float | None = None
     duration_seconds: float | None = None
+    duration_source: str | None = None
     load_seconds: float | None = None
     wait_seconds: float | None = None
 
@@ -184,6 +200,7 @@ class ParsedVrcLogEvent:
             "resolved_url": self.resolved_url,
             "video_offset_seconds": self.video_offset_seconds,
             "duration_seconds": self.duration_seconds,
+            "duration_source": self.duration_source,
             "load_seconds": self.load_seconds,
             "wait_seconds": self.wait_seconds,
             "source_file": str(source_file) if source_file is not None else None,
@@ -215,6 +232,7 @@ class WatchStats:
     live_db_updates: int = 0
     live_promotions: int = 0
     overlay_url: str | None = None
+    replayed_files: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -237,8 +255,406 @@ class WatchStats:
             "live_db_updates": self.live_db_updates,
             "live_promotions": self.live_promotions,
             "overlay_url": self.overlay_url,
+            "replayed_files": self.replayed_files,
             "errors": self.errors,
         }
+
+
+class _LivePlaybackRuntime:
+    """Shared live DB and overlay side effects for tailing and offline replay."""
+
+    def __init__(
+        self,
+        *,
+        stats: WatchStats,
+        app_db_path: Path | str | None,
+        live_db: bool,
+        promote_live: bool,
+        overlay_port: int | None,
+    ) -> None:
+        self.stats = stats
+        self.promote_live = promote_live
+        self.app_conn = None
+        self.overlay_server = None
+        self.playback_builder = None
+        self.live_events: dict[str, dict] = {}
+        self.finalized_live_keys: set[str] = set()
+        self.promoted_keys: set[str] = set()
+        self.current_room_name: str | None = None
+
+        if live_db or promote_live:
+            from dancing_log.storage import (
+                connect_db,
+                mark_live_playback_event_completed,
+                mark_live_playback_event_interrupted,
+                make_live_playback_event_key,
+                promote_live_playback_event,
+                upsert_live_playback_event,
+            )
+
+            self.app_conn = connect_db(app_db_path)
+            self.mark_live_playback_event_completed = mark_live_playback_event_completed
+            self.mark_live_playback_event_interrupted = mark_live_playback_event_interrupted
+            self.make_live_playback_event_key = make_live_playback_event_key
+            self.promote_live_playback_event = promote_live_playback_event
+            self.upsert_live_playback_event = upsert_live_playback_event
+        else:
+            self.mark_live_playback_event_completed = None
+            self.mark_live_playback_event_interrupted = None
+            self.make_live_playback_event_key = None
+            self.promote_live_playback_event = None
+            self.upsert_live_playback_event = None
+
+        if overlay_port is not None:
+            from dancing_log.overlay_server import OverlayServer
+
+            self.overlay_server = OverlayServer(port=overlay_port)
+            self.overlay_server.start()
+            self.stats.overlay_url = self.overlay_server.url
+
+    def close(self) -> None:
+        if self.overlay_server is not None:
+            self.overlay_server.stop()
+            self.overlay_server = None
+        if self.app_conn is not None:
+            self.app_conn.close()
+            self.app_conn = None
+
+    def is_stale_observation(self, observed_at: str | None) -> bool:
+        return _timestamp_before(observed_at, self.stats.last_log_timestamp)
+
+    def promote_completed_event(self, live_event_key: str) -> None:
+        if not self.promote_live or self.app_conn is None:
+            return
+        dance_event_id = self.promote_live_playback_event(self.app_conn, live_event_key)
+        if dance_event_id is not None and live_event_key not in self.promoted_keys:
+            self.promoted_keys.add(live_event_key)
+            self.stats.live_promotions += 1
+
+    def publish_live_settlement(
+        self,
+        event: dict,
+        *,
+        completion_status: str,
+        observed_at: str,
+        played_seconds: float | None,
+        required_played_seconds: float | None,
+        reason: str,
+    ) -> None:
+        event["completion_status"] = completion_status
+        event["completion_reason"] = reason
+        event["played_seconds"] = played_seconds
+        event["required_played_seconds"] = required_played_seconds
+        if completion_status == "completed":
+            event["completed_at"] = observed_at
+            event["interrupted_at"] = None
+        else:
+            event["completed_at"] = None
+            event["interrupted_at"] = observed_at
+        if self.overlay_server is not None:
+            self.overlay_server.publish(event)
+
+    def settle_live_event(
+        self,
+        event: dict,
+        *,
+        observed_at: str,
+        interrupt_if_incomplete: bool,
+        completion_reason: str,
+        interrupt_reason: str,
+    ) -> bool:
+        if self.app_conn is None:
+            return False
+        live_event_key = event.get("live_event_key")
+        if not live_event_key or live_event_key in self.finalized_live_keys:
+            return False
+
+        actual_play_at = event.get("actual_play_at")
+        duration_seconds = _float_or_none(
+            str(event.get("duration_seconds")) if event.get("duration_seconds") is not None else None
+        )
+        played_seconds_at_observed = (
+            _seconds_between(actual_play_at, observed_at) if actual_play_at else None
+        )
+        if played_seconds_at_observed is not None and played_seconds_at_observed < 0:
+            return False
+
+        if event.get("observed_mid_play"):
+            if not interrupt_if_incomplete:
+                return False
+            played_seconds = played_seconds_at_observed
+            changed = self.mark_live_playback_event_interrupted(
+                self.app_conn,
+                live_event_key,
+                interrupted_at=observed_at,
+                played_seconds=played_seconds,
+                required_played_seconds=duration_seconds,
+                reason="observed_mid_play",
+            )
+            self.finalized_live_keys.add(live_event_key)
+            if changed:
+                self.publish_live_settlement(
+                    event,
+                    completion_status="interrupted",
+                    observed_at=observed_at,
+                    played_seconds=played_seconds,
+                    required_played_seconds=duration_seconds,
+                    reason="observed_mid_play",
+                )
+            return changed
+
+        if not event.get("dance_system_key") or not event.get("dance_external_id"):
+            return False
+
+        if not actual_play_at:
+            if not interrupt_if_incomplete:
+                return False
+            changed = self.mark_live_playback_event_interrupted(
+                self.app_conn,
+                live_event_key,
+                interrupted_at=observed_at,
+                played_seconds=None,
+                required_played_seconds=duration_seconds,
+                reason=interrupt_reason,
+            )
+            self.finalized_live_keys.add(live_event_key)
+            if changed:
+                self.publish_live_settlement(
+                    event,
+                    completion_status="interrupted",
+                    observed_at=observed_at,
+                    played_seconds=None,
+                    required_played_seconds=duration_seconds,
+                    reason=interrupt_reason,
+                )
+            return changed
+
+        if duration_seconds is None or duration_seconds <= 0:
+            if not interrupt_if_incomplete:
+                return False
+            reason = (
+                "unknown_duration_before_superseded"
+                if interrupt_reason == "superseded_before_completion"
+                else interrupt_reason
+            )
+            played_seconds = played_seconds_at_observed
+            changed = self.mark_live_playback_event_interrupted(
+                self.app_conn,
+                live_event_key,
+                interrupted_at=observed_at,
+                played_seconds=played_seconds,
+                required_played_seconds=None,
+                reason=reason,
+            )
+            self.finalized_live_keys.add(live_event_key)
+            if changed:
+                self.publish_live_settlement(
+                    event,
+                    completion_status="interrupted",
+                    observed_at=observed_at,
+                    played_seconds=played_seconds,
+                    required_played_seconds=None,
+                    reason=reason,
+                )
+            return changed
+
+        played_seconds = played_seconds_at_observed
+        required_played_seconds = duration_seconds * PROMOTION_COMPLETION_RATIO
+        if played_seconds is None:
+            return False
+        if played_seconds + COMPLETION_EPSILON_SECONDS >= required_played_seconds:
+            changed = self.mark_live_playback_event_completed(
+                self.app_conn,
+                live_event_key,
+                completed_at=observed_at,
+                played_seconds=played_seconds,
+                required_played_seconds=required_played_seconds,
+                reason=completion_reason,
+            )
+            self.promote_completed_event(live_event_key)
+            self.finalized_live_keys.add(live_event_key)
+            if changed:
+                self.publish_live_settlement(
+                    event,
+                    completion_status="completed",
+                    observed_at=observed_at,
+                    played_seconds=played_seconds,
+                    required_played_seconds=required_played_seconds,
+                    reason=completion_reason,
+                )
+            return changed
+
+        if not interrupt_if_incomplete:
+            return False
+
+        changed = self.mark_live_playback_event_interrupted(
+            self.app_conn,
+            live_event_key,
+            interrupted_at=observed_at,
+            played_seconds=played_seconds,
+            required_played_seconds=required_played_seconds,
+            reason=interrupt_reason,
+        )
+        self.finalized_live_keys.add(live_event_key)
+        if changed:
+            self.publish_live_settlement(
+                event,
+                completion_status="interrupted",
+                observed_at=observed_at,
+                played_seconds=played_seconds,
+                required_played_seconds=required_played_seconds,
+                reason=interrupt_reason,
+            )
+        return changed
+
+    def settle_pending_events(
+        self,
+        *,
+        observed_at: str,
+        current_live_event_key: str | None = None,
+        interrupt_others: bool = False,
+        interrupt_started_others: bool = False,
+        completion_reason: str = "observed_completion_threshold",
+        interrupt_reason: str = "superseded_before_completion",
+    ) -> bool:
+        if self.is_stale_observation(observed_at):
+            return False
+        changed = False
+        for live_event_key, event in list(self.live_events.items()):
+            if live_event_key == current_live_event_key:
+                continue
+            interrupt_if_incomplete = interrupt_others or (
+                interrupt_started_others and bool(event.get("actual_play_at"))
+            )
+            changed = (
+                self.settle_live_event(
+                    event,
+                    observed_at=observed_at,
+                    interrupt_if_incomplete=interrupt_if_incomplete,
+                    completion_reason=completion_reason,
+                    interrupt_reason=interrupt_reason,
+                )
+                or changed
+            )
+        return changed
+
+    def handle_log_progress(self, timestamp: str | None) -> None:
+        if not timestamp:
+            return
+        self.stats.last_log_timestamp = timestamp
+        if self.app_conn is None:
+            return
+        try:
+            if self.settle_pending_events(observed_at=timestamp):
+                self.app_conn.commit()
+        except Exception as exc:
+            _record_error(self.stats.errors, f"live completion check failed: {exc}")
+            self.app_conn.rollback()
+
+    def handle_playback_update(self, event: dict) -> None:
+        update = dict(event)
+        update["live_session_id"] = self.stats.live_session_id
+        if self.app_conn is not None:
+            live_event_key = self.make_live_playback_event_key(
+                self.stats.live_session_id,
+                str(event["event_key"]),
+            )
+            update["live_event_key"] = live_event_key
+            try:
+                self.upsert_live_playback_event(
+                    self.app_conn,
+                    event,
+                    session_id=self.stats.live_session_id,
+                    event_key=live_event_key,
+                )
+                self.stats.live_db_updates += 1
+                existing_update = self.live_events.get(live_event_key)
+                if existing_update is not None and existing_update.get("completion_status"):
+                    for field_name in (
+                        "completion_status",
+                        "completion_reason",
+                        "completed_at",
+                        "interrupted_at",
+                        "played_seconds",
+                        "required_played_seconds",
+                    ):
+                        update[field_name] = existing_update.get(field_name)
+                self.live_events[live_event_key] = update
+                actual_observed_at = event.get("actual_play_at")
+                if actual_observed_at:
+                    self.settle_pending_events(
+                        observed_at=actual_observed_at,
+                        current_live_event_key=live_event_key,
+                        interrupt_others=True,
+                    )
+                else:
+                    first_observed_at = event.get("first_seen_at")
+                    if first_observed_at:
+                        self.settle_pending_events(
+                            observed_at=first_observed_at,
+                            current_live_event_key=live_event_key,
+                            interrupt_started_others=True,
+                        )
+                current_observed_at = event.get("last_seen_at") or actual_observed_at
+                if current_observed_at and not self.is_stale_observation(current_observed_at):
+                    self.settle_live_event(
+                        update,
+                        observed_at=current_observed_at,
+                        interrupt_if_incomplete=False,
+                        completion_reason="observed_completion_threshold",
+                        interrupt_reason="superseded_before_completion",
+                    )
+                self.app_conn.commit()
+            except Exception as exc:
+                _record_error(self.stats.errors, f"live DB update failed: {exc}")
+                self.app_conn.rollback()
+        if self.overlay_server is not None:
+            self.overlay_server.publish(update)
+
+    def handle_lifecycle_event(self, event: dict) -> None:
+        event_type = event.get("event_type")
+        if event.get("room_name"):
+            self.current_room_name = event.get("room_name")
+
+        if event_type == "room-entering":
+            if self.overlay_server is not None:
+                self.overlay_server.publish_status(event)
+            return
+
+        if event_type not in {"room-left", "application-quit", "video-shutdown"}:
+            return
+
+        if self.playback_builder is not None:
+            self.playback_builder.close_open_events()
+
+        observed_at = event.get("observed_at") or event.get("timestamp") or self.stats.last_log_timestamp
+        interrupt_reason = {
+            "room-left": "room_left",
+            "application-quit": "application_quit",
+            "video-shutdown": "application_quit",
+        }.get(str(event_type), "playback_stopped")
+
+        if observed_at and self.app_conn is not None:
+            try:
+                if self.settle_pending_events(
+                    observed_at=observed_at,
+                    interrupt_others=True,
+                    completion_reason="observed_completion_threshold",
+                    interrupt_reason=interrupt_reason,
+                ):
+                    self.app_conn.commit()
+            except Exception as exc:
+                _record_error(self.stats.errors, f"live lifecycle settlement failed: {exc}")
+                self.app_conn.rollback()
+
+        if self.overlay_server is not None:
+            status = dict(event)
+            status["room_name"] = status.get("room_name") or self.current_room_name
+            status["clear_current"] = True
+            self.overlay_server.publish_status(status)
+
+        if event_type in {"room-left", "application-quit"}:
+            self.current_room_name = None
 
 
 class PlaybackEventBuilder:
@@ -249,12 +665,17 @@ class PlaybackEventBuilder:
         self._open_by_canonical: dict[str, str] = {}
         self._occurrence_counts: dict[str, int] = {}
         self._preview_until_by_canonical: dict[str, datetime | None] = {}
+        self._metadata_by_canonical: dict[str, dict] = {}
         self._active_key: str | None = None
         self._update_callback = update_callback
 
     def observe(self, record: dict) -> None:
         canonical_key = self._canonical_key_for_record(record)
         event_type = record.get("event_type")
+        if event_type == "metadata":
+            if canonical_key is not None:
+                self._remember_metadata(canonical_key, record)
+            return
         if event_type == "preview":
             if canonical_key is not None:
                 self._mark_preview(canonical_key, record.get("timestamp"))
@@ -278,6 +699,8 @@ class PlaybackEventBuilder:
             return
 
         event = self._events.setdefault(key, self._new_event(key))
+        if canonical_key is not None and canonical_key in self._metadata_by_canonical:
+            self._merge_signal(event, self._metadata_by_canonical[canonical_key])
         self._merge_signal(event, record)
 
         if record.get("video_url"):
@@ -334,6 +757,7 @@ class PlaybackEventBuilder:
             "source_display_name": None,
             "world_parser": None,
             "duration_seconds": None,
+            "duration_source": None,
             "load_seconds": None,
             "wait_seconds": None,
             "source_file": None,
@@ -348,6 +772,26 @@ class PlaybackEventBuilder:
         timestamp = record.get("timestamp")
         timestamp_dt = _parse_vrc_timestamp(timestamp)
         event_type = record.get("event_type")
+
+        if event_type == "metadata":
+            event["parser_names"].add(record.get("parser_name"))
+            event["raw_event_types"].add(event_type)
+            self._copy_first(event, record, "source_file")
+            self._copy_first(event, record, "dance_system_key")
+            self._copy_first(event, record, "dance_external_id")
+            self._copy_first(event, record, "url_kind")
+            self._copy_first(event, record, "world_parser")
+            self._copy_first(event, record, "video_id")
+            self._copy_first(event, record, "video_name")
+            self._copy_first(event, record, "display_name")
+            self._copy_first(event, record, "requester_marker")
+            self._copy_first(event, record, "source_hint")
+            self._copy_first(event, record, "duration_seconds")
+            self._copy_first(event, record, "duration_source")
+            for field_name in ("video_url", "routed_url", "resolved_url"):
+                if event.get(field_name) in (None, "") and record.get(field_name):
+                    event[field_name] = record[field_name]
+            return
 
         if event["first_seen_at"] is None or _timestamp_sort_key(timestamp) < _timestamp_sort_key(event["first_seen_at"]):
             event["first_seen_at"] = timestamp
@@ -368,6 +812,7 @@ class PlaybackEventBuilder:
         self._copy_first(event, record, "requester_marker")
         self._copy_first(event, record, "source_hint")
         self._copy_first(event, record, "duration_seconds")
+        self._copy_first(event, record, "duration_source")
 
         for field_name in ("video_url", "routed_url", "resolved_url"):
             if record.get(field_name):
@@ -420,6 +865,36 @@ class PlaybackEventBuilder:
             self._copy_time(event, "actual_play_signal_at", timestamp, prefer_latest=True)
             if event["actual_play_method"] is None:
                 event["actual_play_method"] = record.get("parser_name")
+
+    def _remember_metadata(self, canonical_key: str, record: dict) -> None:
+        metadata = self._metadata_by_canonical.setdefault(canonical_key, dict(record))
+        for field_name in (
+            "video_url",
+            "display_name",
+            "video_name",
+            "video_id",
+            "requester_marker",
+            "source_hint",
+            "duration_seconds",
+            "duration_source",
+            "dance_system_key",
+            "dance_external_id",
+            "url_kind",
+            "world_parser",
+            "source_file",
+        ):
+            if metadata.get(field_name) in (None, "") and record.get(field_name) not in (None, ""):
+                metadata[field_name] = record[field_name]
+
+        current_key = self._open_by_canonical.get(canonical_key)
+        if current_key is None:
+            return
+        current_event = self._events.get(current_key)
+        if current_event is None:
+            return
+        self._merge_signal(current_event, record)
+        if self._update_callback is not None:
+            self._update_callback(self._finalize_event(current_event))
 
     def _finalize_event(self, event: dict) -> dict:
         finalized = dict(event)
@@ -667,6 +1142,26 @@ def parse_vrc_log_line(line: str) -> list[ParsedVrcLogEvent]:
             )
         )
 
+    match = WANNADANCE_QUEUE_INFO_RE.search(plain_line)
+    if match:
+        events.extend(
+            _events_from_wannadance_queue_info(
+                timestamp=timestamp,
+                payload=match.group("payload"),
+                raw_line=line,
+            )
+        )
+
+    match = WANNADANCE_USER_DATA_RE.search(plain_line)
+    if match:
+        event = _event_from_wannadance_user_data(
+            timestamp=timestamp,
+            payload=match.group("payload"),
+            raw_line=line,
+        )
+        if event is not None:
+            events.append(event)
+
     match = VIDEO_PLAYBACK_RE.search(plain_line)
     if match:
         events.append(
@@ -828,6 +1323,110 @@ def parse_vrc_log_line(line: str) -> list[ParsedVrcLogEvent]:
     return _dedupe_events(events)
 
 
+def _events_from_wannadance_queue_info(
+    *,
+    timestamp: str | None,
+    payload: str,
+    raw_line: str,
+) -> list[ParsedVrcLogEvent]:
+    value = _try_json(payload)
+    if not isinstance(value, list):
+        return []
+    events: list[ParsedVrcLogEvent] = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            continue
+        song_id = entry.get("songId") or entry.get("song_id") or entry.get("id")
+        title = entry.get("title") or entry.get("videoTitle")
+        player_names = entry.get("playerNames") or entry.get("player_names") or []
+        display_name = None
+        if isinstance(player_names, list):
+            names = [_clean_display_name(str(name)) for name in player_names]
+            names = [name for name in names if name]
+            display_name = " / ".join(names) if names else None
+        elif isinstance(player_names, str):
+            display_name = _clean_display_name(player_names)
+        events.append(
+            _wanna_metadata_event(
+                timestamp=timestamp,
+                raw_line=raw_line,
+                parser_name="wannadance_queue_info",
+                song_id=song_id,
+                video_url=entry.get("videoUrl") or entry.get("video_url"),
+                title=title,
+                display_name=display_name,
+                is_random=entry.get("isRandom"),
+                duration_seconds=_float_or_none(
+                    str(entry.get("duration")) if entry.get("duration") is not None else None
+                ),
+            )
+        )
+    return [event for event in events if event is not None]
+
+
+def _event_from_wannadance_user_data(
+    *,
+    timestamp: str | None,
+    payload: str,
+    raw_line: str,
+) -> ParsedVrcLogEvent | None:
+    value = _try_json(payload)
+    if not isinstance(value, dict):
+        return None
+    return _wanna_metadata_event(
+        timestamp=timestamp,
+        raw_line=raw_line,
+        parser_name="wannadance_user_data",
+        song_id=value.get("songId") or value.get("song_id") or value.get("id"),
+        video_url=value.get("videoUrl") or value.get("video_url"),
+        title=value.get("videoTitle") or value.get("title") or value.get("name"),
+        display_name=value.get("playerName") or value.get("displayName"),
+        is_random=value.get("isRandom"),
+        duration_seconds=_float_or_none(
+            str(value.get("duration")) if value.get("duration") is not None else None
+        ),
+    )
+
+
+def _wanna_metadata_event(
+    *,
+    timestamp: str | None,
+    raw_line: str,
+    parser_name: str,
+    song_id,
+    video_url,
+    title,
+    display_name,
+    is_random,
+    duration_seconds: float | None,
+) -> ParsedVrcLogEvent | None:
+    song_id_text = str(song_id).strip() if song_id is not None else ""
+    if not song_id_text and not video_url:
+        return None
+
+    clean_url = _clean_url(str(video_url)) if video_url else _wanna_video_url(song_id_text)
+    title_id, video_name, requester_marker = _parse_video_title_payload(str(title or ""))
+    video_id = song_id_text or title_id
+    random_source = _truthy(is_random)
+    clean_display_name = None if random_source else _clean_display_name(str(display_name)) if display_name is not None else None
+    source_hint = "random" if random_source else None
+
+    return ParsedVrcLogEvent(
+        timestamp=timestamp,
+        event_type="metadata",
+        video_url=clean_url,
+        display_name=clean_display_name,
+        parser_name=parser_name,
+        raw_line=raw_line,
+        video_name=video_name,
+        video_id=video_id or None,
+        requester_marker=requester_marker,
+        source_hint=source_hint,
+        duration_seconds=duration_seconds,
+        duration_source="wanna_queue_json" if duration_seconds is not None else None,
+    )
+
+
 def watch_vrc_logs(
     *,
     log_dir: Path | str | None = None,
@@ -856,362 +1455,15 @@ def watch_vrc_logs(
     current_handle = None
     current_line_number = 0
     idle_since = time.monotonic()
-    app_conn = None
-    overlay_server = None
-    promoted_keys: set[str] = set()
-
-    if live_db or promote_live:
-        from dancing_log.storage import (
-            connect_db,
-            mark_live_playback_event_completed,
-            mark_live_playback_event_interrupted,
-            make_live_playback_event_key,
-            promote_live_playback_event,
-            upsert_live_playback_event,
-        )
-
-        app_conn = connect_db(app_db_path)
-    else:
-        make_live_playback_event_key = None
-        mark_live_playback_event_completed = None
-        mark_live_playback_event_interrupted = None
-        promote_live_playback_event = None
-        upsert_live_playback_event = None
-
-    if overlay_port is not None:
-        from dancing_log.overlay_server import OverlayServer
-
-        overlay_server = OverlayServer(port=overlay_port)
-        overlay_server.start()
-        stats.overlay_url = overlay_server.url
-
-    live_events: dict[str, dict] = {}
-    finalized_live_keys: set[str] = set()
-
-    def promote_completed_event(live_event_key: str) -> None:
-        if not promote_live or app_conn is None:
-            return
-        dance_event_id = promote_live_playback_event(app_conn, live_event_key)
-        if dance_event_id is not None and live_event_key not in promoted_keys:
-            promoted_keys.add(live_event_key)
-            stats.live_promotions += 1
-
-    def publish_live_settlement(
-        event: dict,
-        *,
-        completion_status: str,
-        observed_at: str,
-        played_seconds: float | None,
-        required_played_seconds: float | None,
-        reason: str,
-    ) -> None:
-        event["completion_status"] = completion_status
-        event["completion_reason"] = reason
-        event["played_seconds"] = played_seconds
-        event["required_played_seconds"] = required_played_seconds
-        if completion_status == "completed":
-            event["completed_at"] = observed_at
-            event["interrupted_at"] = None
-        else:
-            event["completed_at"] = None
-            event["interrupted_at"] = observed_at
-        if overlay_server is not None:
-            overlay_server.publish(event)
-
-    def settle_live_event(
-        event: dict,
-        *,
-        observed_at: str,
-        interrupt_if_incomplete: bool,
-        completion_reason: str,
-        interrupt_reason: str,
-    ) -> bool:
-        if app_conn is None:
-            return False
-        live_event_key = event.get("live_event_key")
-        if not live_event_key or live_event_key in finalized_live_keys:
-            return False
-
-        actual_play_at = event.get("actual_play_at")
-        duration_seconds = _float_or_none(
-            str(event.get("duration_seconds")) if event.get("duration_seconds") is not None else None
-        )
-        if event.get("observed_mid_play"):
-            if not interrupt_if_incomplete:
-                return False
-            changed = mark_live_playback_event_interrupted(
-                app_conn,
-                live_event_key,
-                interrupted_at=observed_at,
-                played_seconds=_seconds_between(actual_play_at, observed_at),
-                required_played_seconds=duration_seconds,
-                reason="observed_mid_play",
-            )
-            finalized_live_keys.add(live_event_key)
-            if changed:
-                publish_live_settlement(
-                    event,
-                    completion_status="interrupted",
-                    observed_at=observed_at,
-                    played_seconds=_seconds_between(actual_play_at, observed_at),
-                    required_played_seconds=duration_seconds,
-                    reason="observed_mid_play",
-                )
-            return changed
-
-        if not event.get("dance_system_key") or not event.get("dance_external_id"):
-            return False
-
-        if not actual_play_at:
-            if not interrupt_if_incomplete:
-                return False
-            changed = mark_live_playback_event_interrupted(
-                app_conn,
-                live_event_key,
-                interrupted_at=observed_at,
-                played_seconds=None,
-                required_played_seconds=duration_seconds,
-                reason=interrupt_reason,
-            )
-            finalized_live_keys.add(live_event_key)
-            if changed:
-                publish_live_settlement(
-                    event,
-                    completion_status="interrupted",
-                    observed_at=observed_at,
-                    played_seconds=None,
-                    required_played_seconds=duration_seconds,
-                    reason=interrupt_reason,
-                )
-            return changed
-
-        if duration_seconds is None or duration_seconds <= 0:
-            if not interrupt_if_incomplete:
-                return False
-            reason = (
-                "unknown_duration_before_superseded"
-                if interrupt_reason == "superseded_before_completion"
-                else interrupt_reason
-            )
-            changed = mark_live_playback_event_interrupted(
-                app_conn,
-                live_event_key,
-                interrupted_at=observed_at,
-                played_seconds=_seconds_between(actual_play_at, observed_at),
-                required_played_seconds=None,
-                reason=reason,
-            )
-            finalized_live_keys.add(live_event_key)
-            if changed:
-                publish_live_settlement(
-                    event,
-                    completion_status="interrupted",
-                    observed_at=observed_at,
-                    played_seconds=_seconds_between(actual_play_at, observed_at),
-                    required_played_seconds=None,
-                    reason=reason,
-                )
-            return changed
-
-        played_seconds = _seconds_between(actual_play_at, observed_at)
-        required_played_seconds = duration_seconds * STRICT_PROMOTION_COMPLETION_RATIO
-        if played_seconds is None:
-            return False
-        if played_seconds + COMPLETION_EPSILON_SECONDS >= required_played_seconds:
-            changed = mark_live_playback_event_completed(
-                app_conn,
-                live_event_key,
-                completed_at=observed_at,
-                played_seconds=played_seconds,
-                required_played_seconds=required_played_seconds,
-                reason=completion_reason,
-            )
-            promote_completed_event(live_event_key)
-            finalized_live_keys.add(live_event_key)
-            if changed:
-                publish_live_settlement(
-                    event,
-                    completion_status="completed",
-                    observed_at=observed_at,
-                    played_seconds=played_seconds,
-                    required_played_seconds=required_played_seconds,
-                    reason=completion_reason,
-                )
-            return changed
-
-        if not interrupt_if_incomplete:
-            return False
-
-        changed = mark_live_playback_event_interrupted(
-            app_conn,
-            live_event_key,
-            interrupted_at=observed_at,
-            played_seconds=played_seconds,
-            required_played_seconds=required_played_seconds,
-            reason=interrupt_reason,
-        )
-        finalized_live_keys.add(live_event_key)
-        if changed:
-            publish_live_settlement(
-                event,
-                completion_status="interrupted",
-                observed_at=observed_at,
-                played_seconds=played_seconds,
-                required_played_seconds=required_played_seconds,
-                reason=interrupt_reason,
-            )
-        return changed
-
-    def settle_pending_events(
-        *,
-        observed_at: str,
-        current_live_event_key: str | None = None,
-        interrupt_others: bool = False,
-        interrupt_started_others: bool = False,
-        completion_reason: str = "observed_full_duration",
-        interrupt_reason: str = "superseded_before_completion",
-    ) -> bool:
-        changed = False
-        for live_event_key, event in list(live_events.items()):
-            if live_event_key == current_live_event_key:
-                continue
-            interrupt_if_incomplete = interrupt_others or (
-                interrupt_started_others and bool(event.get("actual_play_at"))
-            )
-            changed = (
-                settle_live_event(
-                    event,
-                    observed_at=observed_at,
-                    interrupt_if_incomplete=interrupt_if_incomplete,
-                    completion_reason=completion_reason,
-                    interrupt_reason=interrupt_reason,
-                )
-                or changed
-            )
-        return changed
-
-    def handle_log_progress(timestamp: str | None) -> None:
-        if not timestamp:
-            return
-        stats.last_log_timestamp = timestamp
-        if app_conn is None:
-            return
-        try:
-            if settle_pending_events(observed_at=timestamp):
-                app_conn.commit()
-        except Exception as exc:
-            _record_error(stats.errors, f"live completion check failed: {exc}")
-            app_conn.rollback()
-
-    def handle_playback_update(event: dict) -> None:
-        update = dict(event)
-        update["live_session_id"] = stats.live_session_id
-        if app_conn is not None:
-            live_event_key = make_live_playback_event_key(
-                stats.live_session_id,
-                str(event["event_key"]),
-            )
-            update["live_event_key"] = live_event_key
-            try:
-                upsert_live_playback_event(
-                    app_conn,
-                    event,
-                    session_id=stats.live_session_id,
-                    event_key=live_event_key,
-                )
-                stats.live_db_updates += 1
-                existing_update = live_events.get(live_event_key)
-                if existing_update is not None and existing_update.get("completion_status"):
-                    for field_name in (
-                        "completion_status",
-                        "completion_reason",
-                        "completed_at",
-                        "interrupted_at",
-                        "played_seconds",
-                        "required_played_seconds",
-                    ):
-                        update[field_name] = existing_update.get(field_name)
-                live_events[live_event_key] = update
-                actual_observed_at = event.get("actual_play_at")
-                if actual_observed_at:
-                    settle_pending_events(
-                        observed_at=actual_observed_at,
-                        current_live_event_key=live_event_key,
-                        interrupt_others=True,
-                    )
-                else:
-                    first_observed_at = event.get("first_seen_at")
-                    if first_observed_at:
-                        settle_pending_events(
-                            observed_at=first_observed_at,
-                            current_live_event_key=live_event_key,
-                            interrupt_started_others=True,
-                        )
-                current_observed_at = event.get("last_seen_at") or actual_observed_at
-                if current_observed_at:
-                    settle_live_event(
-                        update,
-                        observed_at=current_observed_at,
-                        interrupt_if_incomplete=False,
-                        completion_reason="observed_full_duration",
-                        interrupt_reason="superseded_before_completion",
-                    )
-                app_conn.commit()
-            except Exception as exc:
-                _record_error(stats.errors, f"live DB update failed: {exc}")
-                app_conn.rollback()
-        if overlay_server is not None:
-            overlay_server.publish(update)
-
-    current_room_name: str | None = None
-
-    def handle_lifecycle_event(event: dict) -> None:
-        nonlocal current_room_name
-
-        event_type = event.get("event_type")
-        if event.get("room_name"):
-            current_room_name = event.get("room_name")
-
-        if event_type == "room-entering":
-            if overlay_server is not None:
-                overlay_server.publish_status(event)
-            return
-
-        if event_type not in {"room-left", "application-quit", "video-shutdown"}:
-            return
-
-        playback_builder.close_open_events()
-
-        observed_at = event.get("observed_at") or event.get("timestamp") or stats.last_log_timestamp
-        interrupt_reason = {
-            "room-left": "room_left",
-            "application-quit": "application_quit",
-            "video-shutdown": "application_quit",
-        }.get(str(event_type), "playback_stopped")
-
-        if observed_at and app_conn is not None:
-            try:
-                if settle_pending_events(
-                    observed_at=observed_at,
-                    interrupt_others=True,
-                    completion_reason="observed_full_duration",
-                    interrupt_reason=interrupt_reason,
-                ):
-                    app_conn.commit()
-            except Exception as exc:
-                _record_error(stats.errors, f"live lifecycle settlement failed: {exc}")
-                app_conn.rollback()
-
-        if overlay_server is not None:
-            status = dict(event)
-            status["room_name"] = status.get("room_name") or current_room_name
-            status["clear_current"] = True
-            overlay_server.publish_status(status)
-
-        if event_type in {"room-left", "application-quit"}:
-            current_room_name = None
-
-    playback_builder = PlaybackEventBuilder(update_callback=handle_playback_update)
+    runtime = _LivePlaybackRuntime(
+        stats=stats,
+        app_db_path=app_db_path,
+        live_db=live_db,
+        promote_live=promote_live,
+        overlay_port=overlay_port,
+    )
+    playback_builder = PlaybackEventBuilder(update_callback=runtime.handle_playback_update)
+    runtime.playback_builder = playback_builder
 
     raw_handle = None
     candidates_handle = None
@@ -1276,8 +1528,8 @@ def watch_vrc_logs(
                     stats=stats,
                     playback_builder=playback_builder,
                     line_number=current_line_number,
-                    line_timestamp_callback=handle_log_progress,
-                    lifecycle_event_callback=handle_lifecycle_event,
+                    line_timestamp_callback=runtime.handle_log_progress,
+                    lifecycle_event_callback=runtime.handle_lifecycle_event,
                 )
 
                 try:
@@ -1313,10 +1565,98 @@ def watch_vrc_logs(
         stats.delay_metrics = _delay_metrics(playback_records)
         _write_jsonl_file(session_dir / "playback_events.jsonl", playback_records)
         _write_json(session_dir / "summary.json", stats.to_dict())
-        if overlay_server is not None:
-            overlay_server.stop()
-        if app_conn is not None:
-            app_conn.close()
+        runtime.close()
+
+    return stats
+
+
+def replay_vrc_log_files(
+    *,
+    log_files: list[Path | str],
+    output_dir: Path | str,
+    session_name: str | None = None,
+    app_db_path: Path | str | None = None,
+    include_raw: bool = True,
+    live_db: bool = True,
+    promote_live: bool = False,
+) -> WatchStats:
+    """Replay a fixed sequence of VRChat logs into capture artifacts."""
+    replay_files = sorted((Path(path) for path in log_files), key=lambda path: path.name)
+    capture_root = Path(output_dir)
+    session_dir = capture_root / session_name if session_name else capture_root
+    session_dir.mkdir(parents=True, exist_ok=True)
+
+    default_db_path: Path | None = None
+    if (live_db or promote_live) and app_db_path is None:
+        default_db_path = session_dir / "live.sqlite3"
+        if default_db_path.exists():
+            default_db_path.unlink()
+        app_db_path = default_db_path
+
+    stats = WatchStats(session_dir=session_dir, started_at=_utc_now())
+    stats.live_session_id = _live_session_id(session_dir, stats.started_at)
+    stats.replayed_files = [str(path) for path in replay_files]
+    runtime = _LivePlaybackRuntime(
+        stats=stats,
+        app_db_path=app_db_path,
+        live_db=live_db,
+        promote_live=promote_live,
+        overlay_port=None,
+    )
+    playback_builder = PlaybackEventBuilder(update_callback=runtime.handle_playback_update)
+    runtime.playback_builder = playback_builder
+
+    raw_handle = None
+    candidates_handle = None
+    parsed_handle = None
+
+    try:
+        if include_raw:
+            raw_handle = open(
+                session_dir / "raw_output_log.txt",
+                "w",
+                encoding="utf-8",
+                errors="replace",
+                buffering=1,
+            )
+        candidates_handle = open(
+            session_dir / "candidates.jsonl",
+            "w",
+            encoding="utf-8",
+            buffering=1,
+        )
+        parsed_handle = open(
+            session_dir / "parsed_events.jsonl",
+            "w",
+            encoding="utf-8",
+            buffering=1,
+        )
+
+        for path in replay_files:
+            with open(path, "r", encoding="utf-8", errors="replace") as current_handle:
+                _drain_handle(
+                    current_handle=current_handle,
+                    current_path=path,
+                    raw_handle=raw_handle,
+                    candidates_handle=candidates_handle,
+                    parsed_handle=parsed_handle,
+                    stats=stats,
+                    playback_builder=playback_builder,
+                    line_number=0,
+                    line_timestamp_callback=runtime.handle_log_progress,
+                    lifecycle_event_callback=runtime.handle_lifecycle_event,
+                )
+    finally:
+        stats.ended_at = _utc_now()
+        for handle in (raw_handle, candidates_handle, parsed_handle):
+            if handle is not None:
+                handle.close()
+        playback_records = playback_builder.records()
+        stats.playback_events = len(playback_records)
+        stats.delay_metrics = _delay_metrics(playback_records)
+        _write_jsonl_file(session_dir / "playback_events.jsonl", playback_records)
+        _write_json(session_dir / "summary.json", stats.to_dict())
+        runtime.close()
 
     return stats
 
@@ -1347,10 +1687,13 @@ def _drain_handle(
         stats.last_file = str(current_path)
         stats.last_offset = current_handle.tell()
         timestamp = _extract_timestamp(line)
-        if timestamp:
+        timestamp_for_settlement = timestamp
+        if timestamp and not _timestamp_before(timestamp, stats.last_log_timestamp):
             stats.last_log_timestamp = timestamp
+        elif timestamp:
+            timestamp_for_settlement = None
         if line_timestamp_callback is not None:
-            line_timestamp_callback(timestamp)
+            line_timestamp_callback(timestamp_for_settlement)
 
         if raw_handle is not None:
             raw_handle.write(line)
@@ -1446,6 +1789,7 @@ def _events_from_payload(
             actual_play_method=actual_play_method,
             video_offset_seconds=video_offset_seconds,
             duration_seconds=parsed_payload["duration_seconds"],
+            duration_source="vrcx_payload" if parsed_payload["duration_seconds"] is not None else None,
         )
         for url in urls
     ]
@@ -1655,6 +1999,12 @@ def _timestamp_sort_key(value: str | None) -> str:
     return parsed.isoformat()
 
 
+def _timestamp_before(left: str | None, right: str | None) -> bool:
+    left_key = _timestamp_sort_key(left)
+    right_key = _timestamp_sort_key(right)
+    return bool(left_key and right_key and left_key < right_key)
+
+
 def _seconds_between(start: str | None, end: str | None) -> float | None:
     start_dt = _parse_vrc_timestamp(start)
     end_dt = _parse_vrc_timestamp(end)
@@ -1717,11 +2067,23 @@ def _clean_url(value: str | None) -> str:
     return value.strip().strip("\"'").rstrip(".,);]}")
 
 
+def _wanna_video_url(song_id: str) -> str:
+    return f"http://api.udon.dance/Api/Songs/play?id={song_id}"
+
+
 def _clean_display_name(value: str | None) -> str | None:
     if value is None:
         return None
     cleaned = value.strip().strip("\"'")
     return cleaned or None
+
+
+def _truthy(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().casefold() in {"1", "true", "yes"}
+    return bool(value)
 
 
 def _trim_newline(value: str) -> str:

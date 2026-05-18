@@ -383,9 +383,9 @@ without depending on internet access.
 Strict promotion into `dance_events` is explicit behind `--promote-live`.
 Promotion requires a completed live row with `completion_status = completed`,
 `actual_play_at`, known `duration_seconds`, no `observed_mid_play`, and a parsed
-dance system/external id. The watcher marks completion only after observing the
-full duration. If a next song appears too early, or a room leave / VRChat quit /
-video shutdown appears before completion, the pending live row is marked
+dance system/external id. The watcher marks completion after observing at least
+80% of the known duration. If a next song appears too early, or a room leave /
+VRChat quit / video shutdown appears before completion, the pending live row is marked
 `interrupted` and is not promoted.
 
 Current watcher/overlay behavior is based on the 2026-05-17 and 2026-05-18 live
@@ -400,6 +400,10 @@ captures:
 - Retry and resolve signals for the same song shortly after playback starts are
   folded back into the existing playback event, preserving the VRCX title and
   requester fields instead of creating a URL-only current row.
+- WannaDance queue JSON from `VideoQueueManager` / `DeserializeVideoUserData`
+  is metadata only. It can supply `songId`, title, player name, duration, and
+  `duration_source = wanna_queue_json` for a real playback event, but it never
+  creates playback by itself and does not require catalog tables.
 - `Playing synced` is recorded as `synced_play_at` only. It does not clear the
   overlay and does not make a row `observed_mid_play`.
 - True mid-room joins are detected from explicit positive progress offsets.
