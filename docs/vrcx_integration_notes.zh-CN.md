@@ -266,6 +266,44 @@ overlay 页面通过 server-sent events 读取同一份 live state。它显示�
 页面应完全本地自包含：不依赖外部字体、图片、CDN 或网络请求。OBS 应能在整场录制中
 保持打开，不受联网状态影响。
 
+### WannaDance 运行时 duration 来源
+
+实时 watcher 和 overlay 里的 WannaDance duration 必须来自 VRChat 日志中的运行时信号。
+overlay 不应依靠主数据库的信息补运行时字段：不要从 `dance_tracks`、`wannadance_songs`、
+目录同步结果、收藏数据或已落库的 catalog metadata 反查 duration。主数据库可以作为
+`live_playback_events` 和显式 promotion 的写入目标，但不能作为 overlay 当前状态的事实来源。
+
+历史日志里有两个可用的日志侧 duration 来源：
+
+1. `PlayQueueVideo` / `PlayRandomVideo` 日志行里的 `videoDuration = N`。
+2. `VideoQueueManager` queue metadata，包括 `queue info serialized` 和
+   `syncedQueuedInfoJson` JSON 里的 `duration`。
+
+对 `analysis/vrc_logs` 的历史日志统计：
+
+- queue JSON 读到 452 条 duration，覆盖 75 个唯一 song id。
+- `PlayQueueVideo` / `PlayRandomVideo ... videoDuration` 读到 78 条 duration，覆盖 74 个唯一 song id。
+- 折叠后的 127 次 WannaDance 播放里，两个来源都有 24 次，只有 queue JSON 39 次，只有
+  `videoDuration` 54 次，两个都没有 10 次。
+
+对当前 VRChat 日志目录 `%USERPROFILE%\AppData\LocalLow\VRChat\VRChat` 的统计：
+
+- queue JSON 读到 68 条 duration，覆盖 29 个唯一 song id。
+- `PlayQueueVideo` / `PlayRandomVideo ... videoDuration` 读到 65 条 duration，覆盖 61 个唯一 song id。
+- 折叠后的 85 次 WannaDance 播放里，两个来源都有 20 次，只有 queue JSON 12 次，只有
+  `videoDuration` 45 次，两个都没有 8 次。
+
+在这些样本中，两个来源同时存在时没有发现 duration 不一致。`DeserializeVideoUserData`
+JSON 没有携带 duration；WannaDance 的 VRCX `VideoPlay` payload 里 duration 是
+`114514` 哨兵值，不能当真实时长。
+
+因此 runtime 取值优先级应是：
+
+1. 优先使用当前播放附近的 `PlayQueueVideo` / `PlayRandomVideo ... videoDuration`。
+2. 没有时，再使用 queue JSON，但必须先用 `songId` 匹配到当前播放。
+3. 如果两个来源都存在且冲突，记录 anomaly，不能静默覆盖。
+4. 如果没有任何运行时 duration，overlay 只显示 elapsed，不从 catalog 或主数据库回填。
+
 严格 promotion 到 `dance_events` 需要显式传入 `--promote-live`。promotion 要求 live row
 已经 `completion_status = completed`，存在 `actual_play_at`，有已知 `duration_seconds`，
 没有 `observed_mid_play`，并且有解析出的 dance system/external id。watcher 只有在观察到

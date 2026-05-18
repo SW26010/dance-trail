@@ -161,6 +161,11 @@ WannaDance 的 `PreviewVideo` 会抑制预览播放器带来的 load/resolve/sta
 出现真正的 VRCX `VideoPlay`，同一首歌仍会被接受为真实播放。同一首歌的 retry/resolve
 信号会合并回当前 playback event，所以 overlay 会保留 VRCX 曲名，不会退回显示原始 URL。
 
+WannaDance 的 `PlayQueueVideo` / `PlayRandomVideo ... videoDuration` 和
+`VideoQueueManager` queue JSON 只会作为运行时 metadata 解析。它们可以给真实 playback
+event 补 `songId`、曲名、点歌人、duration 和 `duration_source`，但不会单独创建播放事件，
+也不依赖 catalog DB。
+
 WannaDance/PyPyDance 的 `Playing synced` 行现在只记录为 `synced_play_at`，不会单独
 清空 overlay，也不会直接把 live row 判定为半路播放。半路播放以 VRCX 的正 progress
 offset 等明确偏移信号为准；这类 row 会作为 pending current 显示在 overlay 上，但不会

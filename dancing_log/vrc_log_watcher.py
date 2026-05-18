@@ -29,6 +29,9 @@ VIDEO_TOKENS = (
     "videoplay",
     "lsmedia",
     "previewvideo",
+    "playqueuevideo",
+    "playrandomvideo",
+    "videoduration",
     "queue info serialized",
     "syncedqueuedinfojson",
     "deserializevideouserdata",
@@ -122,6 +125,13 @@ WANNADANCE_QUEUE_INFO_RE = re.compile(
 WANNADANCE_USER_DATA_RE = re.compile(
     r"\[VideoQueueManager\].*?:\s+DeserializeVideoUserData:\s+userData\s*=\s*"
     r"(?P<payload>\{.*\})",
+    re.IGNORECASE,
+)
+WANNADANCE_PLAY_VIDEO_RE = re.compile(
+    r"\[VideoQueueManager\].*?:\s+"
+    r"(?P<action>PlayQueueVideo|PlayRandomVideo):\s+"
+    r".*?\buserData\s*=\s*(?P<payload>\{.*\})\s*,\s*"
+    r"videoDuration\s*=\s*(?P<duration>[\d.]+)",
     re.IGNORECASE,
 )
 VRCX_VIDEO_PLAY_RE = re.compile(
@@ -786,8 +796,7 @@ class PlaybackEventBuilder:
             self._copy_first(event, record, "display_name")
             self._copy_first(event, record, "requester_marker")
             self._copy_first(event, record, "source_hint")
-            self._copy_first(event, record, "duration_seconds")
-            self._copy_first(event, record, "duration_source")
+            self._merge_duration(event, record)
             for field_name in ("video_url", "routed_url", "resolved_url"):
                 if event.get(field_name) in (None, "") and record.get(field_name):
                     event[field_name] = record[field_name]
@@ -811,8 +820,7 @@ class PlaybackEventBuilder:
         self._copy_first(event, record, "display_name")
         self._copy_first(event, record, "requester_marker")
         self._copy_first(event, record, "source_hint")
-        self._copy_first(event, record, "duration_seconds")
-        self._copy_first(event, record, "duration_source")
+        self._merge_duration(event, record)
 
         for field_name in ("video_url", "routed_url", "resolved_url"):
             if record.get(field_name):
@@ -875,8 +883,6 @@ class PlaybackEventBuilder:
             "video_id",
             "requester_marker",
             "source_hint",
-            "duration_seconds",
-            "duration_source",
             "dance_system_key",
             "dance_external_id",
             "url_kind",
@@ -885,6 +891,7 @@ class PlaybackEventBuilder:
         ):
             if metadata.get(field_name) in (None, "") and record.get(field_name) not in (None, ""):
                 metadata[field_name] = record[field_name]
+        self._merge_duration(metadata, record)
 
         current_key = self._open_by_canonical.get(canonical_key)
         if current_key is None:
@@ -1025,6 +1032,34 @@ class PlaybackEventBuilder:
             event[field_name] = record[field_name]
 
     @staticmethod
+    def _merge_duration(event: dict, record: dict) -> None:
+        incoming_duration = record.get("duration_seconds")
+        if incoming_duration in (None, ""):
+            return
+
+        existing_duration = event.get("duration_seconds")
+        incoming_source = record.get("duration_source")
+        existing_source = event.get("duration_source")
+        if existing_duration in (None, ""):
+            event["duration_seconds"] = incoming_duration
+            event["duration_source"] = incoming_source
+            return
+
+        if _duration_values_differ(existing_duration, incoming_duration):
+            event.setdefault("duration_conflicts", []).append(
+                {
+                    "existing_duration_seconds": existing_duration,
+                    "existing_duration_source": existing_source,
+                    "incoming_duration_seconds": incoming_duration,
+                    "incoming_duration_source": incoming_source,
+                }
+            )
+
+        if _duration_source_priority(incoming_source) > _duration_source_priority(existing_source):
+            event["duration_seconds"] = incoming_duration
+            event["duration_source"] = incoming_source
+
+    @staticmethod
     def _copy_time(
         event: dict,
         field_name: str,
@@ -1157,6 +1192,17 @@ def parse_vrc_log_line(line: str) -> list[ParsedVrcLogEvent]:
         event = _event_from_wannadance_user_data(
             timestamp=timestamp,
             payload=match.group("payload"),
+            raw_line=line,
+        )
+        if event is not None:
+            events.append(event)
+
+    match = WANNADANCE_PLAY_VIDEO_RE.search(plain_line)
+    if match:
+        event = _event_from_wannadance_play_video(
+            timestamp=timestamp,
+            payload=match.group("payload"),
+            duration=match.group("duration"),
             raw_line=line,
         )
         if event is not None:
@@ -1359,6 +1405,7 @@ def _events_from_wannadance_queue_info(
                 duration_seconds=_float_or_none(
                     str(entry.get("duration")) if entry.get("duration") is not None else None
                 ),
+                duration_source="wanna_queue_json",
             )
         )
     return [event for event in events if event is not None]
@@ -1385,6 +1432,31 @@ def _event_from_wannadance_user_data(
         duration_seconds=_float_or_none(
             str(value.get("duration")) if value.get("duration") is not None else None
         ),
+        duration_source="wanna_queue_json",
+    )
+
+
+def _event_from_wannadance_play_video(
+    *,
+    timestamp: str | None,
+    payload: str,
+    duration: str,
+    raw_line: str,
+) -> ParsedVrcLogEvent | None:
+    value = _try_json(payload)
+    if not isinstance(value, dict):
+        return None
+    return _wanna_metadata_event(
+        timestamp=timestamp,
+        raw_line=raw_line,
+        parser_name="wannadance_play_video",
+        song_id=value.get("songId") or value.get("song_id") or value.get("id"),
+        video_url=value.get("videoUrl") or value.get("video_url"),
+        title=value.get("videoTitle") or value.get("title") or value.get("infoString"),
+        display_name=value.get("playerName") or value.get("displayName"),
+        is_random=value.get("isRandom"),
+        duration_seconds=_float_or_none(duration),
+        duration_source="wanna_video_duration",
     )
 
 
@@ -1399,6 +1471,7 @@ def _wanna_metadata_event(
     display_name,
     is_random,
     duration_seconds: float | None,
+    duration_source: str | None,
 ) -> ParsedVrcLogEvent | None:
     song_id_text = str(song_id).strip() if song_id is not None else ""
     if not song_id_text and not video_url:
@@ -1423,7 +1496,7 @@ def _wanna_metadata_event(
         requester_marker=requester_marker,
         source_hint=source_hint,
         duration_seconds=duration_seconds,
-        duration_source="wanna_queue_json" if duration_seconds is not None else None,
+        duration_source=duration_source if duration_seconds is not None else None,
     )
 
 
@@ -2059,6 +2132,21 @@ def _float_or_none(value: str | None) -> float | None:
         return float(value)
     except ValueError:
         return None
+
+
+def _duration_values_differ(left, right) -> bool:
+    try:
+        return abs(float(left) - float(right)) > COMPLETION_EPSILON_SECONDS
+    except (TypeError, ValueError):
+        return left != right
+
+
+def _duration_source_priority(source: str | None) -> int:
+    return {
+        "wanna_queue_json": 10,
+        "vrcx_payload": 20,
+        "wanna_video_duration": 30,
+    }.get(source or "", 0)
 
 
 def _clean_url(value: str | None) -> str:

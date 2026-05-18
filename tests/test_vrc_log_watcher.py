@@ -88,6 +88,26 @@ class VrcLogParserTest(unittest.TestCase):
         self.assertEqual(record["dance_external_id"], "8385")
         self.assertEqual(record["video_name"], "Poker Face")
 
+    def test_parses_wannadance_play_video_duration_metadata(self):
+        events = parse_vrc_log_line(
+            '2026.05.17 15:23:33 Debug - [VideoQueueManager] [15:23:33] : '
+            'PlayRandomVideo: randomIndex = 2836, infoString = 2836. Random Song, '
+            'userData = {"songId":2836,"isRandom":true,"playerName":"",'
+            '"videoUrl":"http://api.udon.dance/Api/Songs/play?id=2836",'
+            '"videoTitle":"2836. Random Song"}, videoDuration = 155'
+        )
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].event_type, "metadata")
+        self.assertEqual(events[0].parser_name, "wannadance_play_video")
+        self.assertEqual(events[0].duration_seconds, 155.0)
+        self.assertEqual(events[0].duration_source, "wanna_video_duration")
+        self.assertEqual(events[0].source_hint, "random")
+        self.assertIsNone(events[0].display_name)
+        record = events[0].to_capture_record()
+        self.assertEqual(record["dance_system_key"], WANNA_SYSTEM_KEY)
+        self.assertEqual(record["dance_external_id"], "2836")
+
     def test_parses_wannadance_user_data_metadata(self):
         events = parse_vrc_log_line(
             '2026.05.17 19:50:28 Debug - [VideoQueueManager] [19:50:28] : '
@@ -855,6 +875,55 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertEqual(event_count, 1)
             self.assertEqual(live_row["completion_status"], "completed")
             self.assertEqual(live_row["duration_source"], "wanna_queue_json")
+
+    def test_watcher_uses_wanna_play_video_duration_for_live_overlay_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            db_path = root / "app.sqlite3"
+            (log_dir / "output_log_0001.txt").write_text(
+                '2026.05.17 15:23:30 Debug - [VideoQueueManager] [15:23:30] : '
+                'OnPreSerialization: queue info serialized: '
+                '[{"playerNames":[],"title":"2836. Random Song","songId":2836,'
+                '"duration":155,"isRandom":true}]\n'
+                '2026.05.17 15:23:33 Debug - [VideoQueueManager] [15:23:33] : '
+                'PlayRandomVideo: randomIndex = 2836, infoString = 2836. Random Song, '
+                'userData = {"songId":2836,"isRandom":true,"playerName":"",'
+                '"videoUrl":"http://api.udon.dance/Api/Songs/play?id=2836",'
+                '"videoTitle":"2836. Random Song"}, videoDuration = 155\n'
+                '2026.05.17 15:23:33 Debug - [VRCX] VideoPlay(PyPyDance) '
+                '"http://api.udon.dance/Api/Songs/play?node=cf&id=2836",0,114514,'
+                '"$2836. Random Song (Random)"\n'
+                "2026.05.17 15:23:35 Debug - "
+                "[<color=#9C6994>USharpVideo (WannaDance)</color>] "
+                "DelayedVideoReady: Time's up, let's play\n",
+                encoding="utf-8",
+            )
+
+            stats = watch_vrc_logs(
+                log_dir=log_dir,
+                output_dir=root / "capture",
+                session_name="wanna-video-duration-live",
+                app_db_path=db_path,
+                from_start=True,
+                live_db=True,
+                poll_seconds=0.01,
+                stop_after_idle_seconds=0.05,
+            )
+
+            playback = read_jsonl(stats.session_dir / "playback_events.jsonl")
+            event = next(event for event in playback if event["dance_external_id"] == "2836")
+            self.assertEqual(event["duration_seconds"], 155.0)
+            self.assertEqual(event["duration_source"], "wanna_video_duration")
+            with connect_db(db_path) as conn:
+                live_row = conn.execute(
+                    "SELECT * FROM live_playback_events WHERE dance_external_id = '2836'"
+                ).fetchone()
+            self.assertEqual(live_row["actual_play_at"], "2026.05.17 15:23:35")
+            self.assertEqual(live_row["duration_seconds"], 155.0)
+            self.assertEqual(live_row["duration_source"], "wanna_video_duration")
+            self.assertEqual(live_row["source_type"], "random")
 
     def test_watcher_promotes_wanna_before_late_manual_cut(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -222,10 +222,11 @@ noise, but a later real VRCX `VideoPlay` for the same song is still accepted.
 Same-song retry/resolve signals are folded back into the active playback event,
 so the overlay keeps the VRCX title instead of falling back to a raw URL.
 
-WannaDance `VideoQueueManager` queue JSON and `DeserializeVideoUserData` lines
-are parsed as metadata only. They can fill `songId`, title, player name,
-duration, and `duration_source = wanna_queue_json` on a real playback event, but
-they do not create playback by themselves and do not depend on the catalog DB.
+WannaDance `PlayQueueVideo` / `PlayRandomVideo ... videoDuration` and
+`VideoQueueManager` queue JSON lines are parsed as runtime metadata only. They
+can fill `songId`, title, player name, duration, and `duration_source` on a real
+playback event, but they do not create playback by themselves and do not depend
+on the catalog DB.
 
 WannaDance/PyPyDance `Playing synced` lines are recorded as `synced_play_at`
 only; they do not by themselves clear the overlay or mark a row as mid-play.

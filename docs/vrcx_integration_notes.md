@@ -380,6 +380,62 @@ The page should be self-contained and local: no external fonts, images, CDNs, or
 network calls. OBS should be able to keep it open for a whole recording session
 without depending on internet access.
 
+### WannaDance runtime duration sources
+
+WannaDance duration for live watcher and overlay state must come from VRChat log
+signals only. The overlay must not query or depend on the main app database,
+`dance_tracks`, `wannadance_songs`, catalog sync output, favorites, or other
+stored catalog metadata to fill missing runtime fields. The main database can be
+a sink for `live_playback_events` and explicit promotion, but it must not become
+the source of truth for what the overlay shows.
+
+Historical log inspection on 2026-05-18 found two useful log-derived duration
+sources:
+
+- `PlayQueueVideo` / `PlayRandomVideo` lines with `videoDuration = N`.
+  These are closest to the actual play command and are especially important for
+  random plays.
+- `VideoQueueManager` queue metadata from `queue info serialized` or
+  `syncedQueuedInfoJson`, where each queued item can include `duration`.
+  This is reliable when the `songId` is matched onto a real playback event, but
+  queue metadata alone is not a playback signal.
+
+Coverage in `analysis/vrc_logs`:
+
+- queue JSON duration: 452 entries, 75 unique song ids
+- `videoDuration`: 78 entries, 74 unique song ids
+- 127 folded WannaDance playback occurrences:
+  - both sources near the occurrence: 24
+  - queue JSON only: 39
+  - `videoDuration` only: 54
+  - neither source: 10
+
+Coverage in the live VRChat log directory:
+
+- queue JSON duration: 68 entries, 29 unique song ids
+- `videoDuration`: 65 entries, 61 unique song ids
+- 85 folded WannaDance playback occurrences:
+  - both sources near the occurrence: 20
+  - queue JSON only: 12
+  - `videoDuration` only: 45
+  - neither source: 8
+
+No duration mismatches were found where both sources were present. In the same
+logs, `DeserializeVideoUserData` JSON did not include duration, and WannaDance
+VRCX `VideoPlay` rows used `114514` as a sentinel instead of a real duration.
+
+Preferred runtime order:
+
+1. Use nearby `PlayQueueVideo` / `PlayRandomVideo ... videoDuration` for the
+   current playback event when present.
+2. Otherwise, use queue JSON duration only after matching `songId` to the
+   current playback event.
+3. If both sources are present and disagree, keep the row visible but record an
+   anomaly instead of silently choosing one.
+4. If no runtime duration is known, the overlay should show elapsed time without
+   a total duration or progress percentage; it should not backfill from catalog
+   tables.
+
 Strict promotion into `dance_events` is explicit behind `--promote-live`.
 Promotion requires a completed live row with `completion_status = completed`,
 `actual_play_at`, known `duration_seconds`, no `observed_mid_play`, and a parsed
