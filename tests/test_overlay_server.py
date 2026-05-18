@@ -39,6 +39,40 @@ class OverlayServerTest(unittest.TestCase):
         )
         self.assertEqual(resumed["current"]["dance_external_id"], "4661")
 
+    def test_overlay_keeps_completed_event_current_until_cleared(self):
+        state = OverlayState()
+        state.publish(
+            {
+                "event_key": "pypydance:1845#1",
+                "dance_system_key": "pypydance",
+                "dance_external_id": "1845",
+                "actual_play_at": "2026.05.18 15:57:11.690075",
+                "duration_seconds": 245,
+            }
+        )
+
+        completed = state.publish(
+            {
+                "event_key": "pypydance:1845#1",
+                "dance_system_key": "pypydance",
+                "dance_external_id": "1845",
+                "actual_play_at": "2026.05.18 15:57:11.690075",
+                "duration_seconds": 245,
+                "completion_status": "completed",
+                "completion_reason": "observed_completion_threshold",
+            }
+        )
+        self.assertEqual(completed["current"]["dance_external_id"], "1845")
+
+        cleared = state.publish_status(
+            {
+                "event_type": "application-quit",
+                "message": "VRChat ended",
+                "clear_current": True,
+            }
+        )
+        self.assertIsNone(cleared["current"])
+
     def test_overlay_state_and_static_page_are_local(self):
         server = OverlayServer(port=0)
         server.start()

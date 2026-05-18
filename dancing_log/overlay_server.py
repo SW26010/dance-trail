@@ -248,7 +248,7 @@ def _is_current_event(event: dict, *, cleared_sequence: int) -> bool:
     sequence = int(event.get("_overlay_sequence") or 0)
     if sequence <= cleared_sequence:
         return False
-    return event.get("completion_status") not in {"completed", "interrupted"}
+    return event.get("completion_status") != "interrupted"
 
 
 def _utc_now() -> str:
