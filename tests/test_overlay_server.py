@@ -2,7 +2,7 @@ import json
 import unittest
 from urllib.request import urlopen
 
-from dancing_log.overlay_server import OverlayServer, OverlayState
+from dancing_log.overlay_server import OverlayServer, OverlayState, _OVERLAY_HTML
 
 
 class OverlayServerTest(unittest.TestCase):
@@ -135,6 +135,26 @@ class OverlayServerTest(unittest.TestCase):
             self.assertEqual(snapshot["current"]["source_type"], "random")
         finally:
             server.stop()
+
+    def test_overlay_html_preserves_source_and_duration_labels(self):
+        self.assertIn("function sourceLabel(event)", _OVERLAY_HTML)
+        self.assertIn('if (type) return `source ${type}`;', _OVERLAY_HTML)
+        self.assertIn(
+            "if (Number.isFinite(duration) && duration > 0)",
+            _OVERLAY_HTML,
+        )
+        self.assertIn(
+            "parts.push(`remaining ${formatDuration(remaining)}/${formatDuration(duration)}`);",
+            _OVERLAY_HTML,
+        )
+        self.assertIn(
+            "parts.push(`elapsed ${formatDuration(elapsed)}`);",
+            _OVERLAY_HTML,
+        )
+        self.assertNotIn(
+            'source player: ${event.source_display_name || "unknown"}',
+            _OVERLAY_HTML,
+        )
 
 
 if __name__ == "__main__":
