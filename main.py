@@ -12,6 +12,16 @@ def _get_local_config() -> dict:
     return load_local_config()
 
 
+def _is_frozen() -> bool:
+    return bool(getattr(sys, "frozen", False))
+
+
+def _command_prefix() -> str:
+    if _is_frozen():
+        return Path(sys.executable).name
+    return "uv run python main.py"
+
+
 def _pick_value(cli_value, config_value):
     return cli_value if cli_value is not None else config_value
 
@@ -40,6 +50,44 @@ def _resolve_recording_path(recording, recordings_dir, app_root=None) -> Path:
     return app_relative
 
 
+def cmd_sync_wanna():
+    """Sync WannaDance tracks into SQLite."""
+    import argparse
+
+    config = _get_local_config()
+    parser = argparse.ArgumentParser(description="Sync WannaDance catalog into SQLite")
+    parser.add_argument("--app-db", default=None, help="SQLite database path")
+    parser.add_argument("--cache-dir", default=None, help="Local wannadance-song cache directory")
+    parser.add_argument("--offline", action="store_true", help="Use local cache only; skip the public API")
+    parser.add_argument("--write-files", action="store_true", help="Also export data/*.csv/json artifacts")
+    parser.add_argument("--no-files", action="store_true", help=argparse.SUPPRESS)
+    args = parser.parse_args(sys.argv[2:])
+
+    db_path = _configured_db_path(args.app_db, config)
+    cache_dir = _pick_value(args.cache_dir, config.get("wanna_cache_dir"))
+    if cache_dir:
+        cache_dir = resolve_app_path(cache_dir, cache_dir)
+
+    from dancing_log.wanna_catalog import sync_wanna_catalog
+
+    stats = sync_wanna_catalog(
+        db_path=db_path,
+        cache_dir=cache_dir,
+        use_api=not args.offline,
+        write_files=args.write_files and not args.no_files,
+    )
+    source = "API + cache" if stats.used_api else "cache only"
+    print("WannaDance catalog sync complete")
+    print(f"  source: {source}")
+    print(f"  API songs: {stats.api_count}")
+    print(f"  cached songs: {stats.cache_count}")
+    print(f"  database tracks before: {stats.db_before}")
+    print(f"  database tracks after: {stats.db_after}")
+    print(f"  inserted: {stats.inserted}")
+    print(f"  updated/touched: {stats.updated}")
+    print(f"  catalog rows without local cache: {stats.missing_in_cache}")
+
+
 def cmd_recommend():
     """Generate the daily recommendation playlist."""
     import argparse
@@ -55,7 +103,7 @@ def cmd_recommend():
 
     tracks = load_dance_tracks(db_path)
     if not tracks:
-        print("Error: dance_tracks table is empty. Run `uv run python main.py sync-wanna` first.")
+        print(f"Error: dance_tracks table is empty. Run `{_command_prefix()} sync-wanna` first.")
         sys.exit(1)
 
     dance_log = load_dance_log(db_path)
@@ -507,10 +555,9 @@ def cmd_rebuild_data():
 
 
 def main():
-    user_script_commands = {
-        "sync-wanna": ("Sync WannaDance tracks into SQLite", "scripts/sync_wanna_songs.py"),
-    }
+    user_script_commands = {}
     user_builtin_commands = {
+        "sync-wanna": ("Sync WannaDance tracks into SQLite", cmd_sync_wanna),
         "recommend": ("Generate daily recommendation playlist", cmd_recommend),
         "log": ("Append one dance log record", cmd_log),
         "import-favorites": ("Import favorite track flags from text", cmd_import_favorites),
@@ -519,10 +566,12 @@ def main():
         "watch-vrc-log": ("Capture live VRChat output logs", cmd_watch_vrc_log),
         "rebuild-data": ("Archive and rebuild generated local data", cmd_rebuild_data),
     }
-    research_script_commands = {
-        "scrape": ("Fetch Wanna Dance song metadata into local files", "scripts/scrape_wanna.py"),
-        "test-apis": ("Test music APIs", "scripts/test_music_apis.py"),
-    }
+    research_script_commands = {}
+    if not _is_frozen():
+        research_script_commands = {
+            "scrape": ("Fetch Wanna Dance song metadata into local files", "scripts/scrape_wanna.py"),
+            "test-apis": ("Test music APIs", "scripts/test_music_apis.py"),
+        }
     research_builtin_commands = {
         "sample-frames": ("Sample overlay verification frames from a recording", cmd_sample_recording_frames),
     }
@@ -533,27 +582,30 @@ def main():
     all_names = list(script_commands) + list(builtin_commands)
 
     if len(sys.argv) < 2 or sys.argv[1] not in all_names:
+        prefix = _command_prefix()
         print("dancing-log - local dance playback timeline toolkit\n")
-        print("Usage: uv run python main.py <command> [args...]\n")
+        print(f"Usage: {prefix} <command> [args...]\n")
         print("User workflow:")
         for name, (desc, _) in {**user_script_commands, **user_builtin_commands}.items():
             print(f"  {name:<18} {desc}")
-        print("\nDevelopment/research:")
-        for name, (desc, _) in {**research_script_commands, **research_builtin_commands}.items():
-            print(f"  {name:<16} {desc}")
+        if research_script_commands or research_builtin_commands:
+            print("\nDevelopment/research:")
+            for name, (desc, _) in {**research_script_commands, **research_builtin_commands}.items():
+                print(f"  {name:<16} {desc}")
         print("\nExamples:")
-        print("  uv run python main.py sync-wanna")
-        print("  uv run python main.py log --system wannadance 5038")
-        print("  uv run python main.py log --system wannadance 5038 --other")
-        print("  uv run python main.py recommend -n 10")
-        print("  uv run python main.py import-favorites --system wannadance data/favorites.txt")
-        print("  uv run python main.py import-vrcx path/to/vrcx-snapshot/VRCX.sqlite3")
-        print("  uv run python main.py import-vrcx")
-        print("  uv run python main.py sync-queued-self --system wannadance")
-        print("  uv run python main.py watch-vrc-log")
-        print("  uv run python main.py rebuild-data --archive-existing")
-        print("  uv run python main.py scrape")
-        print("  uv run python main.py sample-frames path/to/recordings/example.mkv --at 60 300")
+        print(f"  {prefix} sync-wanna")
+        print(f"  {prefix} log --system wannadance 5038")
+        print(f"  {prefix} log --system wannadance 5038 --other")
+        print(f"  {prefix} recommend -n 10")
+        print(f"  {prefix} import-favorites --system wannadance data/favorites.txt")
+        print(f"  {prefix} import-vrcx path/to/vrcx-snapshot/VRCX.sqlite3")
+        print(f"  {prefix} import-vrcx")
+        print(f"  {prefix} sync-queued-self --system wannadance")
+        print(f"  {prefix} watch-vrc-log")
+        print(f"  {prefix} rebuild-data --archive-existing")
+        if not _is_frozen():
+            print(f"  {prefix} scrape")
+            print(f"  {prefix} sample-frames path/to/recordings/example.mkv --at 60 300")
         sys.exit(0)
 
     cmd = sys.argv[1]

@@ -214,6 +214,8 @@ uv run python main.py sync-queued-self --system wannadance
 英文文档：
 
 - `docs/dance_data_model.md`
+- `docs/app_directories.md`
+- `docs/portable_release.md`
 - `docs/wanna_catalog_sync.md`
 - `docs/vrcx_integration_notes.md`
 - `docs/music_api_research.md`
@@ -221,6 +223,8 @@ uv run python main.py sync-queued-self --system wannadance
 中文文档：
 
 - `docs/dance_data_model.zh-CN.md`
+- `docs/app_directories.zh-CN.md`
+- `docs/portable_release.zh-CN.md`
 - `docs/wanna_catalog_sync.zh-CN.md`
 - `docs/vrcx_integration_notes.zh-CN.md`
 - `docs/music_api_research.zh-CN.md`

@@ -1,0 +1,76 @@
+# Portable Release
+
+The first supported release shape is a Windows x64 portable folder. It keeps the
+same app-root path model as source runs: `config/`, `data/`, and `logs/` live
+next to `DancingLog.exe`.
+
+## Local Build
+
+Prerequisites:
+
+- Windows
+- Python 3.14
+- `uv` on `PATH`
+
+Run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1
+```
+
+The script runs the unit tests, builds a PyInstaller onedir app, runs an exe
+smoke test, and writes:
+
+```text
+dist/releases/DancingLog-v<version>-win-x64-portable.zip
+dist/releases/DancingLog-v<version>-win-x64-portable.zip.sha256
+```
+
+Useful options:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1 -Version 0.1.0
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1 -SkipTests
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1 -SkipSmoke
+```
+
+## GitHub Release
+
+Push a version tag:
+
+```powershell
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The `Release Portable` workflow builds the same portable zip, uploads it as an
+artifact, and attaches the zip plus SHA-256 checksum to the GitHub Release.
+
+## Portable Folder Contents
+
+The generated folder includes:
+
+```text
+DancingLog.exe
+_internal/
+config/dancing-log.example.json
+data/
+logs/
+docs/
+README.md
+README.zh-CN.md
+sync-wanna.bat
+start-watch-vrc-log.bat
+```
+
+User-specific settings belong in `config/dancing-log.local.json`, which is not
+included in the release zip.
+
+`start-watch-vrc-log.bat` starts the common OBS overlay workflow:
+
+```bat
+DancingLog.exe watch-vrc-log --live-db --overlay-port 8765 %*
+```
+
+Extra arguments are appended, so a user can still pass options such as
+`--promote-live`, `--log-dir`, or another `--overlay-port`.

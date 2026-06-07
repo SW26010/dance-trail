@@ -42,6 +42,7 @@ Related docs:
 
 - `docs/dance_data_model.md`: current SQLite model and table boundaries.
 - `docs/app_directories.md`: application-root paths, local config, and output directories.
+- `docs/portable_release.md`: Windows portable release build and tag workflow.
 - `docs/wanna_catalog_sync.md`: WannaDance API/cache sync behavior.
 - `docs/vrcx_integration_notes.md`: VRCX source research and importer status.
 - `docs/music_api_research.md`: archived provider-matching research.
@@ -51,6 +52,7 @@ Chinese docs:
 - `README.zh-CN.md`: Chinese project overview and daily commands.
 - `docs/app_directories.zh-CN.md`: Chinese application-directory notes.
 - `docs/dance_data_model.zh-CN.md`: Chinese data model notes.
+- `docs/portable_release.zh-CN.md`: Chinese portable release notes.
 - `docs/wanna_catalog_sync.zh-CN.md`: Chinese WannaDance sync notes.
 - `docs/vrcx_integration_notes.zh-CN.md`: Chinese VRCX import notes.
 - `docs/music_api_research.zh-CN.md`: Chinese music API research notes.
