@@ -41,6 +41,7 @@ See `docs/dance_data_model.md` for the design rationale.
 Related docs:
 
 - `docs/dance_data_model.md`: current SQLite model and table boundaries.
+- `docs/app_directories.md`: application-root paths, local config, and output directories.
 - `docs/wanna_catalog_sync.md`: WannaDance API/cache sync behavior.
 - `docs/vrcx_integration_notes.md`: VRCX source research and importer status.
 - `docs/music_api_research.md`: archived provider-matching research.
@@ -48,6 +49,7 @@ Related docs:
 Chinese docs:
 
 - `README.zh-CN.md`: Chinese project overview and daily commands.
+- `docs/app_directories.zh-CN.md`: Chinese application-directory notes.
 - `docs/dance_data_model.zh-CN.md`: Chinese data model notes.
 - `docs/wanna_catalog_sync.zh-CN.md`: Chinese WannaDance sync notes.
 - `docs/vrcx_integration_notes.zh-CN.md`: Chinese VRCX import notes.
@@ -86,7 +88,7 @@ uv run python main.py rebuild-data --archive-existing
 
 The rebuild flow keeps:
 
-- `data/local_config.json`
+- `config/dancing-log.local.json`
 - `data/queued_self/`
 
 It archives generated files such as:
@@ -149,7 +151,7 @@ uv run python main.py import-vrcx "path/to/vrcx-snapshot/VRCX.sqlite3"
 uv run python main.py import-vrcx --dry-run
 ```
 
-If `data/local_config.json` contains `vrcx_db_path`, the path can be omitted:
+If `config/dancing-log.local.json` contains `vrcx_db_path`, the path can be omitted:
 
 ```bash
 uv run python main.py import-vrcx
@@ -167,9 +169,9 @@ Capture live VRChat Unity output logs for parser forensics:
 uv run python main.py watch-vrc-log
 ```
 
-The watcher uses `vrc_log_dir` from `data/local_config.json` when present, then
+The watcher uses `vrc_log_dir` from `config/dancing-log.local.json` when present, then
 falls back to the standard Windows LocalLow path. It writes only local ignored
-artifacts under `analysis/vrc_log_capture/<session>/`:
+artifacts under `logs/captures/<session>/`:
 
 - `raw_output_log.txt`: low-overhead mirror of captured raw lines
 - `candidates.jsonl`: video-related lines worth inspecting
@@ -253,14 +255,22 @@ Sync queued-self manifests:
 uv run python main.py sync-queued-self --system wannadance
 ```
 
-## Local Config
+## Application Directories And Local Config
 
-Local machine paths live in `data/local_config.json` and are ignored by git.
+Local machine paths live in `config/dancing-log.local.json` and are ignored by
+git. See `docs/app_directories.md` for the full directory contract.
 
 Supported keys:
 
 ```json
 {
+  "config_version": 1,
+  "app_db": "data/dancing_log.sqlite3",
+  "queued_self_dir": "data/queued_self",
+  "capture_dir": "logs/captures",
+  "run_log_dir": "logs/runs",
+  "source_vrc_log_dir": "logs/source-vrc-logs",
+  "recording_frames_dir": "analysis/recording_frames",
   "self_user_id": null,
   "vrcx_db_path": null,
   "vrc_log_dir": null,

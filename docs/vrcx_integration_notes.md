@@ -253,7 +253,7 @@ uv run python main.py import-vrcx "path/to/vrcx-snapshot/VRCX.sqlite3"
 uv run python main.py import-vrcx --dry-run
 ```
 
-The VRCX database path can also be stored in `data/local_config.json` as
+The VRCX database path can also be stored in `config/dancing-log.local.json` as
 `vrcx_db_path`.
 
 The importer currently:
@@ -286,9 +286,9 @@ The base command remains a forensic capture path. It tails VRChat
 `output_log_*.txt` files, mirrors raw lines when enabled, writes video-related
 candidates to `candidates.jsonl`, writes parsed playback-like signals to
 `parsed_events.jsonl`, writes folded per-song rows to `playback_events.jsonl`,
-and stores the session under `analysis/vrc_log_capture/`.
+and stores the session under `logs/captures/`.
 
-The watcher defaults to `data/local_config.json` key `vrc_log_dir`, falling back
+The watcher defaults to `config/dancing-log.local.json` key `vrc_log_dir`, falling back
 to the standard Windows LocalLow VRChat log directory. It starts from the current
 log file's end by default to avoid rescanning old large logs during gameplay;
 newly created log files are read from the beginning so startup lines are not

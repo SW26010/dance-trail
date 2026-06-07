@@ -12,11 +12,10 @@ import os
 import re
 import time
 
+from dancing_log.app_paths import DEFAULT_CAPTURE_ROOT
 from dancing_log.vrcx_importer import parse_dance_url
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CAPTURE_ROOT = PROJECT_ROOT / "analysis" / "vrc_log_capture"
 LOG_FILE_PATTERN = "output_log_*.txt"
 PROMOTION_COMPLETION_RATIO = 0.8
 COMPLETION_EPSILON_SECONDS = 0.001

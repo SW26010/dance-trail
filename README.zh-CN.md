@@ -73,7 +73,7 @@ uv run python main.py rebuild-data --archive-existing
 
 重建流程会保留：
 
-- `data/local_config.json`
+- `config/dancing-log.local.json`
 - `data/queued_self/`
 
 会归档这些生成文件：
@@ -122,7 +122,7 @@ uv run python main.py import-vrcx "path/to/vrcx-snapshot/VRCX.sqlite3"
 uv run python main.py import-vrcx --dry-run
 ```
 
-如果 `data/local_config.json` 里配置了 `vrcx_db_path`，路径可以省略：
+如果 `config/dancing-log.local.json` 里配置了 `vrcx_db_path`，路径可以省略：
 
 ```bash
 uv run python main.py import-vrcx
@@ -195,7 +195,7 @@ uv run python main.py sync-queued-self --system wannadance
 
 ## 本地配置
 
-本机路径放在 `data/local_config.json`，该文件会被 git 忽略。
+本机路径放在 `config/dancing-log.local.json`，该文件会被 git 忽略。
 
 支持字段：
 

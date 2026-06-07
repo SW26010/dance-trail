@@ -12,7 +12,7 @@
 目录同步使用两个来源：
 
 - WannaDance 公共 API：权威的公开目录元数据。
-- 本地 `wanna_cache_dir`：`data/local_config.json` 中配置的本地下载缓存。
+- 本地 `wanna_cache_dir`：`config/dancing-log.local.json` 中配置的本地下载缓存。
 
 即使 API 不可用，本地缓存仍然有价值，因为每个缓存歌曲目录里可能有
 `metadata.json`、`download.txt` 和 `video.mp4`。

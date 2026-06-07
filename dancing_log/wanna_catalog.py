@@ -10,10 +10,10 @@ import json
 import sqlite3
 import urllib.request
 
+from dancing_log.app_paths import DEFAULT_CONFIG, resolve_app_path
 from dancing_log.local_config import load_local_config
 from dancing_log.storage import (
     DATA_DIR,
-    DB_FILE,
     WANNA_SYSTEM_KEY,
     connect_db,
     ensure_dance_track,
@@ -156,7 +156,16 @@ def sync_wanna_catalog(
 ) -> SyncStats:
     """Synchronize WannaDance catalog data into SQLite and optional artifacts."""
     config = load_local_config()
-    resolved_cache_dir = cache_dir if cache_dir is not None else config.get("wanna_cache_dir")
+    configured_cache_dir = cache_dir if cache_dir is not None else config.get("wanna_cache_dir")
+    resolved_cache_dir = (
+        resolve_app_path(configured_cache_dir, configured_cache_dir)
+        if configured_cache_dir
+        else None
+    )
+    resolved_db_path = resolve_app_path(
+        db_path,
+        config.get("app_db") or DEFAULT_CONFIG["app_db"],
+    )
 
     api_songs: list[dict] = []
     used_api = False
@@ -174,7 +183,7 @@ def sync_wanna_catalog(
     if write_files:
         _write_catalog_files(merged, api_songs)
 
-    with connect_db(db_path or DB_FILE) as conn:
+    with connect_db(resolved_db_path) as conn:
         db_before = _wanna_track_count(conn)
         existing_ids = _wanna_external_ids(conn)
         changed = upsert_catalog(conn, merged)

@@ -649,6 +649,21 @@ class SQLiteRuntimeTest(unittest.TestCase):
             self.assertEqual(len(stats.archived), 3)
             self.assertTrue((stats.archive_dir / "dancing_log.sqlite3").exists())
 
+    def test_archive_existing_data_archives_custom_app_db(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            custom_db = root / "runtime" / "custom.sqlite3"
+            custom_db.parent.mkdir()
+            custom_db.write_text("db", encoding="utf-8")
+            Path(str(custom_db) + "-wal").write_text("wal", encoding="utf-8")
+
+            stats = archive_existing_data(root, app_db_path=custom_db)
+
+            self.assertFalse(custom_db.exists())
+            self.assertFalse(Path(str(custom_db) + "-wal").exists())
+            self.assertTrue((stats.archive_dir / "custom.sqlite3").exists())
+            self.assertTrue((stats.archive_dir / "custom.sqlite3-wal").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

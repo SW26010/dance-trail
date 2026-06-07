@@ -8,11 +8,11 @@ from pathlib import Path
 import re
 import sqlite3
 
-from dancing_log.storage import DATA_DIR, connect_db
+from dancing_log.app_paths import QUEUED_SELF_DIR
+from dancing_log.storage import connect_db
 from dancing_log.vrcx_importer import SOURCE_PRIORITY_SQL
 
 
-QUEUED_SELF_DIR = DATA_DIR / "queued_self"
 SOURCE_QUEUED_SELF = "queued_self"
 EVENT_SOURCE = "queued_self_manifest"
 

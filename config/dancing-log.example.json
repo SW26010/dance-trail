@@ -1,0 +1,14 @@
+{
+  "config_version": 1,
+  "app_db": "data/dancing_log.sqlite3",
+  "queued_self_dir": "data/queued_self",
+  "capture_dir": "logs/captures",
+  "run_log_dir": "logs/runs",
+  "source_vrc_log_dir": "logs/source-vrc-logs",
+  "recording_frames_dir": "analysis/recording_frames",
+  "self_user_id": null,
+  "vrcx_db_path": null,
+  "vrc_log_dir": null,
+  "wanna_cache_dir": null,
+  "recordings_dir": null
+}

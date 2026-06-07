@@ -13,9 +13,8 @@ import re
 import sqlite3
 import unicodedata
 
+from dancing_log.app_paths import DATA_DIR, DB_FILE
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-DB_FILE = DATA_DIR / "dancing_log.sqlite3"
 WANNA_SYSTEM_KEY = "wannadance"
 WANNA_SYSTEM_NAME = "WannaDance"
 

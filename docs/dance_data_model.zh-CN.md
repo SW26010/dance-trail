@@ -14,7 +14,7 @@
 - SQLite 是运行时存储。
 - CSV/JSON 只是导入、导出或检查产物。
 - 重建时归档旧生成数据，不做原地迁移。
-- `data/local_config.json` 和 `data/queued_self/` 会作为本地输入保留。
+- `config/dancing-log.local.json` 和 `data/queued_self/` 会作为本地输入保留。
 - WannaDance 是第一个真正实现的舞蹈系统。
 - PyPyDance URL 身份已能从实测日志中识别；Dudu、VRDancing 和其他系统暂不支持，
   等看到真实元数据形状后再设计。
@@ -337,5 +337,5 @@ uv run python main.py rebuild-data --archive-existing
 
 并保留：
 
-- `data/local_config.json`
+- `config/dancing-log.local.json`
 - `data/queued_self/`

@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import sys
 
+from dancing_log.app_paths import DEFAULT_CONFIG, resolve_app_path
 from dancing_log.local_config import CONFIG_FILE, load_local_config
 
 
@@ -15,22 +16,49 @@ def _pick_value(cli_value, config_value):
     return cli_value if cli_value is not None else config_value
 
 
+def _configured_path(cli_value, config: dict, key: str) -> Path:
+    return resolve_app_path(cli_value, config.get(key) or DEFAULT_CONFIG[key])
+
+
+def _configured_db_path(cli_value, config: dict) -> Path:
+    return _configured_path(cli_value, config, "app_db")
+
+
+def _resolve_recording_path(recording, recordings_dir, app_root=None) -> Path:
+    recording_path = Path(recording)
+    if recording_path.is_absolute():
+        return recording_path
+
+    app_relative = resolve_app_path(recording_path, recording_path, app_root=app_root)
+    if recordings_dir:
+        candidate = (
+            resolve_app_path(recordings_dir, recordings_dir, app_root=app_root)
+            / recording_path
+        )
+        if candidate.exists():
+            return candidate
+    return app_relative
+
+
 def cmd_recommend():
     """Generate the daily recommendation playlist."""
     import argparse
 
+    config = _get_local_config()
     parser = argparse.ArgumentParser(description="Generate daily recommendation playlist")
     parser.add_argument("-n", "--count", type=int, default=20, help="Number of dance tracks to recommend")
+    parser.add_argument("--app-db", default=None, help="SQLite path")
     args = parser.parse_args(sys.argv[2:])
+    db_path = _configured_db_path(args.app_db, config)
 
     from dancing_log.models import generate_daily_playlist, load_dance_log, load_dance_tracks
 
-    tracks = load_dance_tracks()
+    tracks = load_dance_tracks(db_path)
     if not tracks:
         print("Error: dance_tracks table is empty. Run `uv run python main.py sync-wanna` first.")
         sys.exit(1)
 
-    dance_log = load_dance_log()
+    dance_log = load_dance_log(db_path)
     playlist = generate_daily_playlist(tracks, dance_log, count=args.count)
 
     print(f"Daily playlist (Top {args.count}):\n")
@@ -54,8 +82,10 @@ def cmd_log():
     """Append one dance log record."""
     import argparse
 
+    config = _get_local_config()
     parser = argparse.ArgumentParser(description="Add one dance log record")
     parser.add_argument("--system", required=True, help="Dance system key, for example wannadance")
+    parser.add_argument("--app-db", default=None, help="SQLite path")
     parser.add_argument("external_id", help="External id in the selected dance system")
     source_group = parser.add_mutually_exclusive_group()
     source_group.add_argument("--other", action="store_true", help="Picked by someone else")
@@ -69,6 +99,7 @@ def cmd_log():
     parser.add_argument("--time", type=str, default=None, help="ISO 8601 timestamp")
     parser.add_argument("--note", type=str, default="", help="Optional note")
     args = parser.parse_args(sys.argv[2:])
+    db_path = _configured_db_path(args.app_db, config)
 
     from dancing_log.models import (
         SOURCE_LABELS,
@@ -78,7 +109,7 @@ def cmd_log():
     )
     from dancing_log.storage import get_dance_track
 
-    track = get_dance_track(args.system, args.external_id)
+    track = get_dance_track(args.system, args.external_id, db_path)
     if track and (track.get("title") or track.get("artist")):
         print(f"Recording: {track['title']} - {track['artist']}")
     else:
@@ -104,6 +135,7 @@ def cmd_log():
         note=args.note,
         timestamp=args.time,
         auto_detect=auto_detect,
+        db_path=db_path,
     )
     print(
         f"Added dance record ({args.system}:{args.external_id}, "
@@ -115,6 +147,7 @@ def cmd_import_favorites():
     """Import favorite flags from a text file."""
     import argparse
 
+    config = _get_local_config()
     parser = argparse.ArgumentParser(description="Import favorite dance tracks from a text file")
     parser.add_argument(
         "favorites_file",
@@ -129,14 +162,16 @@ def cmd_import_favorites():
     )
     parser.add_argument("--dry-run", action="store_true", help="Validate and report changes without writing")
     args = parser.parse_args(sys.argv[2:])
+    db_path = _configured_db_path(args.app_db, config)
+    favorites_file = resolve_app_path(args.favorites_file, args.favorites_file)
 
     from dancing_log.favorite_importer import FavoriteImportError, import_favorites_file
 
     try:
         stats = import_favorites_file(
             system_key=args.system,
-            favorites_file=args.favorites_file,
-            app_db_path=args.app_db,
+            favorites_file=favorites_file,
+            app_db_path=db_path,
             additive=args.additive,
             dry_run=args.dry_run,
         )
@@ -164,13 +199,13 @@ def cmd_import_vrcx():
         "vrcx_db",
         nargs="?",
         default=None,
-        help="Path to VRCX.sqlite3; falls back to data/local_config.json when omitted",
+        help=f"Path to VRCX.sqlite3; falls back to {CONFIG_FILE} when omitted",
     )
     parser.add_argument("--app-db", default=None, help="Output app SQLite path")
     parser.add_argument(
         "--self-user-id",
         default=None,
-        help="Local VRChat user id; falls back to data/local_config.json when omitted",
+        help=f"Local VRChat user id; falls back to {CONFIG_FILE} when omitted",
     )
     parser.add_argument(
         "--blank-requester-source",
@@ -183,7 +218,10 @@ def cmd_import_vrcx():
     args = parser.parse_args(sys.argv[2:])
 
     vrcx_db_path = _pick_value(args.vrcx_db, config.get("vrcx_db_path"))
+    if vrcx_db_path:
+        vrcx_db_path = resolve_app_path(vrcx_db_path, vrcx_db_path)
     self_user_id = _pick_value(args.self_user_id, config.get("self_user_id"))
+    db_path = _configured_db_path(args.app_db, config)
     if not vrcx_db_path:
         parser.error(
             f"Missing VRCX database path. Pass it explicitly or set `vrcx_db_path` in {CONFIG_FILE}."
@@ -193,7 +231,7 @@ def cmd_import_vrcx():
 
     stats = import_vrcx_database(
         vrcx_db_path=vrcx_db_path,
-        app_db_path=args.app_db,
+        app_db_path=db_path,
         self_user_id=self_user_id,
         blank_requester_source=args.blank_requester_source,
         limit=args.limit,
@@ -213,17 +251,20 @@ def cmd_sync_queued_self():
     """Overlay queued-self manifests onto existing events."""
     import argparse
 
+    config = _get_local_config()
     parser = argparse.ArgumentParser(description="Sync queued_self Markdown manifests")
     parser.add_argument("--app-db", default=None, help="SQLite path")
     parser.add_argument("--manifest-dir", default=None, help="Manifest directory")
     parser.add_argument("--system", required=True, help="Dance system key for bare manifest ids")
     args = parser.parse_args(sys.argv[2:])
+    db_path = _configured_db_path(args.app_db, config)
+    manifest_dir = _configured_path(args.manifest_dir, config, "queued_self_dir")
 
     from dancing_log.queued_self_importer import sync_queued_self_manifests
 
     stats = sync_queued_self_manifests(
-        app_db_path=args.app_db,
-        manifest_dir=args.manifest_dir,
+        app_db_path=db_path,
+        manifest_dir=manifest_dir,
         system_key=args.system,
     )
 
@@ -248,7 +289,7 @@ def cmd_sample_recording_frames():
         "recording",
         help="Recording file path; relative paths are resolved against recordings_dir when configured",
     )
-    parser.add_argument("--output-dir", default="analysis/recording_frames", help="Output directory")
+    parser.add_argument("--output-dir", default=None, help="Output directory")
     parser.add_argument(
         "--at",
         nargs="+",
@@ -259,19 +300,15 @@ def cmd_sample_recording_frames():
     parser.add_argument("--top-ratio", type=float, default=0.22, help="Top crop ratio")
     parser.add_argument("--width", type=int, default=1920, help="Output width")
     args = parser.parse_args(sys.argv[2:])
+    output_dir = _configured_path(args.output_dir, config, "recording_frames_dir")
 
-    recording_path = Path(args.recording)
-    recordings_dir = config.get("recordings_dir")
-    if not recording_path.is_absolute() and recordings_dir:
-        candidate = Path(recordings_dir) / recording_path
-        if candidate.exists():
-            recording_path = candidate
+    recording_path = _resolve_recording_path(args.recording, config.get("recordings_dir"))
 
     from dancing_log.recordings import sample_top_frames
 
     outputs = sample_top_frames(
         recording_path=recording_path,
-        output_dir=args.output_dir,
+        output_dir=output_dir,
         timestamps=args.at,
         top_ratio=args.top_ratio,
         width=args.width,
@@ -291,12 +328,12 @@ def cmd_watch_vrc_log():
     parser.add_argument(
         "--log-dir",
         default=None,
-        help="VRChat log directory; falls back to local_config.json or the default LocalLow path",
+        help=f"VRChat log directory; falls back to {CONFIG_FILE} or the default LocalLow path",
     )
     parser.add_argument(
         "--output-dir",
         default=None,
-        help="Capture root directory; default is analysis/vrc_log_capture",
+        help="Capture root directory; default is logs/captures",
     )
     parser.add_argument("--session-name", default=None, help="Capture session directory name")
     parser.add_argument(
@@ -342,15 +379,21 @@ def cmd_watch_vrc_log():
 
     from dancing_log.vrc_log_watcher import default_vrc_log_dir, watch_vrc_logs
 
-    log_dir = _pick_value(args.log_dir, config.get("vrc_log_dir")) or default_vrc_log_dir()
+    configured_log_dir = _pick_value(args.log_dir, config.get("vrc_log_dir"))
+    if configured_log_dir:
+        log_dir = resolve_app_path(configured_log_dir, configured_log_dir)
+    else:
+        log_dir = default_vrc_log_dir()
+    output_dir = _configured_path(args.output_dir, config, "capture_dir")
+    db_path = _configured_db_path(args.app_db, config)
     print(f"Watching VRChat logs: {log_dir}")
     print("Press Ctrl+C to stop.")
 
     stats = watch_vrc_logs(
         log_dir=log_dir,
-        output_dir=args.output_dir,
+        output_dir=output_dir,
         session_name=args.session_name,
-        app_db_path=args.app_db,
+        app_db_path=db_path,
         from_start=args.from_start,
         include_raw=not args.no_raw,
         live_db=args.live_db,
@@ -394,6 +437,7 @@ def cmd_rebuild_data():
         help="Required: archive generated data files before rebuilding",
     )
     parser.add_argument("--offline", action="store_true", help="Use local WannaDance cache only")
+    parser.add_argument("--app-db", default=None, help="SQLite path")
     parser.add_argument("--limit-vrcx", type=int, default=None, help="Limit imported VRCX rows")
     parser.add_argument(
         "--queued-system",
@@ -406,24 +450,27 @@ def cmd_rebuild_data():
         parser.error("--archive-existing is required to avoid accidental data loss")
 
     config = _get_local_config()
+    db_path = _configured_db_path(args.app_db, config)
+    queued_self_dir = _configured_path(None, config, "queued_self_dir")
     from dancing_log.queued_self_importer import sync_queued_self_manifests
     from dancing_log.rebuild import archive_existing_data
     from dancing_log.vrcx_importer import import_vrcx_database
     from dancing_log.wanna_catalog import sync_wanna_catalog
 
-    archive = archive_existing_data()
+    archive = archive_existing_data(resolve_app_path(None, "data"), app_db_path=db_path)
     print(f"Archived generated data to: {archive.archive_dir}")
     for path in archive.archived:
         print(f"  {path.name}")
 
-    sync_stats = sync_wanna_catalog(use_api=not args.offline)
+    sync_stats = sync_wanna_catalog(db_path=db_path, use_api=not args.offline)
     print("WannaDance catalog sync complete")
     print(f"  database tracks after: {sync_stats.db_after}")
 
     vrcx_db_path = config.get("vrcx_db_path")
     if vrcx_db_path:
         import_stats = import_vrcx_database(
-            vrcx_db_path=vrcx_db_path,
+            vrcx_db_path=resolve_app_path(vrcx_db_path, vrcx_db_path),
+            app_db_path=db_path,
             self_user_id=config.get("self_user_id"),
             limit=args.limit_vrcx,
         )
@@ -433,42 +480,52 @@ def cmd_rebuild_data():
     else:
         print("VRCX import skipped: vrcx_db_path is not configured")
 
-    queued_stats = sync_queued_self_manifests(system_key=args.queued_system)
+    queued_stats = sync_queued_self_manifests(
+        app_db_path=db_path,
+        manifest_dir=queued_self_dir,
+        system_key=args.queued_system,
+    )
     print("queued_self sync complete")
     print(f"  matched entries: {queued_stats.matched_entries}")
     print(f"  unmatched entries: {queued_stats.unmatched_entries}")
 
 
 def main():
-    script_commands = {
-        "scrape": ("Fetch Wanna Dance song metadata", "scripts/scrape_wanna.py"),
+    user_script_commands = {
         "sync-wanna": ("Sync WannaDance tracks into SQLite", "scripts/sync_wanna_songs.py"),
-        "test-apis": ("Test music APIs", "scripts/test_music_apis.py"),
     }
-    builtin_commands = {
+    user_builtin_commands = {
         "recommend": ("Generate daily recommendation playlist", cmd_recommend),
         "log": ("Append one dance log record", cmd_log),
         "import-favorites": ("Import favorite track flags from text", cmd_import_favorites),
         "import-vrcx": ("Import historical playback rows from VRCX SQLite", cmd_import_vrcx),
         "sync-queued-self": ("Sync queued_self manifests", cmd_sync_queued_self),
-        "sample-frames": ("Sample overlay verification frames from a recording", cmd_sample_recording_frames),
         "watch-vrc-log": ("Capture live VRChat output logs", cmd_watch_vrc_log),
         "rebuild-data": ("Archive and rebuild generated local data", cmd_rebuild_data),
     }
+    research_script_commands = {
+        "scrape": ("Fetch Wanna Dance song metadata into local files", "scripts/scrape_wanna.py"),
+        "test-apis": ("Test music APIs", "scripts/test_music_apis.py"),
+    }
+    research_builtin_commands = {
+        "sample-frames": ("Sample overlay verification frames from a recording", cmd_sample_recording_frames),
+    }
+
+    script_commands = {**user_script_commands, **research_script_commands}
+    builtin_commands = {**user_builtin_commands, **research_builtin_commands}
 
     all_names = list(script_commands) + list(builtin_commands)
 
     if len(sys.argv) < 2 or sys.argv[1] not in all_names:
         print("dancing-log - local dance playback timeline toolkit\n")
         print("Usage: uv run python main.py <command> [args...]\n")
-        print("Data collection:")
-        for name, (desc, _) in script_commands.items():
-            print(f"  {name:<16} {desc}")
-        print("\nDaily workflow:")
-        for name, (desc, _) in builtin_commands.items():
+        print("User workflow:")
+        for name, (desc, _) in {**user_script_commands, **user_builtin_commands}.items():
+            print(f"  {name:<18} {desc}")
+        print("\nDevelopment/research:")
+        for name, (desc, _) in {**research_script_commands, **research_builtin_commands}.items():
             print(f"  {name:<16} {desc}")
         print("\nExamples:")
-        print("  uv run python main.py scrape")
         print("  uv run python main.py sync-wanna")
         print("  uv run python main.py log --system wannadance 5038")
         print("  uv run python main.py log --system wannadance 5038 --other")
@@ -479,6 +536,7 @@ def main():
         print("  uv run python main.py sync-queued-self --system wannadance")
         print("  uv run python main.py watch-vrc-log")
         print("  uv run python main.py rebuild-data --archive-existing")
+        print("  uv run python main.py scrape")
         print("  uv run python main.py sample-frames path/to/recordings/example.mkv --at 60 300")
         sys.exit(0)
 

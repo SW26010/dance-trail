@@ -12,7 +12,7 @@ The catalog sync uses two complementary sources:
 
 - Public WannaDance API: canonical public catalog metadata.
 - Local `wanna_cache_dir`: local downloaded song cache from
-  `data/local_config.json`.
+  `config/dancing-log.local.json`.
 
 The local cache remains useful when the API is unavailable because each cached
 song directory can contain `metadata.json`, `download.txt`, and `video.mp4`.

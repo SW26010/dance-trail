@@ -155,7 +155,7 @@ uv run python main.py import-vrcx "path/to/vrcx-snapshot/VRCX.sqlite3"
 uv run python main.py import-vrcx --dry-run
 ```
 
-VRCX 数据库路径也可以配置在 `data/local_config.json` 的 `vrcx_db_path`。
+VRCX 数据库路径也可以配置在 `config/dancing-log.local.json` 的 `vrcx_db_path`。
 
 当前 importer 会：
 
@@ -184,9 +184,9 @@ uv run python main.py watch-vrc-log
 基础命令仍然是取证捕获路径。它会 tail VRChat `output_log_*.txt`，在启用时镜像
 原始行，把视频相关候选行写入 `candidates.jsonl`，把解析后的信号写入
 `parsed_events.jsonl`，把按歌曲折叠后的记录写入 `playback_events.jsonl`，并把
-session 存到 `analysis/vrc_log_capture/`。
+session 存到 `logs/captures/`。
 
-watcher 默认读取 `data/local_config.json` 的 `vrc_log_dir`，否则回退到 Windows
+watcher 默认读取 `config/dancing-log.local.json` 的 `vrc_log_dir`，否则回退到 Windows
 LocalLow 下的 VRChat 标准日志目录。默认从当前日志文件末尾开始，避免游玩时重扫旧
 日志；新建日志文件会从头读取，避免漏掉启动阶段信号。
 

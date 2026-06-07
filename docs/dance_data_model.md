@@ -13,7 +13,7 @@ The first refactor implements the core model directly:
 - SQLite is the runtime store.
 - Generated CSV/JSON files are import/export artifacts only.
 - Existing generated data is archived during rebuild, not migrated in place.
-- `data/local_config.json` and `data/queued_self/` are preserved as local inputs.
+- `config/dancing-log.local.json` and `data/queued_self/` are preserved as local inputs.
 - WannaDance is the first implemented dance system.
 - PyPyDance URL identity is supported from observed logs; Dudu, VRDancing, and
   other systems remain unsupported until their real metadata shapes are
@@ -358,5 +358,5 @@ The rebuild flow archives generated files such as:
 
 It preserves:
 
-- `data/local_config.json`
+- `config/dancing-log.local.json`
 - `data/queued_self/`
