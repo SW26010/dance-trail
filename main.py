@@ -126,6 +126,39 @@ def cmd_recommend():
         )
 
 
+def cmd_day():
+    """Print official dance history for one local day."""
+    import argparse
+    from datetime import date
+
+    config = _get_local_config()
+    parser = argparse.ArgumentParser(description="Print official dance history for one local day")
+    parser.add_argument("date", help="Local date in YYYY-MM-DD format")
+    parser.add_argument("--app-db", default=None, help="SQLite path")
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="Read live playback rows written by watch-vrc-log --live-db",
+    )
+    args = parser.parse_args(sys.argv[2:])
+
+    try:
+        target_date = date.fromisoformat(args.date)
+    except ValueError:
+        parser.error("date must use YYYY-MM-DD format")
+
+    db_path = _configured_db_path(args.app_db, config)
+    from dancing_log.daily_report import (
+        format_daily_dance_line,
+        load_daily_dances,
+        load_daily_live_dances,
+    )
+
+    loader = load_daily_live_dances if args.live else load_daily_dances
+    for dance in loader(target_date, db_path):
+        print(format_daily_dance_line(dance))
+
+
 def cmd_log():
     """Append one dance log record."""
     import argparse
@@ -559,6 +592,7 @@ def main():
     user_builtin_commands = {
         "sync-wanna": ("Sync WannaDance tracks into SQLite", cmd_sync_wanna),
         "recommend": ("Generate daily recommendation playlist", cmd_recommend),
+        "day": ("Print official dance history for one local day", cmd_day),
         "log": ("Append one dance log record", cmd_log),
         "import-favorites": ("Import favorite track flags from text", cmd_import_favorites),
         "import-vrcx": ("Import historical playback rows from VRCX SQLite", cmd_import_vrcx),
@@ -597,6 +631,8 @@ def main():
         print(f"  {prefix} log --system wannadance 5038")
         print(f"  {prefix} log --system wannadance 5038 --other")
         print(f"  {prefix} recommend -n 10")
+        print(f"  {prefix} day 2026-06-07")
+        print(f"  {prefix} day 2026-06-07 --live")
         print(f"  {prefix} import-favorites --system wannadance data/favorites.txt")
         print(f"  {prefix} import-vrcx path/to/vrcx-snapshot/VRCX.sqlite3")
         print(f"  {prefix} import-vrcx")

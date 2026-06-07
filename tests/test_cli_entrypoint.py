@@ -6,6 +6,13 @@ import unittest
 from pathlib import Path
 
 import main as cli
+from dancing_log.storage import (
+    WANNA_SYSTEM_KEY,
+    add_dance_event,
+    connect_db,
+    ensure_dance_track,
+    upsert_live_playback_event,
+)
 
 
 class CliEntrypointTests(unittest.TestCase):
@@ -45,6 +52,88 @@ class CliEntrypointTests(unittest.TestCase):
 
             self.assertIn("WannaDance catalog sync complete", output.getvalue())
             self.assertIn("cached songs: 1", output.getvalue())
+
+    def test_day_dispatches_as_builtin_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "app.sqlite3"
+            with connect_db(db_path) as conn:
+                ensure_dance_track(
+                    conn,
+                    WANNA_SYSTEM_KEY,
+                    "11253",
+                    {"title": "Mmchk", "artist": "NEXZ", "dancer": "Golfy"},
+                )
+                conn.commit()
+            add_dance_event(
+                system_key=WANNA_SYSTEM_KEY,
+                external_id="11253",
+                source="random",
+                played_at="2026.06.07 18:12:08",
+                event_source="manual",
+                path=db_path,
+            )
+
+            original_argv = sys.argv
+            sys.argv = [
+                "main.py",
+                "day",
+                "2026-06-07",
+                "--app-db",
+                str(db_path),
+            ]
+            try:
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    cli.main()
+            finally:
+                sys.argv = original_argv
+
+            self.assertEqual(
+                output.getvalue().strip(),
+                "18:12:08 11253. Mmchk - NEXZ | Golfy",
+            )
+
+    def test_day_live_dispatches_live_db_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "app.sqlite3"
+            with connect_db(db_path) as conn:
+                upsert_live_playback_event(
+                    conn,
+                    {
+                        "event_key": "wannadance:4062#1",
+                        "actual_play_at": "2026.06.07 18:09:09",
+                        "observed_mid_play": False,
+                        "dance_system_key": WANNA_SYSTEM_KEY,
+                        "dance_external_id": "4062",
+                        "video_name": "Mood (Extreme) - 24kGoldn & Iann Dior | Just Dance 2022",
+                        "signal_count": 1,
+                    },
+                    session_id="session-one",
+                )
+                conn.commit()
+
+            original_argv = sys.argv
+            sys.argv = [
+                "main.py",
+                "day",
+                "2026-06-07",
+                "--live",
+                "--app-db",
+                str(db_path),
+            ]
+            try:
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    cli.main()
+            finally:
+                sys.argv = original_argv
+
+            self.assertEqual(
+                output.getvalue().strip(),
+                "18:09:09 4062. Mood (Extreme) - 24kGoldn & Iann Dior | Just Dance 2022",
+            )
 
 
 if __name__ == "__main__":

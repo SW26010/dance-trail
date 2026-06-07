@@ -122,6 +122,25 @@ uv run python main.py recommend
 uv run python main.py recommend -n 10
 ```
 
+Print the dances from one local day, one dance per line:
+
+```bash
+uv run python main.py day 2026-06-07
+uv run python main.py day 2026-06-07 --live
+```
+
+Each line is formatted as `HH:MM:SS song-id. song name`, for example:
+
+```text
+12:00:00 8378. Party In The U.S.A. - Miley Cyrus | Just Dance 2025
+```
+
+Without `--live`, the command uses the stricter official-history view from
+`dance_events`. `--live` reads `live_playback_events`, which is useful for
+checking what `watch-vrc-log --live-db` observed, but it can include rows that
+were not promoted into official history, including `interrupted` or `pending`
+live rows.
+
 Import favorite song IDs from a UTF-8 text file. It can contain one external id
 per line, or a WannaDance export line such as `WannaFavorite:6495,10508`:
 

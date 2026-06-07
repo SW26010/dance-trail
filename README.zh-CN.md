@@ -104,6 +104,24 @@ uv run python main.py recommend
 uv run python main.py recommend -n 10
 ```
 
+打印某个本地日期的舞蹈记录，每行一条：
+
+```bash
+uv run python main.py day 2026-06-07
+uv run python main.py day 2026-06-07 --live
+```
+
+每行格式是 `HH:MM:SS song-id. song name`，例如：
+
+```text
+12:00:00 8378. Party In The U.S.A. - Miley Cyrus | Just Dance 2025
+```
+
+不带 `--live` 时，命令使用更严格的正式历史口径，只读取 `dance_events`。
+`--live` 会读取实时表 `live_playback_events`，适合检查
+`watch-vrc-log --live-db` 当时观察到了什么；但它可能包含没有提升到正式历史的
+live row，包括 `interrupted` 或 `pending` 记录。
+
 当前推荐分数使用：
 
 - 收藏标记
