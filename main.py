@@ -346,6 +346,16 @@ def cmd_watch_vrc_log():
         action="store_true",
         help="Do not mirror all raw log lines; candidate and parsed JSONL files are still written",
     )
+    parser.add_argument(
+        "--source-log-dir",
+        default=None,
+        help="Directory for byte-for-byte source output_log_*.txt archives",
+    )
+    parser.add_argument(
+        "--no-source-archive",
+        action="store_true",
+        help="Do not incrementally archive source VRChat output logs",
+    )
     parser.add_argument("--app-db", default=None, help="SQLite path for live DB writes")
     parser.add_argument(
         "--live-db",
@@ -385,6 +395,7 @@ def cmd_watch_vrc_log():
     else:
         log_dir = default_vrc_log_dir()
     output_dir = _configured_path(args.output_dir, config, "capture_dir")
+    source_log_dir = _configured_path(args.source_log_dir, config, "source_vrc_log_dir")
     db_path = _configured_db_path(args.app_db, config)
     print(f"Watching VRChat logs: {log_dir}")
     print("Press Ctrl+C to stop.")
@@ -401,6 +412,8 @@ def cmd_watch_vrc_log():
         overlay_port=args.overlay_port,
         poll_seconds=args.poll_seconds,
         stop_after_idle_seconds=args.stop_after_idle_seconds,
+        archive_source_logs=not args.no_source_archive,
+        source_log_dir=source_log_dir,
     )
 
     print("VRChat log capture complete")
@@ -415,6 +428,9 @@ def cmd_watch_vrc_log():
         print(f"  live promotions: {stats.live_promotions}")
     if stats.overlay_url:
         print(f"  overlay URL: {stats.overlay_url}")
+    if stats.source_log_dir:
+        print(f"  source log archive: {stats.source_log_dir}")
+        print(f"  source log bytes copied: {stats.source_log_bytes}")
     if stats.delay_metrics:
         print(
             "  delay to actual play: "

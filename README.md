@@ -179,6 +179,13 @@ artifacts under `logs/captures/<session>/`:
 - `playback_events.jsonl`: folded per-song events with playback delay metrics
 - `summary.json`: session counts and final read position
 
+It also incrementally archives the active source `output_log_*.txt` under
+`logs/source-vrc-logs/` by default. The source archive is copied as bytes and
+resumes from the existing archived file size on the next run, so it avoids
+duplicating lines and can preserve the original log content. Use
+`--no-source-archive` to disable this, or `--source-log-dir` to choose another
+archive directory.
+
 By default it starts at the end of the current log file so old large logs are
 not rescanned while VRChat is running. Use `--from-start` to replay an existing
 log file, or `--no-raw` to skip the full raw mirror and keep only candidate and

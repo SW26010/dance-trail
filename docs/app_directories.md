@@ -18,8 +18,8 @@ Configuration precedence is:
 - `data/`: long-lived local user data, including `dancing_log.sqlite3`,
   `queued_self/`, and favorite-list input files.
 - `logs/`: runtime output from normal app use. `watch-vrc-log` captures now
-  default to `logs/captures/`. `logs/source-vrc-logs/` is reserved for future
-  copied source `output_log_*.txt` files.
+  default to `logs/captures/`. Incremental source VRChat log archives are
+  stored in `logs/source-vrc-logs/`.
 - `analysis/`: development and forensic scratch work, such as replay baselines,
   historical raw-log corpora, and one-off comparison outputs. It is not part of
   the future exe user contract.

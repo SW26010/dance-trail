@@ -283,6 +283,98 @@ class VrcLogWatcherTest(unittest.TestCase):
             parsed = read_jsonl(stats.session_dir / "parsed_events.jsonl")
             self.assertEqual(parsed[0]["dance_external_id"], "5038")
 
+    def test_source_archive_copies_current_log_from_start_while_parser_tails_eof(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            log_path = log_dir / "output_log_0001.txt"
+            source_bytes = (
+                "noise\n"
+                "2026.05.17 15:30:00 Log - [Video Playback] "
+                "Resolving URL 'https://api.udon.dance/Api/Songs/play?id=3114'\n"
+            ).encode("utf-8")
+            log_path.write_bytes(source_bytes)
+
+            stats = watch_vrc_logs(
+                log_dir=log_dir,
+                output_dir=root / "capture",
+                session_name="archive-current",
+                from_start=False,
+                poll_seconds=0.01,
+                stop_after_idle_seconds=0.05,
+            )
+
+            archived = root / "source-vrc-logs" / log_path.name
+            self.assertEqual(stats.parsed_events, 0)
+            self.assertEqual(archived.read_bytes(), source_bytes)
+            self.assertEqual(stats.source_log_dir, str(root / "source-vrc-logs"))
+            self.assertEqual(stats.source_log_bytes, len(source_bytes))
+            self.assertEqual(stats.source_log_files[0]["archived_bytes"], len(source_bytes))
+            self.assertTrue(stats.source_log_files[0]["complete"])
+
+    def test_source_archive_resumes_from_archived_size_without_duplicates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            log_path = log_dir / "output_log_0001.txt"
+            first_chunk = b"first line\n"
+            second_chunk = b"second line\n"
+            log_path.write_bytes(first_chunk)
+
+            watch_vrc_logs(
+                log_dir=log_dir,
+                output_dir=root / "capture",
+                session_name="archive-first",
+                from_start=False,
+                poll_seconds=0.01,
+                stop_after_idle_seconds=0.05,
+            )
+
+            with log_path.open("ab") as handle:
+                handle.write(second_chunk)
+
+            stats = watch_vrc_logs(
+                log_dir=log_dir,
+                output_dir=root / "capture",
+                session_name="archive-second",
+                from_start=False,
+                poll_seconds=0.01,
+                stop_after_idle_seconds=0.05,
+            )
+
+            archived = root / "source-vrc-logs" / log_path.name
+            self.assertEqual(archived.read_bytes(), first_chunk + second_chunk)
+            self.assertEqual(archived.read_bytes().count(first_chunk), 1)
+            self.assertEqual(stats.source_log_bytes, len(second_chunk))
+
+    def test_source_archive_preserves_binary_log_bytes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            log_path = log_dir / "output_log_0001.txt"
+            source_bytes = (
+                b"prefix\x00\xff\r\n"
+                b"2026.05.17 15:30:00 Log - [Video Playback] "
+                b"Resolving URL 'https://api.udon.dance/Api/Songs/play?id=5038'\r\n"
+            )
+            log_path.write_bytes(source_bytes)
+
+            stats = watch_vrc_logs(
+                log_dir=log_dir,
+                output_dir=root / "capture",
+                session_name="archive-binary",
+                from_start=True,
+                poll_seconds=0.01,
+                stop_after_idle_seconds=0.05,
+            )
+
+            archived = root / "source-vrc-logs" / log_path.name
+            self.assertEqual(archived.read_bytes(), source_bytes)
+            self.assertEqual(stats.source_log_files[0]["source_size"], len(source_bytes))
+
     def test_watcher_reads_new_rotated_file_from_beginning(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

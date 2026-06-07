@@ -12,7 +12,7 @@ import os
 import re
 import time
 
-from dancing_log.app_paths import DEFAULT_CAPTURE_ROOT
+from dancing_log.app_paths import DEFAULT_CAPTURE_ROOT, SOURCE_VRC_LOG_DIR
 from dancing_log.vrcx_importer import parse_dance_url
 
 
@@ -21,6 +21,7 @@ PROMOTION_COMPLETION_RATIO = 0.8
 COMPLETION_EPSILON_SECONDS = 0.001
 PREVIEW_SUPPRESSION_SECONDS = 90.0
 RETRY_MERGE_SECONDS = 30.0
+SOURCE_LOG_COPY_CHUNK_BYTES = 4 * 1024 * 1024
 
 VIDEO_TOKENS = (
     "video playback",
@@ -242,6 +243,9 @@ class WatchStats:
     live_promotions: int = 0
     overlay_url: str | None = None
     replayed_files: list[str] = field(default_factory=list)
+    source_log_dir: str | None = None
+    source_log_bytes: int = 0
+    source_log_files: list[dict] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -265,8 +269,120 @@ class WatchStats:
             "live_promotions": self.live_promotions,
             "overlay_url": self.overlay_url,
             "replayed_files": self.replayed_files,
+            "source_log_dir": self.source_log_dir,
+            "source_log_bytes": self.source_log_bytes,
+            "source_log_files": self.source_log_files,
             "errors": self.errors,
         }
+
+
+class _SourceLogMirror:
+    """Incrementally mirror source VRChat log bytes without involving parsers."""
+
+    def __init__(
+        self,
+        *,
+        archive_dir: Path,
+        errors: list[str],
+        max_bytes_per_tick: int = SOURCE_LOG_COPY_CHUNK_BYTES,
+    ) -> None:
+        self.archive_dir = archive_dir
+        self.errors = errors
+        self.max_bytes_per_tick = max(1, int(max_bytes_per_tick))
+        self.bytes_copied = 0
+        self._files: dict[str, dict] = {}
+
+    def mirror_file(self, source_path: Path, *, final: bool = False) -> bool:
+        source = Path(source_path)
+        try:
+            source_size = source.stat().st_size
+        except OSError as exc:
+            _record_error(self.errors, f"source log stat failed for {source}: {exc}")
+            return False
+
+        destination = self.archive_dir / source.name
+        entry = self._entry(source, destination)
+        entry["source_size"] = source_size
+
+        try:
+            destination_size = destination.stat().st_size if destination.exists() else 0
+        except OSError as exc:
+            _record_error(self.errors, f"source log archive stat failed for {destination}: {exc}")
+            return False
+
+        if destination_size > source_size:
+            entry["archived_bytes"] = destination_size
+            entry["complete"] = False
+            _record_error(
+                self.errors,
+                f"source log archive is larger than source for {source.name}; not appending",
+            )
+            return False
+
+        bytes_to_copy = source_size - destination_size
+        if bytes_to_copy <= 0:
+            entry["archived_bytes"] = destination_size
+            entry["complete"] = True
+            if final and destination.exists():
+                try:
+                    with destination.open("ab") as dest_handle:
+                        dest_handle.flush()
+                        os.fsync(dest_handle.fileno())
+                except OSError as exc:
+                    _record_error(
+                        self.errors,
+                        f"source log archive sync failed for {destination}: {exc}",
+                    )
+            return False
+
+        limit = None if final else min(bytes_to_copy, self.max_bytes_per_tick)
+        copied = 0
+        try:
+            self.archive_dir.mkdir(parents=True, exist_ok=True)
+            with source.open("rb") as source_handle, destination.open("ab") as dest_handle:
+                source_handle.seek(destination_size)
+                while limit is None or copied < limit:
+                    read_size = 1024 * 1024
+                    if limit is not None:
+                        read_size = min(read_size, limit - copied)
+                    if read_size <= 0:
+                        break
+                    chunk = source_handle.read(read_size)
+                    if not chunk:
+                        break
+                    dest_handle.write(chunk)
+                    copied += len(chunk)
+                if final:
+                    dest_handle.flush()
+                    os.fsync(dest_handle.fileno())
+        except OSError as exc:
+            _record_error(self.errors, f"source log archive failed for {source}: {exc}")
+            return False
+
+        self.bytes_copied += copied
+        archived_bytes = destination_size + copied
+        entry["archived_bytes"] = archived_bytes
+        try:
+            entry["source_size"] = source.stat().st_size
+        except OSError:
+            pass
+        entry["complete"] = archived_bytes >= int(entry["source_size"])
+        return copied > 0
+
+    def to_summary(self) -> list[dict]:
+        return [self._files[key] for key in sorted(self._files)]
+
+    def _entry(self, source: Path, destination: Path) -> dict:
+        key = str(source)
+        if key not in self._files:
+            self._files[key] = {
+                "source_file": str(source),
+                "archived_file": str(destination),
+                "source_size": 0,
+                "archived_bytes": 0,
+                "complete": False,
+            }
+        return self._files[key]
 
 
 class _LivePlaybackRuntime:
@@ -1512,15 +1628,25 @@ def watch_vrc_logs(
     overlay_port: int | None = None,
     poll_seconds: float = 0.25,
     stop_after_idle_seconds: float | None = None,
+    archive_source_logs: bool = True,
+    source_log_dir: Path | str | None = None,
+    source_log_copy_bytes_per_tick: int = SOURCE_LOG_COPY_CHUNK_BYTES,
 ) -> WatchStats:
     """Tail VRChat output logs and write raw/candidate/parsed capture artifacts."""
     resolved_log_dir = Path(log_dir) if log_dir is not None else default_vrc_log_dir()
     capture_root = Path(output_dir) if output_dir is not None else DEFAULT_CAPTURE_ROOT
+    resolved_source_log_dir = _resolve_source_log_dir(
+        source_log_dir=source_log_dir,
+        output_dir=output_dir,
+        capture_root=capture_root,
+    )
     session_dir = capture_root / (session_name or datetime.now().strftime("%Y-%m-%d_%H%M%S"))
     session_dir.mkdir(parents=True, exist_ok=True)
 
     stats = WatchStats(session_dir=session_dir, started_at=_utc_now())
     stats.live_session_id = _live_session_id(session_dir, stats.started_at)
+    if archive_source_logs:
+        stats.source_log_dir = str(resolved_source_log_dir)
     initial_latest = _latest_log_file(resolved_log_dir, stats.errors)
     opened_any_file = False
     current_path: Path | None = None
@@ -1540,6 +1666,15 @@ def watch_vrc_logs(
     raw_handle = None
     candidates_handle = None
     parsed_handle = None
+    source_mirror = (
+        _SourceLogMirror(
+            archive_dir=resolved_source_log_dir,
+            errors=stats.errors,
+            max_bytes_per_tick=source_log_copy_bytes_per_tick,
+        )
+        if archive_source_logs
+        else None
+    )
 
     try:
         if include_raw:
@@ -1565,10 +1700,14 @@ def watch_vrc_logs(
 
         while True:
             latest_path = _latest_log_file(resolved_log_dir, stats.errors)
+            if source_mirror is not None and latest_path is not None:
+                source_mirror.mirror_file(latest_path)
             if latest_path and latest_path != current_path:
                 if current_path is None or _is_newer_log(latest_path, current_path):
                     if current_handle is not None:
                         current_handle.close()
+                    if source_mirror is not None and current_path is not None:
+                        source_mirror.mirror_file(current_path, final=True)
                     current_path = latest_path
                     current_line_number = 0
                     start_offset = _start_offset(
@@ -1629,6 +1768,10 @@ def watch_vrc_logs(
         stats.ended_at = _utc_now()
         if current_handle is not None:
             current_handle.close()
+        if source_mirror is not None and current_path is not None:
+            source_mirror.mirror_file(current_path, final=True)
+            stats.source_log_bytes = source_mirror.bytes_copied
+            stats.source_log_files = source_mirror.to_summary()
         for handle in (raw_handle, candidates_handle, parsed_handle):
             if handle is not None:
                 handle.close()
@@ -2041,6 +2184,19 @@ def _start_offset(
         except OSError:
             return 0
     return 0
+
+
+def _resolve_source_log_dir(
+    *,
+    source_log_dir: Path | str | None,
+    output_dir: Path | str | None,
+    capture_root: Path,
+) -> Path:
+    if source_log_dir is not None:
+        return Path(source_log_dir)
+    if output_dir is not None:
+        return capture_root.parent / "source-vrc-logs"
+    return SOURCE_VRC_LOG_DIR
 
 
 def _extract_timestamp(line: str) -> str | None:
