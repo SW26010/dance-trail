@@ -404,6 +404,10 @@ function seriesName(title) {
   return parts.length > 1 ? parts.slice(1).join("|").trim() : "";
 }
 
+function primaryTitle(title) {
+  return String(title || "").split("|")[0].trim();
+}
+
 function sourceLabel(event) {
   const type = String(event.source_type || "").trim();
   const displayName = String(event.source_display_name || "").trim();
@@ -465,7 +469,7 @@ function render(snapshot) {
     return;
   }
   const title = event.video_name || event.video_url || `${event.dance_system_key || "unknown"}:${event.dance_external_id || "?"}`;
-  nodes.title.textContent = title;
+  nodes.title.textContent = primaryTitle(title) || title;
   nodes.sourcePlayer.textContent = sourceLabel(event);
   requestAnimationFrame(updateTitleScroll);
   updateClock();
@@ -476,14 +480,14 @@ function updateMeta(event, elapsed, duration) {
   const parts = [
     `${systemLabel(event.dance_system_key)} ID: ${event.dance_external_id || "?"}`
   ];
+  if (Number.isFinite(duration) && duration > 0) {
+    const displayElapsed = Math.min(elapsed, duration);
+    parts.push(`${formatDuration(displayElapsed)}/${formatDuration(duration)}`);
+  } else {
+    parts.push(formatDuration(elapsed));
+  }
   const series = seriesName(title);
   if (series) parts.push(series);
-  if (Number.isFinite(duration) && duration > 0) {
-    const remaining = Math.max(0, duration - elapsed);
-    parts.push(`remaining ${formatDuration(remaining)}/${formatDuration(duration)}`);
-  } else {
-    parts.push(`elapsed ${formatDuration(elapsed)}`);
-  }
   nodes.meta.textContent = parts.join(" | ");
 }
 

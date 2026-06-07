@@ -137,6 +137,8 @@ class OverlayServerTest(unittest.TestCase):
             server.stop()
 
     def test_overlay_html_preserves_source_and_duration_labels(self):
+        self.assertIn("function primaryTitle(title)", _OVERLAY_HTML)
+        self.assertIn("nodes.title.textContent = primaryTitle(title) || title;", _OVERLAY_HTML)
         self.assertIn("function sourceLabel(event)", _OVERLAY_HTML)
         self.assertIn('if (type) return `source ${type}`;', _OVERLAY_HTML)
         self.assertIn(
@@ -144,13 +146,15 @@ class OverlayServerTest(unittest.TestCase):
             _OVERLAY_HTML,
         )
         self.assertIn(
-            "parts.push(`remaining ${formatDuration(remaining)}/${formatDuration(duration)}`);",
+            "parts.push(`${formatDuration(displayElapsed)}/${formatDuration(duration)}`);",
             _OVERLAY_HTML,
         )
         self.assertIn(
-            "parts.push(`elapsed ${formatDuration(elapsed)}`);",
+            "parts.push(formatDuration(elapsed));",
             _OVERLAY_HTML,
         )
+        self.assertNotIn("remaining ", _OVERLAY_HTML)
+        self.assertNotIn("parts.push(`elapsed ", _OVERLAY_HTML)
         self.assertNotIn(
             'source player: ${event.source_display_name || "unknown"}',
             _OVERLAY_HTML,
