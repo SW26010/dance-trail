@@ -249,7 +249,13 @@ uv run python main.py sync-queued-self --system wannadance
 
 ## 研究脚本
 
-`scripts/match_netease.py` 和 `scripts/test_music_apis.py` 仍然是研究工具，
-不是当前运行时数据模型的一部分。
+`scripts/match_netease.py`、`scripts/test_music_apis.py` 和 `sample-frames`
+仍然是研究工具，不是当前运行时数据模型或 portable release 的一部分。
+
+`sample-frames` 需要可选的录屏工具依赖：
+
+```bash
+uv sync --extra recording-tools
+```
 
 `scripts/init_songs.py` 已废弃，因为运行时数据库不再有 `songs` 表。

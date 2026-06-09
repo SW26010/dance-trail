@@ -49,6 +49,31 @@ function Invoke-Portable {
     }
 }
 
+function Assert-PortableRejects {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [Parameter(Mandatory = $true)][string]$ExpectedOutput
+    )
+
+    $displayArguments = $Arguments | ForEach-Object {
+        if ($_ -match '[\s"]') {
+            '"' + ($_ -replace '"', '\"') + '"'
+        }
+        else {
+            $_
+        }
+    }
+    Write-Host "==> DancingLog.exe $($displayArguments -join ' ')"
+    $output = & $ExePath @Arguments 2>&1
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -eq 0) {
+        throw "DancingLog.exe $($Arguments -join ' ') unexpectedly succeeded"
+    }
+    if (($output -join "`n") -notlike "*$ExpectedOutput*") {
+        throw "DancingLog.exe $($Arguments -join ' ') did not print expected output: $ExpectedOutput"
+    }
+}
+
 try {
     Invoke-Portable -Arguments @("sync-wanna", "--offline", "--app-db", $DbPath, "--cache-dir", (Join-Path $SmokeRoot "wanna-cache"))
     Invoke-Portable -Arguments @("recommend", "--app-db", $DbPath, "-n", "1")
@@ -56,6 +81,7 @@ try {
     Invoke-Portable -Arguments @("import-favorites", "--app-db", $DbPath, "--system", "wannadance", $FavoritesPath)
     Invoke-Portable -Arguments @("sync-queued-self", "--app-db", $DbPath, "--manifest-dir", $ManifestDir, "--system", "wannadance")
     Invoke-Portable -Arguments @("watch-vrc-log", "--log-dir", $VrcLogDir, "--output-dir", $CaptureDir, "--app-db", $DbPath, "--no-source-archive", "--stop-after-idle-seconds", "0.1")
+    Assert-PortableRejects -Arguments @("sample-frames") -ExpectedOutput "Usage:"
     Write-Host "Portable smoke test passed: $SmokeRoot"
 }
 finally {

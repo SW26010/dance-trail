@@ -309,8 +309,15 @@ Supported keys:
 
 ## Research Scripts
 
-`scripts/match_netease.py` and `scripts/test_music_apis.py` remain research
-tools. They are not part of the current runtime data model.
+`scripts/match_netease.py`, `scripts/test_music_apis.py`, and `sample-frames`
+remain research tools. They are not part of the current runtime data model or
+portable release.
+
+`sample-frames` requires optional recording dependencies:
+
+```bash
+uv sync --extra recording-tools
+```
 
 `scripts/init_songs.py` is deprecated because the runtime database no longer
 has a `songs` table.

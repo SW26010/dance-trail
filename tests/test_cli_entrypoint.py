@@ -135,6 +135,29 @@ class CliEntrypointTests(unittest.TestCase):
                 "18:09:09 4062. Mood (Extreme) - 24kGoldn & Iann Dior | Just Dance 2022",
             )
 
+    def test_frozen_entrypoint_excludes_research_commands(self):
+        original_argv = sys.argv
+        had_frozen = hasattr(sys, "frozen")
+        original_frozen = getattr(sys, "frozen", None)
+        sys.argv = ["DancingLog.exe", "sample-frames"]
+        sys.frozen = True
+        try:
+            output = io.StringIO()
+            with self.assertRaises(SystemExit) as exit_context:
+                with contextlib.redirect_stdout(output):
+                    cli.main()
+        finally:
+            sys.argv = original_argv
+            if had_frozen:
+                sys.frozen = original_frozen
+            else:
+                delattr(sys, "frozen")
+
+        self.assertEqual(exit_context.exception.code, 2)
+        self.assertIn("Usage:", output.getvalue())
+        self.assertNotIn("sample-frames", output.getvalue())
+        self.assertNotIn("Development/research", output.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

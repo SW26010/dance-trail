@@ -141,6 +141,8 @@ $pyInstallerArgs = @(
     "--noconfirm",
     "--onedir",
     "--name", $AppName,
+    "--exclude-module", "imageio",
+    "--exclude-module", "imageio_ffmpeg",
     "--distpath", $PyInstallerDist,
     "--workpath", $PyInstallerWork,
     "--specpath", $PyInstallerWork,

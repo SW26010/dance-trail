@@ -74,3 +74,6 @@ DancingLog.exe watch-vrc-log --live-db --overlay-port 8765 %*
 
 Extra arguments are appended, so a user can still pass options such as
 `--promote-live`, `--log-dir`, or another `--overlay-port`.
+
+Development/research commands are not part of the portable release. In
+particular, `sample-frames` and its ffmpeg dependency are excluded from the zip.

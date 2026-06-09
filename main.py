@@ -606,9 +606,14 @@ def main():
             "scrape": ("Fetch Wanna Dance song metadata into local files", "scripts/scrape_wanna.py"),
             "test-apis": ("Test music APIs", "scripts/test_music_apis.py"),
         }
-    research_builtin_commands = {
-        "sample-frames": ("Sample overlay verification frames from a recording", cmd_sample_recording_frames),
-    }
+    research_builtin_commands = {}
+    if not _is_frozen():
+        research_builtin_commands = {
+            "sample-frames": (
+                "Sample overlay verification frames from a recording",
+                cmd_sample_recording_frames,
+            ),
+        }
 
     script_commands = {**user_script_commands, **research_script_commands}
     builtin_commands = {**user_builtin_commands, **research_builtin_commands}
@@ -642,7 +647,7 @@ def main():
         if not _is_frozen():
             print(f"  {prefix} scrape")
             print(f"  {prefix} sample-frames path/to/recordings/example.mkv --at 60 300")
-        sys.exit(0)
+        sys.exit(0 if len(sys.argv) < 2 else 2)
 
     cmd = sys.argv[1]
     if cmd in script_commands:

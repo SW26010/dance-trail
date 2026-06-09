@@ -73,3 +73,6 @@ DancingLog.exe watch-vrc-log --live-db --overlay-port 8765 %*
 
 额外参数会继续追加在后面，所以仍然可以传 `--promote-live`、`--log-dir`，
 或者用另一个 `--overlay-port` 覆盖端口。
+
+开发/研究命令不是 portable release 的一部分。特别是 `sample-frames` 以及
+它依赖的 ffmpeg 不会包含在 zip 里。

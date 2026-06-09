@@ -3,8 +3,6 @@
 from pathlib import Path
 import subprocess
 
-import imageio_ffmpeg
-
 
 def sample_top_frames(
     recording_path: Path | str,
@@ -25,6 +23,14 @@ def sample_top_frames(
 
     target_dir = Path(output_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        import imageio_ffmpeg
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "sample-frames requires the optional recording-tools dependencies. "
+            "Install them with: uv sync --extra recording-tools"
+        ) from exc
 
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
     outputs: list[Path] = []
