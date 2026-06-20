@@ -211,19 +211,40 @@ wannadance:5038 Good Time
 uv run python main.py sync-queued-self --system wannadance
 ```
 
-## 本地配置
+## 本地 Web UI
 
-本机路径放在 `config/dancing-log.local.json`，该文件会被 git 忽略。
+启动主本地 Web UI：
+
+```bash
+uv run python main.py webui
+uv run python main.py webui --port 8787 --no-open
+```
+
+Web UI 只绑定到 `127.0.0.1`。第一版已实现 Settings-first 的完整配置编辑器，并保留既定的导航入口：Home、Timeline、Catalog、Lists、Insights、Data Operations、Settings。Settings 保存支持字段时，会把不认识的本地配置键作为只读值保留。UI 支持英语和中文，可在浏览器本地切换语言。
+
+## 应用目录与本地配置
+
+本机路径放在 `config/dancing-log.local.json`，该文件会被 git 忽略。完整目录约定见 `docs/app_directories.zh-CN.md`。
 
 支持字段：
 
 ```json
 {
+  "config_version": 1,
+  "app_db": "data/dancing_log.sqlite3",
+  "queued_self_dir": "data/queued_self",
+  "capture_dir": "logs/captures",
+  "run_log_dir": "logs/runs",
+  "source_vrc_log_dir": "logs/source-vrc-logs",
+  "recording_frames_dir": "analysis/recording_frames",
   "self_user_id": null,
   "vrcx_db_path": null,
   "vrc_log_dir": null,
   "wanna_cache_dir": null,
-  "recordings_dir": null
+  "recordings_dir": null,
+  "auto_start_watcher": false,
+  "auto_start_overlay": false,
+  "overlay_port": 8765
 }
 ```
 

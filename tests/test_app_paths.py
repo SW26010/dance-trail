@@ -53,20 +53,34 @@ class AppPathTests(unittest.TestCase):
             migrated_config = json.loads(migrated.read_text(encoding="utf-8"))
             self.assertEqual(migrated_config["vrc_log_dir"], config["vrc_log_dir"])
 
-    def test_save_app_config_filters_unknown_keys(self):
+    def test_save_app_config_preserves_unknown_keys(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             path = save_app_config(
                 {
                     "app_db": "data/custom.sqlite3",
-                    "unknown": "ignore me",
+                    "unknown": "keep me",
                 },
                 app_root=root,
             )
 
             raw = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(raw["app_db"], "data/custom.sqlite3")
-            self.assertNotIn("unknown", raw)
+            self.assertEqual(raw["unknown"], "keep me")
+
+    def test_overlay_auto_start_implies_watcher_auto_start(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = save_app_config(
+                {
+                    "auto_start_overlay": True,
+                },
+                app_root=root,
+            )
+
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            self.assertTrue(raw["auto_start_overlay"])
+            self.assertTrue(raw["auto_start_watcher"])
 
     def test_recording_path_prefers_existing_configured_recordings_dir(self):
         with tempfile.TemporaryDirectory() as tmp:

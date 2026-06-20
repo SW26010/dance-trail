@@ -112,6 +112,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "vrc_log_dir": None,
     "wanna_cache_dir": None,
     "recordings_dir": None,
+    "auto_start_watcher": False,
+    "auto_start_overlay": False,
+    "overlay_port": 8765,
 }
 
 
@@ -171,15 +174,17 @@ def save_app_config(
 
 
 def normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
-    """Return a config containing only supported keys and defaults."""
+    """Return a config with supported defaults while preserving unknown keys."""
     if not isinstance(raw, dict):
         raise ValueError("App config must be a JSON object")
 
-    config = dict(DEFAULT_CONFIG)
+    config = dict(raw)
     for key in DEFAULT_CONFIG:
-        if key in raw:
-            config[key] = raw[key]
+        if key not in config:
+            config[key] = DEFAULT_CONFIG[key]
     config["config_version"] = 1
+    if config.get("auto_start_overlay"):
+        config["auto_start_watcher"] = True
     return config
 
 

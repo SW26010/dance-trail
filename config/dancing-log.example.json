@@ -10,5 +10,8 @@
   "vrcx_db_path": null,
   "vrc_log_dir": null,
   "wanna_cache_dir": null,
-  "recordings_dir": null
+  "recordings_dir": null,
+  "auto_start_watcher": false,
+  "auto_start_overlay": false,
+  "overlay_port": 8765
 }

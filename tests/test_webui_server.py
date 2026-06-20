@@ -1,0 +1,318 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
+
+from dancing_log.webui_server import (
+    WebUiRuntime,
+    WebUiServer,
+    _windows_picker_script,
+    load_catalog_snapshot,
+    load_config_snapshot,
+    load_insights_snapshot,
+    load_timeline_snapshot,
+)
+
+
+class WebUiServerTest(unittest.TestCase):
+    def _csrf_token(self, server: WebUiServer) -> str:
+        with urlopen(server.url, timeout=2) as response:
+            html = response.read().decode("utf-8")
+        marker = 'const CSRF_TOKEN = "'
+        self.assertIn(marker, html)
+        token = html.split(marker, 1)[1].split('"', 1)[0]
+        self.assertTrue(token)
+        self.assertNotEqual(token, "__DANCING_LOG_CSRF_TOKEN__")
+        return token
+
+    def _json_request(
+        self,
+        server: WebUiServer,
+        path: str,
+        payload: dict,
+        *,
+        token: str | None = None,
+        origin: str | None = None,
+        content_type: str = "application/json",
+        host: str | None = None,
+    ) -> Request:
+        headers = {"Content-Type": content_type}
+        if token is not None:
+            headers["X-Dancing-Log-CSRF"] = token
+        if origin is not None:
+            headers["Origin"] = origin
+        if host is not None:
+            headers["Host"] = host
+        return Request(
+            f"{server.url}{path}",
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+
+    def _http_error_json(self, request: Request, expected_code: int) -> dict:
+        with self.assertRaises(HTTPError) as context:
+            urlopen(request, timeout=2)
+        error = context.exception
+        try:
+            body = error.read().decode("utf-8")
+        finally:
+            error.close()
+        self.assertEqual(error.code, expected_code)
+        return json.loads(body) if body else {}
+
+    def test_webui_serves_main_page_and_config_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server = WebUiServer(port=0, app_root=tmp)
+            server.start()
+            try:
+                with urlopen(server.url, timeout=2) as response:
+                    html = response.read().decode("utf-8")
+                self.assertIn("dancing-log", html)
+                self.assertIn("Settings", html)
+                self.assertIn("dancing-log.language", html)
+                self.assertIn("中文", html)
+                self.assertIn("本地 Web UI", html)
+                self.assertIn("prefers-color-scheme: dark", html)
+                self.assertIn("color-scheme: dark", html)
+                self.assertNotIn("https://", html)
+                self.assertIn('const CSRF_TOKEN = "', html)
+                self.assertNotIn("__DANCING_LOG_CSRF_TOKEN__", html)
+
+                with urlopen(f"{server.url}api/config", timeout=2) as response:
+                    snapshot = json.loads(response.read().decode("utf-8"))
+                self.assertEqual(snapshot["config"]["app_db"], "data/dancing_log.sqlite3")
+                self.assertIn("overlay_port", snapshot["config"])
+            finally:
+                server.stop()
+
+    def test_webui_config_save_preserves_unknown_keys(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "config" / "dancing-log.local.json"
+            config_path.parent.mkdir()
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "app_db": "data/old.sqlite3",
+                        "custom_future_key": {"keep": True},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            server = WebUiServer(port=0, app_root=root)
+            server.start()
+            try:
+                token = self._csrf_token(server)
+                payload = {
+                    "config": {
+                        "app_db": "data/new.sqlite3",
+                        "queued_self_dir": "data/queued_self",
+                        "capture_dir": "logs/captures",
+                        "run_log_dir": "logs/runs",
+                        "source_vrc_log_dir": "logs/source-vrc-logs",
+                        "recording_frames_dir": "analysis/recording_frames",
+                        "self_user_id": "",
+                        "vrcx_db_path": "",
+                        "vrc_log_dir": "",
+                        "wanna_cache_dir": "",
+                        "recordings_dir": "",
+                        "auto_start_watcher": False,
+                        "auto_start_overlay": True,
+                        "overlay_port": 8765,
+                    }
+                }
+                request = self._json_request(
+                    server,
+                    "api/config",
+                    payload,
+                    token=token,
+                    origin=server.url.rstrip("/"),
+                )
+                with urlopen(request, timeout=2) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+
+                saved = json.loads(config_path.read_text(encoding="utf-8"))
+                self.assertTrue(result["saved"])
+                self.assertEqual(saved["app_db"], "data/new.sqlite3")
+                self.assertEqual(saved["custom_future_key"], {"keep": True})
+                self.assertTrue(saved["auto_start_overlay"])
+                self.assertTrue(saved["auto_start_watcher"])
+                self.assertIsNone(saved["vrcx_db_path"])
+            finally:
+                server.stop()
+
+    def test_webui_config_save_rejects_invalid_port_without_writing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "config" / "dancing-log.local.json"
+            config_path.parent.mkdir()
+            config_path.write_text(
+                json.dumps({"app_db": "data/original.sqlite3"}),
+                encoding="utf-8",
+            )
+            server = WebUiServer(port=0, app_root=root)
+            server.start()
+            try:
+                token = self._csrf_token(server)
+                payload = {
+                    "config": {
+                        "app_db": "data/new.sqlite3",
+                        "queued_self_dir": "data/queued_self",
+                        "capture_dir": "logs/captures",
+                        "run_log_dir": "logs/runs",
+                        "source_vrc_log_dir": "logs/source-vrc-logs",
+                        "recording_frames_dir": "analysis/recording_frames",
+                        "auto_start_watcher": False,
+                        "auto_start_overlay": False,
+                        "overlay_port": 70000,
+                    }
+                }
+                request = self._json_request(
+                    server,
+                    "api/config",
+                    payload,
+                    token=token,
+                    origin=server.url.rstrip("/"),
+                )
+                body = self._http_error_json(request, 400)
+                saved = json.loads(config_path.read_text(encoding="utf-8"))
+                self.assertIn("overlay_port", body["errors"])
+                self.assertEqual(saved["app_db"], "data/original.sqlite3")
+            finally:
+                server.stop()
+
+    def test_webui_config_save_rejects_cross_origin_text_and_missing_token(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "config" / "dancing-log.local.json"
+            config_path.parent.mkdir()
+            config_path.write_text(
+                json.dumps({"app_db": "data/original.sqlite3"}),
+                encoding="utf-8",
+            )
+            server = WebUiServer(port=0, app_root=root)
+            server.start()
+            try:
+                token = self._csrf_token(server)
+                payload = {"config": {"app_db": "data/csrf.sqlite3"}}
+
+                text_request = self._json_request(
+                    server,
+                    "api/config",
+                    payload,
+                    token=token,
+                    origin="https://example.invalid",
+                    content_type="text/plain",
+                )
+                self._http_error_json(text_request, 415)
+
+                origin_request = self._json_request(
+                    server,
+                    "api/config",
+                    payload,
+                    token=token,
+                    origin="https://example.invalid",
+                )
+                self._http_error_json(origin_request, 403)
+
+                missing_token_request = self._json_request(
+                    server,
+                    "api/config",
+                    payload,
+                    origin=server.url.rstrip("/"),
+                )
+                self._http_error_json(missing_token_request, 403)
+
+                host_request = self._json_request(
+                    server,
+                    "api/config",
+                    payload,
+                    token=token,
+                    origin=server.url.rstrip("/"),
+                    host=f"example.invalid:{server.port}",
+                )
+                self._http_error_json(host_request, 403)
+
+                saved = json.loads(config_path.read_text(encoding="utf-8"))
+                self.assertEqual(saved["app_db"], "data/original.sqlite3")
+            finally:
+                server.stop()
+
+    def test_webui_resolve_path_uses_draft_value(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            server = WebUiServer(port=0, app_root=root)
+            server.start()
+            try:
+                token = self._csrf_token(server)
+                request = self._json_request(
+                    server,
+                    "api/resolve-path",
+                    {"field": "app_db", "current_value": "data/new.sqlite3"},
+                    token=token,
+                    origin=server.url.rstrip("/"),
+                )
+                with urlopen(request, timeout=2) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+
+                self.assertEqual(result["field"], "app_db")
+                self.assertEqual(result["path"]["resolved"], str(root / "data" / "new.sqlite3"))
+                self.assertFalse(result["path"]["exists"])
+
+                null_request = self._json_request(
+                    server,
+                    "api/resolve-path",
+                    {"field": "vrcx_db_path", "current_value": ""},
+                    token=token,
+                    origin=server.url.rstrip("/"),
+                )
+                with urlopen(null_request, timeout=2) as response:
+                    null_result = json.loads(response.read().decode("utf-8"))
+                self.assertIsNone(null_result["path"]["resolved"])
+            finally:
+                server.stop()
+
+    def test_webui_read_snapshots_do_not_initialize_empty_sqlite_db(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "data" / "dancing_log.sqlite3"
+            db_path.parent.mkdir()
+            db_path.write_bytes(b"")
+            runtime = WebUiRuntime.from_root(root)
+
+            catalog = load_catalog_snapshot(runtime, {})
+            insights = load_insights_snapshot(runtime)
+            timeline = load_timeline_snapshot(runtime, {"date": ["2026-06-18"]})
+
+            self.assertTrue(catalog["database_exists"])
+            self.assertTrue(insights["database_exists"])
+            self.assertTrue(timeline["database_exists"])
+            self.assertEqual(db_path.stat().st_size, 0)
+
+    def test_webui_config_snapshot_does_not_migrate_legacy_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy_path = root / "data" / "local_config.json"
+            new_path = root / "config" / "dancing-log.local.json"
+            legacy_path.parent.mkdir()
+            legacy_path.write_text(json.dumps({"app_db": "data/legacy.sqlite3"}), encoding="utf-8")
+
+            snapshot = load_config_snapshot(WebUiRuntime.from_root(root))
+
+            self.assertEqual(snapshot["config"]["app_db"], "data/legacy.sqlite3")
+            self.assertFalse(new_path.exists())
+
+    def test_windows_picker_script_uses_topmost_owner(self):
+        script = _windows_picker_script()
+
+        self.assertIn("$owner.TopMost = $true", script)
+        self.assertIn("$owner.Show()", script)
+        self.assertIn(".ShowDialog($owner)", script)
+        self.assertNotIn(".ShowDialog()", script)
+
+
+if __name__ == "__main__":
+    unittest.main()

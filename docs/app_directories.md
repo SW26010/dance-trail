@@ -44,13 +44,20 @@ The tracked example config is `config/dancing-log.example.json`.
   "vrcx_db_path": null,
   "vrc_log_dir": null,
   "wanna_cache_dir": null,
-  "recordings_dir": null
+  "recordings_dir": null,
+  "auto_start_watcher": false,
+  "auto_start_overlay": false,
+  "overlay_port": 8765
 }
 ```
 
 Relative paths in this file are resolved from the application root. Absolute
 paths remain absolute. Environment variables such as `%USERPROFILE%` are
 expanded before resolution.
+
+`auto_start_watcher`, `auto_start_overlay`, and `overlay_port` are runtime
+defaults for app workflows. Setting `auto_start_overlay` to `true` also keeps
+`auto_start_watcher` enabled because the overlay depends on live watcher state.
 
 `data/local_config.json` is a legacy location. The app can read it when the new
 config file does not exist, then writes normalized config to

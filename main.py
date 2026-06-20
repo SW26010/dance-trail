@@ -523,6 +523,24 @@ def cmd_watch_vrc_log():
     print(f"  summary: {stats.session_dir / 'summary.json'}")
 
 
+def cmd_webui():
+    """Start the local Web UI server."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Start the local dancing-log Web UI")
+    parser.add_argument("--port", type=int, default=8787, help="Localhost port")
+    parser.add_argument(
+        "--no-open",
+        action="store_true",
+        help="Do not open the system browser after starting",
+    )
+    args = parser.parse_args(sys.argv[2:])
+
+    from dancing_log.webui_server import run_webui_server
+
+    run_webui_server(port=args.port, open_browser=not args.no_open)
+
+
 def cmd_rebuild_data():
     """Archive generated local data and rebuild the current SQLite database."""
     import argparse
@@ -598,6 +616,7 @@ def main():
         "import-vrcx": ("Import historical playback rows from VRCX SQLite", cmd_import_vrcx),
         "sync-queued-self": ("Sync queued_self manifests", cmd_sync_queued_self),
         "watch-vrc-log": ("Capture live VRChat output logs", cmd_watch_vrc_log),
+        "webui": ("Start the local Web UI", cmd_webui),
         "rebuild-data": ("Archive and rebuild generated local data", cmd_rebuild_data),
     }
     research_script_commands = {}
@@ -643,6 +662,7 @@ def main():
         print(f"  {prefix} import-vrcx")
         print(f"  {prefix} sync-queued-self --system wannadance")
         print(f"  {prefix} watch-vrc-log")
+        print(f"  {prefix} webui")
         print(f"  {prefix} rebuild-data --archive-existing")
         if not _is_frozen():
             print(f"  {prefix} scrape")

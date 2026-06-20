@@ -217,6 +217,22 @@ event view is `playback_events.jsonl`, which tracks request, resolve, load,
 actual-play, source, mid-play progress, and delay fields when those signals appear
 in the VRChat log.
 
+## Local Web UI
+
+Start the main local Web UI:
+
+```bash
+uv run python main.py webui
+uv run python main.py webui --port 8787 --no-open
+```
+
+The Web UI binds only to `127.0.0.1`. The first implemented workflow is the
+Settings-first full configuration editor, with the settled navigation entries:
+Home, Timeline, Catalog, Lists, Insights, Data Operations, and Settings.
+Settings preserves unsupported local config keys as read-only values when it
+saves supported fields.
+The UI supports English and Chinese through a browser-local language switch.
+
 For deterministic offline replay of a fixed corpus, use the replay helper
 instead of `watch-vrc-log --from-start`:
 
@@ -303,7 +319,10 @@ Supported keys:
   "vrcx_db_path": null,
   "vrc_log_dir": null,
   "wanna_cache_dir": null,
-  "recordings_dir": null
+  "recordings_dir": null,
+  "auto_start_watcher": false,
+  "auto_start_overlay": false,
+  "overlay_port": 8765
 }
 ```
 
