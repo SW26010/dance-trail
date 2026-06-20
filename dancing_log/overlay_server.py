@@ -11,6 +11,8 @@ import sys
 import threading
 from urllib.parse import urlparse
 
+from dancing_log.overlay_view_model import build_overlay_view_model
+
 
 OVERLAY_HOST = "127.0.0.1"
 
@@ -113,6 +115,7 @@ class OverlayState:
         return {
             "generated_at": _utc_now(),
             "current": current,
+            "current_view": build_overlay_view_model(current),
             "events": events,
             "status": self._status,
         }
@@ -338,18 +341,13 @@ body {
   <div class="line source" id="source-player">source player: unknown</div>
 </main>
 <script>
-const state = { current: null };
+const state = { current: null, currentView: null };
 const nodes = {
   isoTime: document.getElementById("iso-time"),
   meta: document.getElementById("meta"),
   title: document.getElementById("title"),
   titleFrame: document.querySelector(".title-frame"),
   sourcePlayer: document.getElementById("source-player")
-};
-
-const SYSTEM_LABELS = {
-  wannadance: "WD",
-  pypydance: "PY"
 };
 
 function parseVrcTime(value) {
@@ -393,31 +391,6 @@ function formatDuration(seconds) {
   return `${mins}:${secs}`;
 }
 
-function systemLabel(system) {
-  const key = String(system || "").toLowerCase();
-  if (SYSTEM_LABELS[key]) return SYSTEM_LABELS[key];
-  return key ? key.slice(0, 2).toUpperCase() : "--";
-}
-
-function seriesName(title) {
-  const parts = String(title || "").split("|");
-  return parts.length > 1 ? parts.slice(1).join("|").trim() : "";
-}
-
-function primaryTitle(title) {
-  return String(title || "").split("|")[0].trim();
-}
-
-function sourceLabel(event) {
-  const type = String(event.source_type || "").trim();
-  const displayName = String(event.source_display_name || "").trim();
-  if (type === "player") return `source player: ${displayName || "unknown"}`;
-  if (type && displayName) return `source ${type}: ${displayName}`;
-  if (type) return `source ${type}`;
-  if (displayName) return `source player: ${displayName}`;
-  return "source unknown";
-}
-
 function updateTitleScroll() {
   nodes.title.classList.remove("is-scrolling");
   nodes.title.style.removeProperty("--scroll-x");
@@ -433,11 +406,11 @@ function updateClock() {
   const now = new Date();
   nodes.isoTime.textContent = formatIso8601Local(now);
   const event = state.current;
-  if (!event) return;
+  const view = state.currentView;
+  if (!event || !view) return;
   const started = parseVrcTime(event.actual_play_at);
-  const duration = Number(event.duration_seconds);
   const elapsed = started ? Math.max(0, (Date.now() - started.getTime()) / 1000) : 0;
-  updateMeta(event, elapsed, duration);
+  updateMeta(view, elapsed);
 }
 
 function visibleStatus(snapshot) {
@@ -456,8 +429,10 @@ function visibleStatus(snapshot) {
 
 function render(snapshot) {
   state.current = snapshot.current || null;
+  state.currentView = snapshot.current_view || null;
   const event = state.current;
-  if (!event) {
+  const view = state.currentView;
+  if (!event || !view) {
     const status = visibleStatus(snapshot);
     nodes.title.textContent = status && status.message
       ? status.message
@@ -468,25 +443,28 @@ function render(snapshot) {
     updateClock();
     return;
   }
-  const title = event.video_name || event.video_url || `${event.dance_system_key || "unknown"}:${event.dance_external_id || "?"}`;
-  nodes.title.textContent = primaryTitle(title) || title;
-  nodes.sourcePlayer.textContent = sourceLabel(event);
+  nodes.title.textContent = view.title || "Waiting for playback";
+  nodes.sourcePlayer.textContent = view.source_label || "source unknown";
   requestAnimationFrame(updateTitleScroll);
   updateClock();
 }
 
-function updateMeta(event, elapsed, duration) {
-  const title = event.video_name || event.video_url || "";
-  const parts = [
-    `${systemLabel(event.dance_system_key)} ID: ${event.dance_external_id || "?"}`
-  ];
-  if (Number.isFinite(duration) && duration > 0) {
+function formatTimer(timer, elapsed) {
+  const mode = String((timer && timer.mode) || "elapsed");
+  const duration = Number(timer && timer.duration_seconds);
+  if (mode === "elapsed_total" && Number.isFinite(duration) && duration > 0) {
     const displayElapsed = Math.min(elapsed, duration);
-    parts.push(`${formatDuration(displayElapsed)}/${formatDuration(duration)}`);
-  } else {
-    parts.push(formatDuration(elapsed));
+    return `${formatDuration(displayElapsed)}/${formatDuration(duration)}`;
   }
-  const series = seriesName(title);
+  return formatDuration(elapsed);
+}
+
+function updateMeta(view, elapsed) {
+  const parts = [
+    view.system_track_label || "-- ID: ?",
+    formatTimer(view.timer, elapsed)
+  ];
+  const series = String(view.series_name || "").trim();
   if (series) parts.push(series);
   nodes.meta.textContent = parts.join(" | ");
 }

@@ -96,6 +96,8 @@ class OverlayServerTest(unittest.TestCase):
             with urlopen(f"http://127.0.0.1:{server.port}/state", timeout=2) as response:
                 state = json.loads(response.read().decode("utf-8"))
             self.assertEqual(state["current"]["dance_external_id"], "3114")
+            self.assertEqual(state["current_view"]["source_label"], "source player: Alice")
+            self.assertEqual(state["current_view"]["timer"]["mode"], "elapsed_total")
 
             with urlopen(f"http://127.0.0.1:{server.port}/overlay", timeout=2) as response:
                 html = response.read().decode("utf-8")
@@ -133,28 +135,24 @@ class OverlayServerTest(unittest.TestCase):
             snapshot = json.loads(data_line.removeprefix("data: "))
             self.assertEqual(snapshot["current"]["dance_system_key"], "pypydance")
             self.assertEqual(snapshot["current"]["source_type"], "random")
+            self.assertEqual(snapshot["current_view"]["source_label"], "source random")
         finally:
             server.stop()
 
-    def test_overlay_html_preserves_source_and_duration_labels(self):
-        self.assertIn("function primaryTitle(title)", _OVERLAY_HTML)
-        self.assertIn("nodes.title.textContent = primaryTitle(title) || title;", _OVERLAY_HTML)
-        self.assertIn("function sourceLabel(event)", _OVERLAY_HTML)
-        self.assertIn('if (type) return `source ${type}`;', _OVERLAY_HTML)
+    def test_overlay_html_consumes_view_model_contract(self):
+        self.assertIn("state.currentView = snapshot.current_view || null;", _OVERLAY_HTML)
         self.assertIn(
-            "if (Number.isFinite(duration) && duration > 0)",
+            'nodes.sourcePlayer.textContent = view.source_label || "source unknown";',
             _OVERLAY_HTML,
         )
-        self.assertIn(
-            "parts.push(`${formatDuration(displayElapsed)}/${formatDuration(duration)}`);",
-            _OVERLAY_HTML,
-        )
-        self.assertIn(
-            "parts.push(formatDuration(elapsed));",
-            _OVERLAY_HTML,
-        )
+        self.assertIn("formatTimer(view.timer, elapsed)", _OVERLAY_HTML)
+        self.assertNotIn("function sourceLabel", _OVERLAY_HTML)
+        self.assertNotIn("function primaryTitle", _OVERLAY_HTML)
+        self.assertNotIn("function systemLabel", _OVERLAY_HTML)
+        self.assertNotIn("event.source_type", _OVERLAY_HTML)
+        self.assertNotIn("event.source_display_name", _OVERLAY_HTML)
+        self.assertNotIn("event.duration_seconds", _OVERLAY_HTML)
         self.assertNotIn("remaining ", _OVERLAY_HTML)
-        self.assertNotIn("parts.push(`elapsed ", _OVERLAY_HTML)
         self.assertNotIn(
             'source player: ${event.source_display_name || "unknown"}',
             _OVERLAY_HTML,
