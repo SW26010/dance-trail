@@ -117,6 +117,7 @@ if ($Version.StartsWith("v", [System.StringComparison]::OrdinalIgnoreCase)) {
 }
 
 $AppName = "DancingLog"
+$CliAppName = "DancingLogCli"
 $ReleaseName = "$AppName-v$Version-$Runtime-portable"
 $StageDir = Join-Path $PortableRoot $ReleaseName
 $ZipPath = Join-Path $ReleaseRoot "$ReleaseName.zip"
@@ -136,24 +137,37 @@ Remove-InRepoDirectory $PyInstallerWork
 Remove-InRepoDirectory $StageDir
 New-Item -ItemType Directory -Force $PyInstallerDist, $PyInstallerWork, $StageDir, $ReleaseRoot | Out-Null
 
-$pyInstallerArgs = @(
+$pyInstallerBaseArgs = @(
     "--clean",
     "--noconfirm",
     "--onedir",
-    "--name", $AppName,
     "--exclude-module", "imageio",
     "--exclude-module", "imageio_ffmpeg",
     "--distpath", $PyInstallerDist,
     "--workpath", $PyInstallerWork,
-    "--specpath", $PyInstallerWork,
+    "--specpath", $PyInstallerWork
+)
+$cliPyInstallerArgs = $pyInstallerBaseArgs + @(
+    "--name", $CliAppName,
     "main.py"
 )
-Invoke-Checked { Invoke-PyInstaller -Arguments $pyInstallerArgs } "Build PyInstaller onedir app"
+$guiPyInstallerArgs = $pyInstallerBaseArgs + @(
+    "--name", $AppName,
+    "--windowed",
+    "main.py"
+)
+Invoke-Checked { Invoke-PyInstaller -Arguments $cliPyInstallerArgs } "Build PyInstaller CLI onedir app"
+Invoke-Checked { Invoke-PyInstaller -Arguments $guiPyInstallerArgs } "Build PyInstaller desktop tray onedir app"
 
+$BuiltCliAppDir = Join-Path $PyInstallerDist $CliAppName
 $BuiltAppDir = Join-Path $PyInstallerDist $AppName
+if (-not (Test-Path -LiteralPath (Join-Path $BuiltCliAppDir "$CliAppName.exe"))) {
+    throw "PyInstaller output is missing $CliAppName.exe"
+}
 if (-not (Test-Path -LiteralPath (Join-Path $BuiltAppDir "$AppName.exe"))) {
     throw "PyInstaller output is missing $AppName.exe"
 }
+Copy-Item -Path (Join-Path $BuiltCliAppDir "*") -Destination $StageDir -Recurse -Force
 Copy-Item -Path (Join-Path $BuiltAppDir "*") -Destination $StageDir -Recurse -Force
 
 Copy-Item -LiteralPath (Join-Path $RepoRoot "README.md") -Destination $StageDir -Force
@@ -175,12 +189,12 @@ Copy-Item -LiteralPath (Join-Path $RepoRoot "config\dancing-log.example.json") -
 $batEncoding = [System.Text.UTF8Encoding]::new($false)
 [System.IO.File]::WriteAllText(
     (Join-Path $StageDir "sync-wanna.bat"),
-    "@echo off`r`nsetlocal`r`ncd /d ""%~dp0""`r`nDancingLog.exe sync-wanna %*`r`n",
+    "@echo off`r`nsetlocal`r`ncd /d ""%~dp0""`r`nDancingLogCli.exe sync-wanna %*`r`n",
     $batEncoding
 )
 [System.IO.File]::WriteAllText(
     (Join-Path $StageDir "start-watch-vrc-log.bat"),
-    "@echo off`r`nsetlocal`r`ncd /d ""%~dp0""`r`nDancingLog.exe watch-vrc-log --live-db --overlay-port 8765 %*`r`n",
+    "@echo off`r`nsetlocal`r`ncd /d ""%~dp0""`r`nDancingLogCli.exe watch-vrc-log --live-db --overlay-port 8765 %*`r`n",
     $batEncoding
 )
 

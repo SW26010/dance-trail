@@ -1,6 +1,6 @@
 """dancing-log command-line entrypoint."""
 
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import subprocess
 import sys
 
@@ -16,9 +16,22 @@ def _is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
 
 
+def _executable_name() -> str:
+    executable = str(sys.executable)
+    if "\\" in executable or ":" in executable:
+        return PureWindowsPath(executable).name
+    return Path(executable).name
+
+
+def _is_desktop_tray_entry() -> bool:
+    return _is_frozen() and PureWindowsPath(_executable_name()).stem.casefold() == "dancinglog"
+
+
 def _command_prefix() -> str:
     if _is_frozen():
-        return Path(sys.executable).name
+        if _is_desktop_tray_entry():
+            return "DancingLogCli.exe"
+        return _executable_name()
     return "uv run python main.py"
 
 
@@ -541,6 +554,13 @@ def cmd_webui():
     run_webui_server(port=args.port, open_browser=not args.no_open)
 
 
+def run_desktop_tray_entry():
+    """Run the frozen desktop tray entry."""
+    from dancing_log.tray_app import run_tray_webui_app
+
+    run_tray_webui_app()
+
+
 def cmd_rebuild_data():
     """Archive generated local data and rebuild the current SQLite database."""
     import argparse
@@ -606,6 +626,10 @@ def cmd_rebuild_data():
 
 
 def main():
+    if _is_desktop_tray_entry() and len(sys.argv) < 2:
+        run_desktop_tray_entry()
+        return
+
     user_script_commands = {}
     user_builtin_commands = {
         "sync-wanna": ("Sync WannaDance tracks into SQLite", cmd_sync_wanna),

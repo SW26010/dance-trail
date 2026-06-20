@@ -215,6 +215,27 @@ class VrcLogParserTest(unittest.TestCase):
 
 
 class VrcLogWatcherTest(unittest.TestCase):
+    def test_watcher_stops_when_stop_event_is_set(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            stop_event = threading.Event()
+            stop_event.set()
+
+            stats = watch_vrc_logs(
+                log_dir=log_dir,
+                output_dir=root / "capture",
+                session_name="stop-event",
+                poll_seconds=0.01,
+                stop_event=stop_event,
+                archive_source_logs=False,
+            )
+
+            self.assertTrue(stats.stop_requested)
+            summary = json.loads((stats.session_dir / "summary.json").read_text(encoding="utf-8"))
+            self.assertTrue(summary["stop_requested"])
+
     def test_watcher_reads_existing_file_from_start(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

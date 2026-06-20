@@ -9,8 +9,12 @@ $ErrorActionPreference = "Stop"
 
 $PortableRoot = (Resolve-Path $PortableDir).Path
 $ExePath = Join-Path $PortableRoot "DancingLog.exe"
+$CliExePath = Join-Path $PortableRoot "DancingLogCli.exe"
 if (-not (Test-Path -LiteralPath $ExePath)) {
     throw "DancingLog.exe not found under portable directory: $PortableRoot"
+}
+if (-not (Test-Path -LiteralPath $CliExePath)) {
+    throw "DancingLogCli.exe not found under portable directory: $PortableRoot"
 }
 
 $SmokeRoot = Join-Path $env:TEMP ("dancing-log-portable-smoke-" + [guid]::NewGuid().ToString("N"))
@@ -42,10 +46,10 @@ function Invoke-Portable {
             $_
         }
     }
-    Write-Host "==> DancingLog.exe $($displayArguments -join ' ')"
-    & $ExePath @Arguments
+    Write-Host "==> DancingLogCli.exe $($displayArguments -join ' ')"
+    & $CliExePath @Arguments
     if ($LASTEXITCODE -ne 0) {
-        throw "DancingLog.exe $($Arguments -join ' ') failed with exit code $LASTEXITCODE"
+        throw "DancingLogCli.exe $($Arguments -join ' ') failed with exit code $LASTEXITCODE"
     }
 }
 
@@ -63,14 +67,14 @@ function Assert-PortableRejects {
             $_
         }
     }
-    Write-Host "==> DancingLog.exe $($displayArguments -join ' ')"
-    $output = & $ExePath @Arguments 2>&1
+    Write-Host "==> DancingLogCli.exe $($displayArguments -join ' ')"
+    $output = & $CliExePath @Arguments 2>&1
     $exitCode = $LASTEXITCODE
     if ($exitCode -eq 0) {
-        throw "DancingLog.exe $($Arguments -join ' ') unexpectedly succeeded"
+        throw "DancingLogCli.exe $($Arguments -join ' ') unexpectedly succeeded"
     }
     if (($output -join "`n") -notlike "*$ExpectedOutput*") {
-        throw "DancingLog.exe $($Arguments -join ' ') did not print expected output: $ExpectedOutput"
+        throw "DancingLogCli.exe $($Arguments -join ' ') did not print expected output: $ExpectedOutput"
     }
 }
 

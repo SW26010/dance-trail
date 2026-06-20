@@ -10,6 +10,7 @@ import csv
 import json
 import os
 import re
+import threading
 import time
 
 from dancing_log.app_paths import DEFAULT_CAPTURE_ROOT, SOURCE_VRC_LOG_DIR
@@ -242,6 +243,7 @@ class WatchStats:
     live_db_updates: int = 0
     live_promotions: int = 0
     overlay_url: str | None = None
+    stop_requested: bool = False
     replayed_files: list[str] = field(default_factory=list)
     source_log_dir: str | None = None
     source_log_bytes: int = 0
@@ -268,6 +270,7 @@ class WatchStats:
             "live_db_updates": self.live_db_updates,
             "live_promotions": self.live_promotions,
             "overlay_url": self.overlay_url,
+            "stop_requested": self.stop_requested,
             "replayed_files": self.replayed_files,
             "source_log_dir": self.source_log_dir,
             "source_log_bytes": self.source_log_bytes,
@@ -1628,6 +1631,7 @@ def watch_vrc_logs(
     overlay_port: int | None = None,
     poll_seconds: float = 0.25,
     stop_after_idle_seconds: float | None = None,
+    stop_event: threading.Event | None = None,
     archive_source_logs: bool = True,
     source_log_dir: Path | str | None = None,
     source_log_copy_bytes_per_tick: int = SOURCE_LOG_COPY_CHUNK_BYTES,
@@ -1699,6 +1703,9 @@ def watch_vrc_logs(
         )
 
         while True:
+            if stop_event is not None and stop_event.is_set():
+                stats.stop_requested = True
+                break
             latest_path = _latest_log_file(resolved_log_dir, stats.errors)
             if source_mirror is not None and latest_path is not None:
                 source_mirror.mirror_file(latest_path)

@@ -2,7 +2,7 @@
 
 The first supported release shape is a Windows x64 portable folder. It keeps the
 same app-root path model as source runs: `config/`, `data/`, and `logs/` live
-next to `DancingLog.exe`.
+next to the executable files.
 
 ## Local Build
 
@@ -18,8 +18,8 @@ Run:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1
 ```
 
-The script runs the unit tests, builds a PyInstaller onedir app, runs an exe
-smoke test, and writes:
+The script runs the unit tests, builds a PyInstaller onedir desktop app plus a
+console CLI app, runs an exe smoke test, and writes:
 
 ```text
 dist/releases/DancingLog-v<version>-win-x64-portable.zip
@@ -52,6 +52,7 @@ The generated folder includes:
 
 ```text
 DancingLog.exe
+DancingLogCli.exe
 _internal/
 config/dancing-log.example.json
 data/
@@ -66,10 +67,15 @@ start-watch-vrc-log.bat
 User-specific settings belong in `config/dancing-log.local.json`, which is not
 included in the release zip.
 
+Double-clicking `DancingLog.exe` starts the desktop tray entry and activates the
+Local Web UI on `http://127.0.0.1:8787/` without opening a console window. Use
+the tray menu to open the Web UI again, start or stop the live watcher and OBS
+overlay, or quit the background app session.
+
 `start-watch-vrc-log.bat` starts the common OBS overlay workflow:
 
 ```bat
-DancingLog.exe watch-vrc-log --live-db --overlay-port 8765 %*
+DancingLogCli.exe watch-vrc-log --live-db --overlay-port 8765 %*
 ```
 
 Extra arguments are appended, so a user can still pass options such as

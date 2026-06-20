@@ -64,6 +64,18 @@ _Avoid_: live watcher control, process manager
 A saved preference that affects whether the local OBS overlay server should run when the watcher is started by an app workflow. Enabling overlay auto-start implies watcher auto-start, because the overlay depends on live watcher state.
 _Avoid_: OBS overlay page, live overlay control
 
+**Desktop Tray Entry**:
+The Windows notification-area entry for running `dancing-log` as a local desktop app. It opens the Local Web UI, exposes immediate watcher and overlay controls, and owns quitting the background app session.
+_Avoid_: CLI command, Web UI navigation entry, background service
+
+**Live Watcher Control**:
+An immediate start or stop command for the current VRChat log watcher process. It changes the running app session and is separate from Watcher Default.
+_Avoid_: watcher default, saved configuration, startup preference
+
+**Live Overlay Control**:
+An immediate start or stop command for the current OBS Overlay server. It depends on Live Watcher Control: turning overlay on keeps watcher on, and turning watcher off also turns overlay off.
+_Avoid_: overlay default, saved configuration, OBS overlay page
+
 **Full Configuration Editor**:
 The Settings surface that exposes every supported local configuration key for inspection and editing. It edits the local app configuration, not catalog data, playback history, or bulk data workflows.
 _Avoid_: setup wizard, raw JSON editor, data operations

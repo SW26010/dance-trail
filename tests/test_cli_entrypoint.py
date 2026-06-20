@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import main as cli
 from dancing_log.storage import (
@@ -157,6 +158,52 @@ class CliEntrypointTests(unittest.TestCase):
         self.assertIn("Usage:", output.getvalue())
         self.assertNotIn("sample-frames", output.getvalue())
         self.assertNotIn("Development/research", output.getvalue())
+
+    def test_frozen_gui_entrypoint_defaults_to_desktop_tray(self):
+        original_argv = sys.argv
+        original_executable = sys.executable
+        had_frozen = hasattr(sys, "frozen")
+        original_frozen = getattr(sys, "frozen", None)
+        sys.argv = ["DancingLog.exe"]
+        sys.executable = r"C:\portable\DancingLog.exe"
+        sys.frozen = True
+        try:
+            with patch("main.run_desktop_tray_entry") as run_tray:
+                cli.main()
+        finally:
+            sys.argv = original_argv
+            sys.executable = original_executable
+            if had_frozen:
+                sys.frozen = original_frozen
+            else:
+                delattr(sys, "frozen")
+
+        run_tray.assert_called_once_with()
+
+    def test_frozen_cli_entrypoint_without_command_keeps_usage_help(self):
+        original_argv = sys.argv
+        original_executable = sys.executable
+        had_frozen = hasattr(sys, "frozen")
+        original_frozen = getattr(sys, "frozen", None)
+        sys.argv = ["DancingLogCli.exe"]
+        sys.executable = r"C:\portable\DancingLogCli.exe"
+        sys.frozen = True
+        try:
+            output = io.StringIO()
+            with self.assertRaises(SystemExit) as exit_context:
+                with contextlib.redirect_stdout(output):
+                    cli.main()
+        finally:
+            sys.argv = original_argv
+            sys.executable = original_executable
+            if had_frozen:
+                sys.frozen = original_frozen
+            else:
+                delattr(sys, "frozen")
+
+        self.assertEqual(exit_context.exception.code, 0)
+        self.assertIn("Usage:", output.getvalue())
+        self.assertIn("DancingLogCli.exe", output.getvalue())
 
 
 if __name__ == "__main__":
