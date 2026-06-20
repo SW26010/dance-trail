@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import shutil
 
-from dancing_log.storage import DATA_DIR
+from dancing_log.app_paths import AppPaths
 
 
 ARCHIVE_NAMES = (
@@ -31,7 +31,7 @@ def archive_existing_data(
     app_db_path: Path | str | None = None,
 ) -> ArchiveStats:
     """Move old generated data files into data/archive/<timestamp>."""
-    root = Path(data_dir) if data_dir is not None else DATA_DIR
+    root = Path(data_dir) if data_dir is not None else AppPaths.from_root().data_dir
     root.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).astimezone().strftime("%Y%m%d-%H%M%S")
     archive_dir = root / "archive" / timestamp

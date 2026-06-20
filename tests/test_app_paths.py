@@ -120,6 +120,28 @@ class AppPathTests(unittest.TestCase):
             self.assertEqual(runtime.overlay_port, 9911)
             self.assertEqual(runtime.supported_values()["app_db"], "db/app.sqlite3")
 
+    def test_runtime_config_resolves_standard_app_root_directories(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime = AppRuntimeConfig.from_config(DEFAULT_CONFIG, app_root=root)
+
+            self.assertEqual(
+                runtime.paths.local_config_file,
+                root / "config" / "dancing-log.local.json",
+            )
+            self.assertEqual(runtime.app_db_path, root / "data" / "dancing_log.sqlite3")
+            self.assertEqual(runtime.queued_self_dir, root / "data" / "queued_self")
+            self.assertEqual(runtime.capture_dir, root / "logs" / "captures")
+            self.assertEqual(runtime.run_log_dir, root / "logs" / "runs")
+            self.assertEqual(
+                runtime.source_vrc_log_dir,
+                root / "logs" / "source-vrc-logs",
+            )
+            self.assertEqual(
+                runtime.recording_frames_dir,
+                root / "analysis" / "recording_frames",
+            )
+
     def test_runtime_watcher_config_preserves_defaults_and_empty_override_fallback(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

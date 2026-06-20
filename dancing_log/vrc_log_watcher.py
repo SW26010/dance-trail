@@ -11,7 +11,7 @@ import os
 import threading
 import time
 
-from dancing_log.app_paths import DEFAULT_CAPTURE_ROOT, SOURCE_VRC_LOG_DIR
+from dancing_log.app_paths import AppPaths
 from dancing_log.live_playback_folding import (
     PREVIEW_SUPPRESSION_SECONDS,
     RETRY_MERGE_SECONDS,
@@ -557,11 +557,13 @@ def watch_vrc_logs(
 ) -> WatchStats:
     """Tail VRChat output logs and write raw/candidate/parsed capture artifacts."""
     resolved_log_dir = Path(log_dir) if log_dir is not None else default_vrc_log_dir()
-    capture_root = Path(output_dir) if output_dir is not None else DEFAULT_CAPTURE_ROOT
+    app_paths = AppPaths.from_root()
+    capture_root = Path(output_dir) if output_dir is not None else app_paths.capture_dir
     resolved_source_log_dir = _resolve_source_log_dir(
         source_log_dir=source_log_dir,
         output_dir=output_dir,
         capture_root=capture_root,
+        default_source_log_dir=app_paths.source_vrc_log_dir,
     )
     session_dir = capture_root / (session_name or datetime.now().strftime("%Y-%m-%d_%H%M%S"))
     session_dir.mkdir(parents=True, exist_ok=True)
@@ -927,12 +929,13 @@ def _resolve_source_log_dir(
     source_log_dir: Path | str | None,
     output_dir: Path | str | None,
     capture_root: Path,
+    default_source_log_dir: Path,
 ) -> Path:
     if source_log_dir is not None:
         return Path(source_log_dir)
     if output_dir is not None:
         return capture_root.parent / "source-vrc-logs"
-    return SOURCE_VRC_LOG_DIR
+    return default_source_log_dir
 
 
 def _write_json(path: Path, value: dict) -> None:

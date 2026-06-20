@@ -371,6 +371,7 @@ def _run_sync_wanna(
     from dancing_log.wanna_catalog import sync_wanna_catalog
 
     stats = sync_wanna_catalog(
+        config=config,
         db_path=config.path("app_db", override=params.get("app_db")),
         cache_dir=config.optional_path("wanna_cache_dir", override=params.get("cache_dir")),
         use_api=not bool(params.get("offline", False)),
@@ -443,11 +444,12 @@ def _run_rebuild_data(
     from dancing_log.wanna_catalog import sync_wanna_catalog
 
     db_path = config.path("app_db", override=params.get("app_db"))
-    archive = archive_existing_data(config.paths.data_dir, app_db_path=db_path)
+    archive = archive_existing_data(data_dir=config.paths.data_dir, app_db_path=db_path)
     lines = [f"Archived generated data to: {archive.archive_dir}"]
     lines.extend(f"  {path.name}" for path in archive.archived)
 
     sync_stats = sync_wanna_catalog(
+        config=config,
         db_path=db_path,
         cache_dir=config.wanna_cache_dir,
         use_api=not bool(params.get("offline", False)),

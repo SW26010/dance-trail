@@ -13,7 +13,7 @@ import re
 import sqlite3
 import unicodedata
 
-from dancing_log.app_paths import DATA_DIR, DB_FILE
+from dancing_log.app_paths import AppPaths
 from dancing_log.live_playback_settlement import is_live_playback_promotable
 
 WANNA_SYSTEM_KEY = "wannadance"
@@ -31,7 +31,7 @@ class ClosingConnection(sqlite3.Connection):
 
 def connect_db(path: Path | str | None = None) -> sqlite3.Connection:
     """Open the local app database and ensure the schema exists."""
-    db_path = Path(path) if path is not None else DB_FILE
+    db_path = Path(path) if path is not None else AppPaths.from_root().db_file
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, factory=ClosingConnection)
     conn.row_factory = sqlite3.Row

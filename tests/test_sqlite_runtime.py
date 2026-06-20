@@ -4,7 +4,9 @@ import tempfile
 import unittest
 from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 
+from dancing_log.app_paths import save_app_config
 from dancing_log.models import (
     SOURCE_RECOMMEND,
     add_dance_record,
@@ -27,7 +29,7 @@ from dancing_log.storage import (
     upsert_live_playback_event,
 )
 from dancing_log.vrcx_importer import import_vrcx_database
-from dancing_log.wanna_catalog import upsert_catalog
+from dancing_log.wanna_catalog import sync_wanna_catalog, upsert_catalog
 
 
 def favorite_map(db_path: Path | str) -> dict[tuple[str, str], int]:
@@ -227,6 +229,30 @@ class SQLiteRuntimeTest(unittest.TestCase):
             self.assertEqual(row["artist"], "Owl City")
             self.assertEqual(row["cache_url"], "https://example.test/video.mp4")
             self.assertEqual(row["cache_flip"], 1)
+
+    def test_sync_wanna_catalog_default_loads_saved_app_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cache_track_dir = root / "cache" / "5038"
+            cache_track_dir.mkdir(parents=True)
+            (cache_track_dir / "metadata.json").write_text(
+                '{"id":5038,"title":"Configured Song","artist":"Configured Artist"}',
+                encoding="utf-8",
+            )
+            save_app_config(
+                {
+                    "app_db": "custom/app.sqlite3",
+                    "wanna_cache_dir": "cache",
+                },
+                app_root=root,
+            )
+
+            with patch("dancing_log.app_paths.default_app_root", return_value=root):
+                stats = sync_wanna_catalog(use_api=False)
+
+            self.assertEqual(stats.cache_count, 1)
+            self.assertTrue((root / "custom" / "app.sqlite3").exists())
+            self.assertFalse((root / "data" / "dancing_log.sqlite3").exists())
 
     def test_manual_log_uses_system_external_id_and_preserves_note(self):
         with tempfile.TemporaryDirectory() as tmp:

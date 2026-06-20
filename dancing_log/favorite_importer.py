@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import re
 
-from dancing_log.storage import DB_FILE, connect_db
+from dancing_log.storage import connect_db
 
 
 WANNA_FAVORITE_PREFIX = "WannaFavorite:"
@@ -41,7 +41,7 @@ def import_favorites_file(
     parsed = _parse_favorite_file(favorites_file)
     imported_ids = set(parsed.ids)
 
-    with connect_db(app_db_path or DB_FILE) as conn:
+    with connect_db(app_db_path) as conn:
         system = conn.execute(
             "SELECT id FROM dance_systems WHERE key = ?",
             (normalized_system_key,),

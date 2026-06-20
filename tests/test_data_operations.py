@@ -43,7 +43,12 @@ class DataOperationsTests(unittest.TestCase):
             config["wanna_cache_dir"] = "wanna-cache"
             runtime_config = AppRuntimeConfig.from_config(config, app_root=root)
 
-            result = run_data_operation("sync-wanna", config=runtime_config, offline=True)
+            result = run_data_operation(
+                "sync-wanna",
+                config=runtime_config,
+                offline=True,
+                write_files=True,
+            )
 
             self.assertEqual(result.operation_key, "sync-wanna")
             self.assertEqual(result.status, "completed")
@@ -51,6 +56,9 @@ class DataOperationsTests(unittest.TestCase):
             self.assertIn("  cached songs: 1", result.lines)
             self.assertEqual(result.metrics["sync_wanna"]["cache_count"], 1)
             self.assertEqual(result.as_dict()["metrics"]["sync_wanna"]["cache_count"], 1)
+            self.assertTrue((root / "data" / "smoke.sqlite3").exists())
+            self.assertTrue((root / "data" / "wanna_songs.json").exists())
+            self.assertTrue((root / "data" / "wanna_songs.csv").exists())
 
     def test_import_vrcx_requires_configured_source_database(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -12,7 +12,6 @@ import urllib.request
 
 from dancing_log.app_paths import AppRuntimeConfig
 from dancing_log.storage import (
-    DATA_DIR,
     WANNA_SYSTEM_KEY,
     connect_db,
     ensure_dance_track,
@@ -22,8 +21,6 @@ from dancing_log.storage import (
 
 
 API_URL = "https://x.kiva.moe/api/v2/wanna/songs"
-WANNA_JSON = DATA_DIR / "wanna_songs.json"
-WANNA_CSV = DATA_DIR / "wanna_songs.csv"
 
 
 @dataclass
@@ -148,15 +145,22 @@ def merge_catalog(api_songs: list[dict], cache_songs: list[dict]) -> list[dict]:
 
 def sync_wanna_catalog(
     *,
+    config: AppRuntimeConfig | None = None,
     db_path: Path | str | None = None,
     cache_dir: Path | str | None = None,
+    catalog_dir: Path | str | None = None,
     use_api: bool = True,
     write_files: bool = False,
 ) -> SyncStats:
     """Synchronize WannaDance catalog data into SQLite and optional artifacts."""
-    config = AppRuntimeConfig.load(migrate_legacy=True)
-    resolved_cache_dir = config.optional_path("wanna_cache_dir", override=cache_dir)
-    resolved_db_path = config.path("app_db", override=db_path)
+    runtime_config = config or AppRuntimeConfig.load(migrate_legacy=True)
+    resolved_cache_dir = runtime_config.optional_path("wanna_cache_dir", override=cache_dir)
+    resolved_db_path = runtime_config.path("app_db", override=db_path)
+    resolved_catalog_dir = (
+        runtime_config.resolve_path(catalog_dir)
+        if catalog_dir is not None
+        else runtime_config.paths.data_dir
+    )
 
     api_songs: list[dict] = []
     used_api = False
@@ -170,9 +174,8 @@ def sync_wanna_catalog(
     cache_songs = load_cache_songs(resolved_cache_dir)
     merged = merge_catalog(api_songs, cache_songs)
 
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
     if write_files:
-        _write_catalog_files(merged, api_songs)
+        _write_catalog_files(merged, api_songs, resolved_catalog_dir)
 
     with connect_db(resolved_db_path) as conn:
         db_before = _wanna_track_count(conn)
@@ -317,12 +320,17 @@ def _wanna_external_ids(conn: sqlite3.Connection) -> set[str]:
     return {row["external_id"] for row in rows}
 
 
-def _write_catalog_files(merged: list[dict], api_songs: list[dict]) -> None:
-    with open(WANNA_JSON, "w", encoding="utf-8") as f:
+def _write_catalog_files(
+    merged: list[dict],
+    api_songs: list[dict],
+    catalog_dir: Path,
+) -> None:
+    catalog_dir.mkdir(parents=True, exist_ok=True)
+    with open(catalog_dir / "wanna_songs.json", "w", encoding="utf-8") as f:
         json.dump(api_songs or merged, f, ensure_ascii=False, indent=2)
 
     public_fields = ["id", "name", "artist", "dancer", "player_count", "group", "major"]
-    with open(WANNA_CSV, "w", encoding="utf-8-sig", newline="") as f:
+    with open(catalog_dir / "wanna_songs.csv", "w", encoding="utf-8-sig", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=public_fields)
         writer.writeheader()
         writer.writerows({field: song.get(field, "") for field in public_fields} for song in merged)
