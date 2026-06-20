@@ -417,7 +417,6 @@ def cmd_watch_vrc_log():
     """Capture live VRChat output logs for video playback forensics."""
     import argparse
 
-    config = _get_runtime_config()
     parser = argparse.ArgumentParser(description="Watch VRChat output logs for video playback lines")
     parser.add_argument(
         "--log-dir",
@@ -481,23 +480,14 @@ def cmd_watch_vrc_log():
     )
     args = parser.parse_args(sys.argv[2:])
 
-    from dancing_log.vrc_log_watcher import default_vrc_log_dir, watch_vrc_logs
+    from dancing_log.live_app_session import LiveAppSessionRuntime, LiveWatcherRunOptions
 
-    watcher_config = config.watcher_config(
-        default_log_dir=default_vrc_log_dir(),
+    options = LiveWatcherRunOptions(
         log_dir=args.log_dir,
         output_dir=args.output_dir,
+        session_name=args.session_name,
         source_log_dir=args.source_log_dir,
         app_db_path=args.app_db,
-    )
-    print(f"Watching VRChat logs: {watcher_config.log_dir}")
-    print("Press Ctrl+C to stop.")
-
-    stats = watch_vrc_logs(
-        log_dir=watcher_config.log_dir,
-        output_dir=watcher_config.output_dir,
-        session_name=args.session_name,
-        app_db_path=watcher_config.app_db_path,
         from_start=args.from_start,
         include_raw=not args.no_raw,
         live_db=args.live_db,
@@ -506,8 +496,12 @@ def cmd_watch_vrc_log():
         poll_seconds=args.poll_seconds,
         stop_after_idle_seconds=args.stop_after_idle_seconds,
         archive_source_logs=not args.no_source_archive,
-        source_log_dir=watcher_config.source_log_dir,
     )
+    runtime = LiveAppSessionRuntime(migrate_legacy_config=True)
+    print(f"Watching VRChat logs: {runtime.resolved_log_dir(options)}")
+    print("Press Ctrl+C to stop.")
+
+    stats = runtime.run_watcher(options)
 
     print("VRChat log capture complete")
     print(f"  session dir: {stats.session_dir}")

@@ -68,6 +68,10 @@ _Avoid_: OBS overlay page, live overlay control
 The Windows notification-area entry for running `dancing-log` as a local desktop app. It opens the Local Web UI, exposes immediate watcher and overlay controls, and owns quitting the background app session.
 _Avoid_: CLI command, Web UI navigation entry, background service
 
+**Live App Session Runtime**:
+The runtime module that owns immediate watcher and overlay lifecycle for the current local app session, including start, stop, status, recent errors, and recent watcher stats. CLI, Desktop Tray Entry, and future Web UI controls should call this runtime instead of each reimplementing watcher and overlay startup rules.
+_Avoid_: parser runtime, saved configuration, background service
+
 **Live Watcher Control**:
 An immediate start or stop command for the current VRChat log watcher process. It changes the running app session and is separate from Watcher Default.
 _Avoid_: watcher default, saved configuration, startup preference

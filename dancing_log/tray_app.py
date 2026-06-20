@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 import sys
-import threading
 
-from dancing_log.app_paths import AppRuntimeConfig
-from dancing_log.vrc_log_watcher import default_vrc_log_dir
+from dancing_log.live_app_session import LiveAppSessionRuntime, WatchVrcLogsFunc
 from dancing_log.webui_server import DEFAULT_WEBUI_PORT, WebUiServer
 
 
@@ -17,8 +14,6 @@ IDM_OPEN_WEBUI = 1001
 IDM_TOGGLE_WATCHER = 1002
 IDM_TOGGLE_OVERLAY = 1003
 IDM_EXIT = 1004
-
-WatchVrcLogsFunc = Callable[..., object]
 
 
 @dataclass(frozen=True)
@@ -32,7 +27,7 @@ def _is_separator(item: TrayMenuItem) -> bool:
 
 
 class TrayRuntime:
-    """Runtime controls owned by the desktop tray session."""
+    """Desktop tray adapter for live app session controls."""
 
     def __init__(
         self,
@@ -41,23 +36,26 @@ class TrayRuntime:
         watch_vrc_logs_func: WatchVrcLogsFunc | None = None,
     ) -> None:
         self.app_root = Path(app_root).resolve() if app_root is not None else None
-        self._watch_vrc_logs_func = watch_vrc_logs_func
-        self._lock = threading.RLock()
-        self._watcher_thread: threading.Thread | None = None
-        self._watcher_stop_event: threading.Event | None = None
-        self._watcher_overlay = False
-        self.last_error: str | None = None
-        self.last_watcher_stats: object | None = None
+        self.session = LiveAppSessionRuntime(
+            app_root=self.app_root,
+            watch_vrc_logs_func=watch_vrc_logs_func,
+        )
 
     @property
     def watcher_running(self) -> bool:
-        with self._lock:
-            return self._watcher_thread is not None and self._watcher_thread.is_alive()
+        return self.session.watcher_running
 
     @property
     def overlay_running(self) -> bool:
-        with self._lock:
-            return self.watcher_running and self._watcher_overlay
+        return self.session.overlay_running
+
+    @property
+    def last_error(self) -> str | None:
+        return self.session.last_error
+
+    @property
+    def last_watcher_stats(self) -> object | None:
+        return self.session.last_watcher_stats
 
     def menu_items(self) -> list[TrayMenuItem]:
         watcher_label = "Stop watcher" if self.watcher_running else "Start watcher"
@@ -75,7 +73,7 @@ class TrayRuntime:
         if self.watcher_running:
             self.stop_watcher()
         else:
-            self.start_watcher(overlay=False)
+            self.start_watcher()
 
     def toggle_overlay(self) -> None:
         if self.overlay_running:
@@ -83,78 +81,20 @@ class TrayRuntime:
         else:
             self.start_overlay()
 
-    def start_watcher(self, *, overlay: bool) -> None:
-        if self.watcher_running:
-            if overlay and not self.overlay_running:
-                self.stop_watcher()
-            else:
-                return
-
-        stop_event = threading.Event()
-        thread = threading.Thread(
-            target=self._watcher_thread_main,
-            args=(stop_event, overlay),
-            name="DancingLogTrayWatcher",
-            daemon=True,
-        )
-        with self._lock:
-            self._watcher_stop_event = stop_event
-            self._watcher_overlay = overlay
-            self._watcher_thread = thread
-            self.last_error = None
-        thread.start()
+    def start_watcher(self, *, overlay: bool = False) -> None:
+        self.session.start_watcher(overlay=overlay)
 
     def start_overlay(self) -> None:
-        self.start_watcher(overlay=True)
+        self.session.start_overlay()
 
     def stop_watcher(self) -> None:
-        with self._lock:
-            stop_event = self._watcher_stop_event
-            thread = self._watcher_thread
-        if stop_event is not None:
-            stop_event.set()
-        if thread is not None and thread is not threading.current_thread():
-            thread.join(timeout=3.0)
+        self.session.stop_watcher()
 
     def stop_overlay(self) -> None:
-        if not self.overlay_running:
-            return
-        self.stop_watcher()
-        self.start_watcher(overlay=False)
+        self.session.stop_overlay()
 
     def close(self) -> None:
-        self.stop_watcher()
-
-    def _watcher_thread_main(self, stop_event: threading.Event, overlay: bool) -> None:
-        try:
-            watch_vrc_logs = self._watch_vrc_logs_func
-            if watch_vrc_logs is None:
-                from dancing_log.vrc_log_watcher import watch_vrc_logs
-            stats = watch_vrc_logs(**self._watcher_kwargs(stop_event, overlay))
-            with self._lock:
-                self.last_watcher_stats = stats
-        except Exception as exc:  # pragma: no cover - visible through the tray tooltip later.
-            with self._lock:
-                self.last_error = str(exc)
-        finally:
-            with self._lock:
-                if self._watcher_thread is threading.current_thread():
-                    self._watcher_thread = None
-                    self._watcher_stop_event = None
-                    self._watcher_overlay = False
-
-    def _watcher_kwargs(self, stop_event: threading.Event, overlay: bool) -> dict:
-        config = AppRuntimeConfig.load(app_root=self.app_root)
-        watcher_config = config.watcher_config(default_log_dir=default_vrc_log_dir())
-        return {
-            "log_dir": watcher_config.log_dir,
-            "output_dir": watcher_config.output_dir,
-            "app_db_path": watcher_config.app_db_path,
-            "live_db": True,
-            "overlay_port": watcher_config.overlay_port if overlay else None,
-            "source_log_dir": watcher_config.source_log_dir,
-            "stop_event": stop_event,
-        }
+        self.session.close()
 
 
 def run_tray_webui_app(

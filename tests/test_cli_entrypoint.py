@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import main as cli
@@ -135,6 +136,88 @@ class CliEntrypointTests(unittest.TestCase):
                 output.getvalue().strip(),
                 "18:09:09 4062. Mood (Extreme) - 24kGoldn & Iann Dior | Just Dance 2022",
             )
+
+    def test_watch_vrc_log_dispatches_through_live_app_session_runtime(self):
+        calls = {}
+
+        class FakeRuntime:
+            def __init__(self, *, migrate_legacy_config=False):
+                calls["migrate_legacy_config"] = migrate_legacy_config
+
+            def resolved_log_dir(self, options):
+                calls["resolved_options"] = options
+                return Path(r"C:\VRChat\Logs")
+
+            def run_watcher(self, options):
+                calls["run_options"] = options
+                return SimpleNamespace(
+                    session_dir=Path("captures") / "manual",
+                    raw_lines=7,
+                    candidate_lines=3,
+                    parsed_events=2,
+                    playback_events=1,
+                    live_db_updates=4,
+                    live_promotions=1,
+                    overlay_url="http://127.0.0.1:9876/overlay",
+                    source_log_dir="source-logs",
+                    source_log_bytes=123,
+                    delay_metrics={},
+                )
+
+        original_argv = sys.argv
+        sys.argv = [
+            "main.py",
+            "watch-vrc-log",
+            "--log-dir",
+            "logs/input",
+            "--output-dir",
+            "logs/output",
+            "--session-name",
+            "manual",
+            "--from-start",
+            "--no-raw",
+            "--source-log-dir",
+            "logs/source",
+            "--app-db",
+            "data/live.sqlite3",
+            "--live-db",
+            "--promote-live",
+            "--overlay-port",
+            "9876",
+            "--poll-seconds",
+            "0.1",
+            "--stop-after-idle-seconds",
+            "0.2",
+            "--no-source-archive",
+        ]
+        try:
+            output = io.StringIO()
+            with (
+                patch("dancing_log.live_app_session.LiveAppSessionRuntime", FakeRuntime),
+                contextlib.redirect_stdout(output),
+            ):
+                cli.main()
+        finally:
+            sys.argv = original_argv
+
+        options = calls["run_options"]
+        self.assertTrue(calls["migrate_legacy_config"])
+        self.assertIs(calls["resolved_options"], options)
+        self.assertEqual(options.log_dir, "logs/input")
+        self.assertEqual(options.output_dir, "logs/output")
+        self.assertEqual(options.session_name, "manual")
+        self.assertEqual(options.source_log_dir, "logs/source")
+        self.assertEqual(options.app_db_path, "data/live.sqlite3")
+        self.assertTrue(options.from_start)
+        self.assertFalse(options.include_raw)
+        self.assertTrue(options.live_db)
+        self.assertTrue(options.promote_live)
+        self.assertEqual(options.overlay_port, 9876)
+        self.assertEqual(options.poll_seconds, 0.1)
+        self.assertEqual(options.stop_after_idle_seconds, 0.2)
+        self.assertFalse(options.archive_source_logs)
+        self.assertIn("Watching VRChat logs: C:\\VRChat\\Logs", output.getvalue())
+        self.assertIn("overlay URL: http://127.0.0.1:9876/overlay", output.getvalue())
 
     def test_frozen_entrypoint_excludes_research_commands(self):
         original_argv = sys.argv
