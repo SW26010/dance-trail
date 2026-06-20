@@ -129,6 +129,18 @@ class DailyReportTest(unittest.TestCase):
                 ],
             )
 
+    def test_daily_report_does_not_create_missing_sqlite_db(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "missing" / "app.sqlite3"
+
+            official = load_daily_dances(date(2026, 6, 7), db_path)
+            live = load_daily_live_dances(date(2026, 6, 7), db_path)
+
+            self.assertEqual(official, [])
+            self.assertEqual(live, [])
+            self.assertFalse(db_path.exists())
+            self.assertFalse(db_path.parent.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
