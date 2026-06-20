@@ -8,7 +8,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from dancing_log.app_paths import DEFAULT_CONFIG
-from dancing_log.data_operations import operation_catalog_snapshot
+from dancing_log.data_operations import DataOperationResult, operation_catalog_snapshot
 from dancing_log.webui_server import (
     WebUiRuntime,
     WebUiServer,
@@ -446,6 +446,72 @@ class WebUiServerTest(unittest.TestCase):
         operations = {operation["key"]: operation for operation in snapshot["operations"]}
         self.assertEqual(operations["rebuild-data"]["parameters"][0]["key"], "archive_existing")
         self.assertEqual(operations["sync-wanna"]["text"]["zh"]["risk"], "更新目录记录")
+
+    def test_webui_runs_operation_through_shared_request(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            server = WebUiServer(port=0, app_root=root)
+            server.start()
+            try:
+                token = self._csrf_token(server)
+                fake_result = DataOperationResult(
+                    operation_key="sync-wanna",
+                    title="Sync WannaDance catalog",
+                    status="completed",
+                    summary="done",
+                    lines=("done",),
+                    metrics={"count": 1},
+                )
+                with patch(
+                    "dancing_log.webui_server.run_data_operation_request",
+                    return_value=fake_result,
+                ) as runner:
+                    request = self._json_request(
+                        server,
+                        "api/operations/run",
+                        {
+                            "operation": "sync-wanna",
+                            "parameters": {"offline": "true", "write_files": False},
+                        },
+                        token=token,
+                        origin=server.url.rstrip("/"),
+                    )
+                    with urlopen(request, timeout=2) as response:
+                        payload = json.loads(response.read().decode("utf-8"))
+            finally:
+                server.stop()
+
+            self.assertEqual(payload["result"]["operation_key"], "sync-wanna")
+            operation_request = runner.call_args.args[0]
+            runtime_config = runner.call_args.kwargs["config"]
+            self.assertEqual(operation_request.operation_key, "sync-wanna")
+            self.assertTrue(operation_request.params["offline"])
+            self.assertFalse(operation_request.params["write_files"])
+            self.assertEqual(runtime_config.app_root, root.resolve())
+
+    def test_webui_operation_run_rejects_invalid_payload_before_runner(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server = WebUiServer(port=0, app_root=tmp)
+            server.start()
+            try:
+                token = self._csrf_token(server)
+                with patch("dancing_log.webui_server.run_data_operation_request") as runner:
+                    request = self._json_request(
+                        server,
+                        "api/operations/run",
+                        {
+                            "operation": "import-vrcx",
+                            "parameters": {"blank_requester_source": "self"},
+                        },
+                        token=token,
+                        origin=server.url.rstrip("/"),
+                    )
+                    error = self._http_error_json(request, 400)
+            finally:
+                server.stop()
+
+            self.assertIn("blank_requester_source must be one of", error["error"])
+            runner.assert_not_called()
 
     def test_windows_picker_options_use_ifileopendialog_modes(self):
         directory_options = _file_dialog_options("directory", 0)

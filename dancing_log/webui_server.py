@@ -14,8 +14,13 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse, urlsplit
 import webbrowser
 
-from dancing_log.app_paths import AppPaths, default_app_root
-from dancing_log.data_operations import operation_catalog_snapshot
+from dancing_log.app_paths import AppPaths, AppRuntimeConfig, default_app_root
+from dancing_log.data_operations import (
+    DataOperationError,
+    build_data_operation_request_from_payload,
+    operation_catalog_snapshot,
+    run_data_operation_request,
+)
 from dancing_log.live_app_session import (
     LiveAppSessionRuntime,
     LiveAppSessionStatus,
@@ -183,6 +188,9 @@ class _WebUiHandler(BaseHTTPRequestHandler):
                 self._send_json(status, response)
             elif parsed.path == "/api/live/overlay":
                 response, status = control_live_overlay_from_payload(self.server.runtime, payload)
+                self._send_json(status, response)
+            elif parsed.path == "/api/operations/run":
+                response, status = run_operation_from_payload(self.server.runtime, payload)
                 self._send_json(status, response)
             else:
                 self._send_json(404, {"error": "not found"})
@@ -359,6 +367,16 @@ def load_insights_snapshot(runtime: WebUiRuntime) -> dict:
 
 def load_operations_snapshot() -> dict:
     return operation_catalog_snapshot()
+
+
+def run_operation_from_payload(runtime: WebUiRuntime, payload: dict) -> tuple[dict, int]:
+    try:
+        request = build_data_operation_request_from_payload(payload)
+        config = AppRuntimeConfig.load(app_root=runtime.app_root, migrate_legacy=True)
+        result = run_data_operation_request(request, config=config)
+    except DataOperationError as exc:
+        return {"error": str(exc)}, 400
+    return {"result": result.as_dict()}, 200
 
 
 _WEBUI_HTML = r"""<!doctype html>
@@ -807,7 +825,11 @@ const TEXT = {
     lastRuntimeError: "Last runtime error",
     lastWatcherStats: "Last watcher stats",
     noWatcherStats: "No watcher stats yet",
-    liveControlFailed: "Live control failed"
+    liveControlFailed: "Live control failed",
+    run: "Run",
+    runningOperation: "Running...",
+    operationComplete: "Complete",
+    operationFailed: "Operation failed"
   },
   zh: {
     brandSubtitle: "本地 Web UI",
@@ -908,7 +930,11 @@ const TEXT = {
     lastRuntimeError: "\u6700\u8fd1\u8fd0\u884c\u9519\u8bef",
     lastWatcherStats: "\u6700\u8fd1 watcher \u7edf\u8ba1",
     noWatcherStats: "\u5c1a\u65e0 watcher \u7edf\u8ba1",
-    liveControlFailed: "\u5b9e\u65f6\u63a7\u5236\u5931\u8d25"
+    liveControlFailed: "\u5b9e\u65f6\u63a7\u5236\u5931\u8d25",
+    run: "执行",
+    runningOperation: "执行中...",
+    operationComplete: "已完成",
+    operationFailed: "操作失败"
   }
 };
 const FIELD_TEXT = {
@@ -932,7 +958,12 @@ const state = {
   active: "settings",
   lang: initialLanguage(),
   configSnapshot: null,
+  operationsSnapshot: null,
   draft: {},
+  operationDrafts: {},
+  operationResults: {},
+  operationErrors: {},
+  runningOperation: null,
   fieldErrors: {},
   pathPreviews: {},
   previewTimers: {}
@@ -1584,13 +1615,174 @@ function renderKeyCount(rows, key) {
 
 async function renderOperations() {
   const node = document.getElementById("view-operations");
-  const data = await api("/api/operations");
-  node.innerHTML = `<div class="list-stack">${(data.operations || []).map(operation => `
+  if (!state.operationsSnapshot) {
+    node.innerHTML = `<div class="panel"><div class="empty">${esc(ui("loading"))}</div></div>`;
+    api("/api/operations").then(data => {
+      state.operationsSnapshot = data;
+      renderOperations();
+    }).catch(error => {
+      node.innerHTML = `<div class="message show error">${esc(error.message)}</div>`;
+    });
+    return;
+  }
+  const operations = state.operationsSnapshot.operations || [];
+  node.innerHTML = `<div class="list-stack">${operations.map(renderOperationPanel).join("")}</div>`;
+  bindOperationControls(operations);
+}
+
+function renderOperationPanel(operation) {
+  ensureOperationDraft(operation);
+  const result = state.operationResults[operation.key];
+  const error = state.operationErrors[operation.key];
+  const running = state.runningOperation === operation.key;
+  return `
     <section class="panel">
-      <div class="panel-head"><h2>${esc(operationText(operation, "title"))}</h2><span class="pill orange">${esc(operationText(operation, "risk"))}</span></div>
-      <div class="panel-body"><code>${esc(operation.command)}</code></div>
+      <div class="panel-head">
+        <h2>${esc(operationText(operation, "title"))}</h2>
+        <span class="pill orange">${esc(operationText(operation, "risk"))}</span>
+      </div>
+      <div class="panel-body">
+        <code>${esc(operation.command)}</code>
+        <div class="settings-grid">
+          ${renderOperationParameters(operation)}
+        </div>
+        <div class="toolbar">
+          <button class="button primary" type="button" data-run-operation="${esc(operation.key)}" ${state.runningOperation ? "disabled" : ""}>${esc(running ? ui("runningOperation") : ui("run"))}</button>
+        </div>
+        ${error ? `<div class="message show error"><strong>${esc(ui("operationFailed"))}</strong><br>${esc(error)}</div>` : ""}
+        ${result ? renderOperationResult(result) : ""}
+      </div>
     </section>
-  `).join("")}</div>`;
+  `;
+}
+
+function renderOperationParameters(operation) {
+  if (!operation.parameters || !operation.parameters.length) return "";
+  return operation.parameters.map(parameter => renderOperationParameter(operation, parameter)).join("");
+}
+
+function renderOperationParameter(operation, parameter) {
+  return `
+    <div class="field-row">
+      <div class="field-label">
+        <strong>${esc(parameter.label)}</strong>
+        <code>${esc(parameter.key)}</code>
+        <span class="field-summary">${esc(parameter.summary)}</span>
+      </div>
+      <div class="field-control">
+        ${renderOperationParameterControl(operation, parameter)}
+      </div>
+    </div>
+  `;
+}
+
+function renderOperationParameterControl(operation, parameter) {
+  const value = state.operationDrafts[operation.key]?.[parameter.key];
+  const dataAttrs = `data-operation-key="${esc(operation.key)}" data-param-key="${esc(parameter.key)}"`;
+  if (parameter.type === "boolean") {
+    return `
+      <label class="toggle-line">
+        <input type="checkbox" ${dataAttrs} ${value ? "checked" : ""}>
+        <span>${value ? esc(ui("enabled")) : esc(ui("disabled"))}</span>
+      </label>
+    `;
+  }
+  if (parameter.type === "integer") {
+    return `<input type="number" ${dataAttrs} value="${esc(value ?? "")}">`;
+  }
+  if (parameter.type === "choice") {
+    return `
+      <select ${dataAttrs}>
+        ${(parameter.choices || []).map(choice => `<option value="${esc(choice)}" ${choice === value ? "selected" : ""}>${esc(choice)}</option>`).join("")}
+      </select>
+    `;
+  }
+  return `<input type="text" ${dataAttrs} value="${esc(value ?? "")}">`;
+}
+
+function renderOperationResult(result) {
+  return `
+    <div class="message show success"><strong>${esc(ui("operationComplete"))}</strong><br>${esc(result.summary || "")}</div>
+    <pre class="readonly-json">${esc((result.lines || []).join("\n"))}</pre>
+  `;
+}
+
+function ensureOperationDraft(operation) {
+  if (state.operationDrafts[operation.key]) return;
+  const draft = {};
+  for (const parameter of operation.parameters || []) {
+    if (parameter.type === "boolean") {
+      draft[parameter.key] = Boolean(parameter.default);
+    } else if (parameter.default !== null && parameter.default !== undefined) {
+      draft[parameter.key] = parameter.default;
+    } else {
+      draft[parameter.key] = "";
+    }
+  }
+  state.operationDrafts[operation.key] = draft;
+}
+
+function bindOperationControls(operations) {
+  for (const control of document.querySelectorAll("[data-operation-key][data-param-key]")) {
+    control.oninput = () => updateOperationDraft(control);
+    control.onchange = () => {
+      updateOperationDraft(control);
+      renderOperations();
+    };
+  }
+  for (const button of document.querySelectorAll("[data-run-operation]")) {
+    button.onclick = () => runOperation(button.dataset.runOperation, operations);
+  }
+}
+
+function updateOperationDraft(control) {
+  const operationKey = control.dataset.operationKey;
+  const paramKey = control.dataset.paramKey;
+  const operation = (state.operationsSnapshot?.operations || []).find(item => item.key === operationKey);
+  const parameter = operation?.parameters?.find(item => item.key === paramKey);
+  if (!operation || !parameter) return;
+  ensureOperationDraft(operation);
+  if (parameter.type === "boolean") {
+    state.operationDrafts[operationKey][paramKey] = control.checked;
+  } else {
+    state.operationDrafts[operationKey][paramKey] = control.value;
+  }
+}
+
+function operationPayload(operation) {
+  ensureOperationDraft(operation);
+  const draft = state.operationDrafts[operation.key] || {};
+  const parameters = {};
+  for (const parameter of operation.parameters || []) {
+    const value = draft[parameter.key];
+    if (parameter.type === "boolean") {
+      parameters[parameter.key] = Boolean(value);
+    } else if (value !== "" && value !== null && value !== undefined) {
+      parameters[parameter.key] = value;
+    }
+  }
+  return { operation: operation.key, parameters };
+}
+
+async function runOperation(key, operations) {
+  const operation = operations.find(item => item.key === key);
+  if (!operation || state.runningOperation) return;
+  state.runningOperation = key;
+  state.operationErrors[key] = "";
+  state.operationResults[key] = null;
+  renderOperations();
+  try {
+    const response = await api("/api/operations/run", {
+      method: "POST",
+      body: operationPayload(operation)
+    });
+    state.operationResults[key] = response.result;
+  } catch (error) {
+    state.operationErrors[key] = error.message;
+  } finally {
+    state.runningOperation = null;
+    renderOperations();
+  }
 }
 
 renderLanguageSwitch();

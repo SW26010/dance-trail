@@ -6,10 +6,10 @@ import sys
 
 from dancing_log.app_paths import AppRuntimeConfig, resolve_app_path
 from dancing_log.data_operations import (
-    DEFAULT_QUEUED_SYSTEM,
     DataOperationError,
     operation_cli_descriptions,
-    run_data_operation,
+    parse_data_operation_cli_request,
+    run_data_operation_request,
 )
 from dancing_log.local_config import CONFIG_FILE
 
@@ -54,6 +54,15 @@ def _print_data_operation_result(result) -> None:
         print(line)
 
 
+def _run_data_operation_command(key: str) -> None:
+    request, parser = parse_data_operation_cli_request(key, sys.argv[2:])
+    try:
+        result = run_data_operation_request(request, config=_get_runtime_config())
+    except DataOperationError as exc:
+        parser.error(str(exc))
+    _print_data_operation_result(result)
+
+
 def _resolve_recording_path(recording, recordings_dir, app_root=None) -> Path:
     recording_path = Path(recording)
     if recording_path.is_absolute():
@@ -72,25 +81,7 @@ def _resolve_recording_path(recording, recordings_dir, app_root=None) -> Path:
 
 def cmd_sync_wanna():
     """Sync WannaDance tracks into SQLite."""
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Sync WannaDance catalog into SQLite")
-    parser.add_argument("--app-db", default=None, help="SQLite database path")
-    parser.add_argument("--cache-dir", default=None, help="Local wannadance-song cache directory")
-    parser.add_argument("--offline", action="store_true", help="Use local cache only; skip the public API")
-    parser.add_argument("--write-files", action="store_true", help="Also export data/*.csv/json artifacts")
-    parser.add_argument("--no-files", action="store_true", help=argparse.SUPPRESS)
-    args = parser.parse_args(sys.argv[2:])
-
-    result = run_data_operation(
-        "sync-wanna",
-        config=_get_runtime_config(),
-        app_db=args.app_db,
-        cache_dir=args.cache_dir,
-        offline=args.offline,
-        write_files=args.write_files and not args.no_files,
-    )
-    _print_data_operation_result(result)
+    _run_data_operation_command("sync-wanna")
 
 
 def cmd_recommend():
@@ -277,69 +268,12 @@ def cmd_import_favorites():
 
 def cmd_import_vrcx():
     """Import historical playback rows from VRCX SQLite."""
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Import historical playback rows from VRCX SQLite")
-    parser.add_argument(
-        "vrcx_db",
-        nargs="?",
-        default=None,
-        help=f"Path to VRCX.sqlite3; falls back to {CONFIG_FILE} when omitted",
-    )
-    parser.add_argument("--app-db", default=None, help="Output app SQLite path")
-    parser.add_argument(
-        "--self-user-id",
-        default=None,
-        help=f"Local VRChat user id; falls back to {CONFIG_FILE} when omitted",
-    )
-    parser.add_argument(
-        "--blank-requester-source",
-        choices=["unknown", "random"],
-        default="random",
-        help="Source to infer when VRCX requester fields are blank",
-    )
-    parser.add_argument("--limit", type=int, default=None, help="Maximum candidate rows to import")
-    parser.add_argument("--dry-run", action="store_true", help="Scan only, do not write to the app database")
-    args = parser.parse_args(sys.argv[2:])
-
-    try:
-        result = run_data_operation(
-            "import-vrcx",
-            config=_get_runtime_config(),
-            vrcx_db=args.vrcx_db,
-            app_db=args.app_db,
-            self_user_id=args.self_user_id,
-            blank_requester_source=args.blank_requester_source,
-            limit=args.limit,
-            dry_run=args.dry_run,
-        )
-    except DataOperationError as exc:
-        parser.error(str(exc))
-    _print_data_operation_result(result)
+    _run_data_operation_command("import-vrcx")
 
 
 def cmd_sync_queued_self():
     """Overlay queued-self manifests onto existing events."""
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Sync queued_self Markdown manifests")
-    parser.add_argument("--app-db", default=None, help="SQLite path")
-    parser.add_argument("--manifest-dir", default=None, help="Manifest directory")
-    parser.add_argument(
-        "--system",
-        default=DEFAULT_QUEUED_SYSTEM,
-        help="Dance system key for bare manifest ids",
-    )
-    args = parser.parse_args(sys.argv[2:])
-
-    result = run_data_operation(
-        "sync-queued-self",
-        config=_get_runtime_config(),
-        app_db=args.app_db,
-        manifest_dir=args.manifest_dir,
-        system=args.system,
-    )
-    _print_data_operation_result(result)
+    _run_data_operation_command("sync-queued-self")
 
 
 def cmd_sample_recording_frames():
@@ -529,37 +463,7 @@ def run_desktop_tray_entry():
 
 def cmd_rebuild_data():
     """Archive generated local data and rebuild the current SQLite database."""
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Archive old generated data and rebuild local SQLite")
-    parser.add_argument(
-        "--archive-existing",
-        action="store_true",
-        help="Required: archive generated data files before rebuilding",
-    )
-    parser.add_argument("--offline", action="store_true", help="Use local WannaDance cache only")
-    parser.add_argument("--app-db", default=None, help="SQLite path")
-    parser.add_argument("--limit-vrcx", type=int, default=None, help="Limit imported VRCX rows")
-    parser.add_argument(
-        "--queued-system",
-        default="wannadance",
-        help="Dance system key for bare queued_self manifest ids",
-    )
-    args = parser.parse_args(sys.argv[2:])
-
-    try:
-        result = run_data_operation(
-            "rebuild-data",
-            config=_get_runtime_config(),
-            archive_existing=args.archive_existing,
-            offline=args.offline,
-            app_db=args.app_db,
-            limit_vrcx=args.limit_vrcx,
-            queued_system=args.queued_system,
-        )
-    except DataOperationError as exc:
-        parser.error(str(exc))
-    _print_data_operation_result(result)
+    _run_data_operation_command("rebuild-data")
 
 
 def main():

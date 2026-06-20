@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -80,6 +81,12 @@ class DataOperation:
                 }
             },
         }
+
+
+@dataclass(frozen=True)
+class DataOperationRequest:
+    operation_key: str
+    params: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -306,15 +313,101 @@ def operation_cli_descriptions() -> dict[str, str]:
     }
 
 
+def data_operation_arg_parser(
+    key: str,
+    *,
+    prog: str | None = None,
+) -> argparse.ArgumentParser:
+    operation = _require_operation(key)
+    parser = argparse.ArgumentParser(prog=prog, description=operation.cli_description)
+    for parameter in operation.parameters:
+        _add_cli_parameter(parser, parameter)
+
+    if key == "sync-wanna":
+        parser.add_argument(
+            "--no-files",
+            action="store_true",
+            dest="_no_files",
+            help=argparse.SUPPRESS,
+        )
+    return parser
+
+
+def parse_data_operation_cli_request(
+    key: str,
+    argv: list[str],
+    *,
+    prog: str | None = None,
+) -> tuple[DataOperationRequest, argparse.ArgumentParser]:
+    parser = data_operation_arg_parser(key, prog=prog)
+    namespace = parser.parse_args(argv)
+    params = vars(namespace)
+    if key == "sync-wanna" and params.pop("_no_files", False):
+        params["write_files"] = False
+    try:
+        request = build_data_operation_request(key, params)
+    except DataOperationError as exc:
+        parser.error(str(exc))
+    return request, parser
+
+
+def build_data_operation_request(
+    key: str,
+    params: dict[str, Any] | None = None,
+) -> DataOperationRequest:
+    operation = _require_operation(str(key or ""))
+    raw_params = dict(params or {})
+    parameter_by_key = {parameter.key: parameter for parameter in operation.parameters}
+    unknown_keys = sorted(set(raw_params) - set(parameter_by_key))
+    if unknown_keys:
+        joined = ", ".join(unknown_keys)
+        raise DataOperationError(f"Unknown parameter(s) for {operation.key}: {joined}")
+
+    normalized: dict[str, Any] = {}
+    for parameter in operation.parameters:
+        value = _normalize_parameter_value(parameter, raw_params.get(parameter.key))
+        if value is None and parameter.default is not None:
+            value = parameter.default
+        if parameter.required:
+            _validate_required_parameter(parameter, value)
+        if value is not None:
+            normalized[parameter.key] = value
+
+    return DataOperationRequest(operation_key=operation.key, params=normalized)
+
+
+def build_data_operation_request_from_payload(payload: dict[str, Any]) -> DataOperationRequest:
+    if not isinstance(payload, dict):
+        raise DataOperationError("request body must be a JSON object")
+    key = payload.get("operation") or payload.get("operation_key") or payload.get("key")
+    if not isinstance(key, str) or not key:
+        raise DataOperationError("Missing data operation key")
+    params = payload.get("parameters", payload.get("params", {}))
+    if params is None:
+        params = {}
+    if not isinstance(params, dict):
+        raise DataOperationError("operation parameters must be a JSON object")
+    return build_data_operation_request(key, params)
+
+
 def run_data_operation(
     key: str,
     *,
     config: AppRuntimeConfig | None = None,
     **params: Any,
 ) -> DataOperationResult:
-    operation = _require_operation(key)
+    request = build_data_operation_request(key, params)
+    return run_data_operation_request(request, config=config)
+
+
+def run_data_operation_request(
+    request: DataOperationRequest,
+    *,
+    config: AppRuntimeConfig | None = None,
+) -> DataOperationResult:
+    operation = _require_operation(request.operation_key)
     runtime_config = config or AppRuntimeConfig.load(migrate_legacy=True)
-    return _RUNNERS[key](operation, runtime_config, params)
+    return _RUNNERS[operation.key](operation, runtime_config, dict(request.params))
 
 
 def _run_import_vrcx(
@@ -518,6 +611,93 @@ def _require_operation(key: str) -> DataOperation:
         return DATA_OPERATION_BY_KEY[key]
     except KeyError as exc:
         raise DataOperationError(f"Unknown data operation: {key}") from exc
+
+
+def _add_cli_parameter(
+    parser: argparse.ArgumentParser,
+    parameter: OperationParameter,
+) -> None:
+    kwargs: dict[str, Any] = {
+        "default": None,
+        "help": _cli_parameter_help(parameter),
+    }
+    if _is_positional_parameter(parameter):
+        kwargs["nargs"] = "?" if not parameter.required else None
+        parser.add_argument(parameter.key, **{key: value for key, value in kwargs.items() if value is not None})
+        return
+
+    if parameter.value_type == "boolean":
+        kwargs["action"] = "store_true"
+    parser.add_argument(parameter.flag or f"--{parameter.key.replace('_', '-')}", **kwargs)
+
+
+def _is_positional_parameter(parameter: OperationParameter) -> bool:
+    return bool(parameter.flag and parameter.flag.startswith("<") and parameter.flag.endswith(">"))
+
+
+def _cli_parameter_help(parameter: OperationParameter) -> str:
+    parts = [parameter.summary]
+    if parameter.config_key:
+        parts.append(f"Falls back to {CONFIG_FILE} `{parameter.config_key}` when omitted.")
+    if parameter.choices:
+        parts.append(f"Choices: {', '.join(parameter.choices)}.")
+    if parameter.default not in (None, False):
+        parts.append(f"Default: {parameter.default}.")
+    return " ".join(parts)
+
+
+def _normalize_parameter_value(parameter: OperationParameter, value: Any) -> Any:
+    if parameter.value_type == "boolean":
+        return _normalize_bool(value, parameter.key)
+    if value in (None, ""):
+        return None
+    if parameter.value_type == "integer":
+        return _normalize_int(value, parameter.key)
+    if parameter.value_type == "choice":
+        text = str(value)
+        if parameter.choices and text not in parameter.choices:
+            joined = ", ".join(parameter.choices)
+            raise DataOperationError(f"{parameter.key} must be one of: {joined}")
+        return text
+    if parameter.value_type in {"path", "text"}:
+        return str(value)
+    return value
+
+
+def _normalize_bool(value: Any, key: str) -> bool | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().casefold()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    raise DataOperationError(f"{key} must be true or false")
+
+
+def _normalize_int(value: Any, key: str) -> int:
+    if isinstance(value, bool):
+        raise DataOperationError(f"{key} must be an integer")
+    if isinstance(value, float) and not value.is_integer():
+        raise DataOperationError(f"{key} must be an integer")
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise DataOperationError(f"{key} must be an integer") from exc
+
+
+def _validate_required_parameter(parameter: OperationParameter, value: Any) -> None:
+    if parameter.value_type == "boolean":
+        if value is not True:
+            raise DataOperationError(f"{parameter.flag or parameter.key} is required")
+        return
+    if value in (None, ""):
+        raise DataOperationError(f"{parameter.flag or parameter.key} is required")
 
 
 def _result(

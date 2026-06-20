@@ -5,6 +5,8 @@ from pathlib import Path
 from dancing_log.app_paths import AppRuntimeConfig, DEFAULT_CONFIG
 from dancing_log.data_operations import (
     DataOperationError,
+    build_data_operation_request,
+    build_data_operation_request_from_payload,
     operation_catalog_snapshot,
     run_data_operation,
 )
@@ -68,6 +70,40 @@ class DataOperationsTests(unittest.TestCase):
                 run_data_operation("import-vrcx", config=runtime_config)
 
             self.assertIn("Missing VRCX database path", str(context.exception))
+
+    def test_request_builder_coerces_payload_values_and_defaults(self):
+        request = build_data_operation_request_from_payload(
+            {
+                "operation": "import-vrcx",
+                "parameters": {
+                    "vrcx_db": "history.sqlite3",
+                    "blank_requester_source": "unknown",
+                    "limit": "25",
+                    "dry_run": "true",
+                },
+            }
+        )
+
+        self.assertEqual(request.operation_key, "import-vrcx")
+        self.assertEqual(request.params["limit"], 25)
+        self.assertTrue(request.params["dry_run"])
+        self.assertEqual(request.params["blank_requester_source"], "unknown")
+
+        queued_request = build_data_operation_request("sync-queued-self", {})
+        self.assertEqual(queued_request.params["system"], "wannadance")
+
+    def test_request_builder_rejects_unknown_or_invalid_parameters(self):
+        with self.assertRaises(DataOperationError) as unknown_context:
+            build_data_operation_request("sync-wanna", {"offline": True, "extra": "nope"})
+        self.assertIn("Unknown parameter", str(unknown_context.exception))
+
+        with self.assertRaises(DataOperationError) as invalid_context:
+            build_data_operation_request("import-vrcx", {"blank_requester_source": "self"})
+        self.assertIn("blank_requester_source must be one of", str(invalid_context.exception))
+
+        with self.assertRaises(DataOperationError) as required_context:
+            build_data_operation_request("rebuild-data", {"archive_existing": False})
+        self.assertIn("--archive-existing is required", str(required_context.exception))
 
 
 if __name__ == "__main__":
