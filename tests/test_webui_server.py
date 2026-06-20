@@ -10,19 +10,21 @@ from urllib.request import Request, urlopen
 from dancing_log.app_paths import DEFAULT_CONFIG
 from dancing_log.data_operations import operation_catalog_snapshot
 from dancing_log.webui_server import (
+    WebUiRuntime,
+    WebUiServer,
+    load_catalog_snapshot,
+    load_insights_snapshot,
+    load_operations_snapshot,
+    load_timeline_snapshot,
+)
+from dancing_log.webui_settings import load_config_snapshot
+from dancing_log.windows_picker import (
     FOS_FILEMUSTEXIST,
     FOS_FORCEFILESYSTEM,
     FOS_PATHMUSTEXIST,
     FOS_PICKFOLDERS,
-    WebUiRuntime,
-    WebUiServer,
     _file_dialog_options,
     _run_windows_picker,
-    load_catalog_snapshot,
-    load_config_snapshot,
-    load_insights_snapshot,
-    load_operations_snapshot,
-    load_timeline_snapshot,
 )
 
 
@@ -459,7 +461,7 @@ class WebUiServerTest(unittest.TestCase):
         self.assertFalse(file_options & FOS_PICKFOLDERS)
 
     def test_windows_picker_delegates_to_ifileopendialog_backend(self):
-        with patch("dancing_log.webui_server._show_windows_file_open_dialog", return_value="C:\\temp\\x.sqlite3") as picker:
+        with patch("dancing_log.windows_picker._show_windows_file_open_dialog", return_value="C:\\temp\\x.sqlite3") as picker:
             selected = _run_windows_picker({"picker": "file", "label": "App database"}, "C:\\temp")
 
         self.assertEqual(selected, "C:\\temp\\x.sqlite3")
