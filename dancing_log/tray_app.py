@@ -8,7 +8,7 @@ from pathlib import Path
 import sys
 import threading
 
-from dancing_log.app_paths import DEFAULT_CONFIG, load_app_config, resolve_app_path
+from dancing_log.app_paths import AppRuntimeConfig
 from dancing_log.vrc_log_watcher import default_vrc_log_dir
 from dancing_log.webui_server import DEFAULT_WEBUI_PORT, WebUiServer
 
@@ -144,34 +144,15 @@ class TrayRuntime:
                     self._watcher_overlay = False
 
     def _watcher_kwargs(self, stop_event: threading.Event, overlay: bool) -> dict:
-        config = load_app_config(app_root=self.app_root)
-        app_root = self.app_root
-        configured_log_dir = config.get("vrc_log_dir")
-        log_dir = (
-            resolve_app_path(configured_log_dir, configured_log_dir, app_root=app_root)
-            if configured_log_dir
-            else default_vrc_log_dir()
-        )
-        overlay_port = int(config.get("overlay_port") or DEFAULT_CONFIG["overlay_port"])
+        config = AppRuntimeConfig.load(app_root=self.app_root)
+        watcher_config = config.watcher_config(default_log_dir=default_vrc_log_dir())
         return {
-            "log_dir": log_dir,
-            "output_dir": resolve_app_path(
-                config.get("capture_dir"),
-                DEFAULT_CONFIG["capture_dir"],
-                app_root=app_root,
-            ),
-            "app_db_path": resolve_app_path(
-                config.get("app_db"),
-                DEFAULT_CONFIG["app_db"],
-                app_root=app_root,
-            ),
+            "log_dir": watcher_config.log_dir,
+            "output_dir": watcher_config.output_dir,
+            "app_db_path": watcher_config.app_db_path,
             "live_db": True,
-            "overlay_port": overlay_port if overlay else None,
-            "source_log_dir": resolve_app_path(
-                config.get("source_vrc_log_dir"),
-                DEFAULT_CONFIG["source_vrc_log_dir"],
-                app_root=app_root,
-            ),
+            "overlay_port": watcher_config.overlay_port if overlay else None,
+            "source_log_dir": watcher_config.source_log_dir,
             "stop_event": stop_event,
         }
 

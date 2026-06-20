@@ -67,6 +67,10 @@ class TrayRuntimeTest(unittest.TestCase):
                 wait_for_call_count(calls, 1)
                 self.assertTrue(runtime.watcher_running)
                 self.assertFalse(runtime.overlay_running)
+                self.assertEqual(calls[-1]["log_dir"], root / "logs")
+                self.assertEqual(calls[-1]["output_dir"], root / "logs" / "captures")
+                self.assertEqual(calls[-1]["app_db_path"], root / "data" / "dancing_log.sqlite3")
+                self.assertEqual(calls[-1]["source_log_dir"], root / "logs" / "source-vrc-logs")
                 self.assertIsNone(calls[-1]["overlay_port"])
 
                 labels = [item.label for item in runtime.menu_items() if item.command_id]

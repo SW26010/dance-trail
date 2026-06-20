@@ -23,12 +23,15 @@ from uuid import UUID
 import webbrowser
 
 from dancing_log.app_paths import (
+    AppRuntimeConfig,
     AppPaths,
-    DEFAULT_CONFIG,
+    CONFIG_FIELD_BY_KEY,
+    CONFIG_FIELDS,
+    CONFIG_KEYS,
     default_app_root,
-    load_app_config,
-    resolve_app_path,
+    resolve_config_path,
     save_app_config,
+    validate_supported_config,
 )
 from dancing_log.daily_report import (
     DailyDance,
@@ -85,150 +88,6 @@ class COMDLG_FILTERSPEC(ctypes.Structure):
 CLSID_FileOpenDialog = GUID("{DC1C5A9C-E88A-4DDE-A5A1-60F82A20AEF7}")
 IID_IFileOpenDialog = GUID("{D57C7288-D4AD-4768-BE02-9D969532D960}")
 IID_IShellItem = GUID("{43826D1E-E718-42EE-BC55-A1E261C37BFE}")
-
-CONFIG_FIELDS: list[dict[str, Any]] = [
-    {
-        "key": "config_version",
-        "label": "Config version",
-        "group": "System",
-        "type": "readonly",
-        "required": True,
-        "summary": "Local config schema version.",
-    },
-    {
-        "key": "app_db",
-        "label": "App database",
-        "group": "Internal app paths",
-        "type": "path",
-        "picker": "file",
-        "required": True,
-        "summary": "SQLite runtime state.",
-    },
-    {
-        "key": "queued_self_dir",
-        "label": "Queued-self directory",
-        "group": "Internal app paths",
-        "type": "path",
-        "picker": "directory",
-        "required": True,
-        "summary": "Markdown manifests for planned self-picked dances.",
-    },
-    {
-        "key": "capture_dir",
-        "label": "Capture directory",
-        "group": "Internal app paths",
-        "type": "path",
-        "picker": "directory",
-        "required": True,
-        "summary": "Live watcher capture output.",
-    },
-    {
-        "key": "run_log_dir",
-        "label": "Run log directory",
-        "group": "Internal app paths",
-        "type": "path",
-        "picker": "directory",
-        "required": True,
-        "summary": "Normal app run logs.",
-    },
-    {
-        "key": "source_vrc_log_dir",
-        "label": "Source VRChat archive",
-        "group": "Internal app paths",
-        "type": "path",
-        "picker": "directory",
-        "required": True,
-        "summary": "Byte-for-byte source output_log archives.",
-    },
-    {
-        "key": "recording_frames_dir",
-        "label": "Recording frame directory",
-        "group": "Internal app paths",
-        "type": "path",
-        "picker": "directory",
-        "required": True,
-        "summary": "Top-cropped frame samples for analysis.",
-    },
-    {
-        "key": "self_user_id",
-        "label": "Self VRChat user ID",
-        "group": "External sources",
-        "type": "text",
-        "required": False,
-        "placeholder": "usr_00000000-0000-0000-0000-000000000000",
-        "summary": "Used to infer whether a historical VRCX requester is self.",
-    },
-    {
-        "key": "vrcx_db_path",
-        "label": "VRCX database",
-        "group": "External sources",
-        "type": "path",
-        "picker": "file",
-        "required": False,
-        "summary": "VRCX playback history SQLite file.",
-    },
-    {
-        "key": "vrc_log_dir",
-        "label": "VRChat log directory",
-        "group": "External sources",
-        "type": "path",
-        "picker": "directory",
-        "required": False,
-        "summary": "Directory containing VRChat output_log files.",
-    },
-    {
-        "key": "wanna_cache_dir",
-        "label": "WannaDance cache",
-        "group": "External sources",
-        "type": "path",
-        "picker": "directory",
-        "required": False,
-        "summary": "Local WannaDance cache for offline catalog sync.",
-    },
-    {
-        "key": "recordings_dir",
-        "label": "Recordings directory",
-        "group": "External sources",
-        "type": "path",
-        "picker": "directory",
-        "required": False,
-        "summary": "Recording files used by sample-frame tools.",
-    },
-    {
-        "key": "auto_start_watcher",
-        "label": "Auto-start watcher",
-        "group": "Runtime defaults",
-        "type": "boolean",
-        "required": True,
-        "summary": "Default preference for app workflows that start live capture.",
-    },
-    {
-        "key": "auto_start_overlay",
-        "label": "Auto-start overlay",
-        "group": "Runtime defaults",
-        "type": "boolean",
-        "required": True,
-        "summary": "If enabled, watcher auto-start is also enabled.",
-    },
-    {
-        "key": "overlay_port",
-        "label": "Overlay port",
-        "group": "Runtime defaults",
-        "type": "integer",
-        "required": True,
-        "min": 1,
-        "max": 65535,
-        "summary": "Localhost OBS overlay port.",
-    },
-]
-
-CONFIG_FIELD_BY_KEY = {field["key"]: field for field in CONFIG_FIELDS}
-PATH_FIELD_KEYS = {
-    field["key"]
-    for field in CONFIG_FIELDS
-    if field.get("type") == "path"
-}
-
 
 @dataclass(frozen=True)
 class WebUiRuntime:
@@ -445,11 +304,11 @@ def run_webui_server(
 def load_config_snapshot(runtime: WebUiRuntime) -> dict:
     """Return saved configuration plus editor metadata."""
     raw = _read_saved_config(runtime)
-    config = load_app_config(app_root=runtime.app_root)
+    config = AppRuntimeConfig.load(app_root=runtime.app_root)
     unsupported = {
         key: value
         for key, value in raw.items()
-        if key not in DEFAULT_CONFIG
+        if key not in CONFIG_KEYS
     }
     warnings = []
     if unsupported:
@@ -458,7 +317,7 @@ def load_config_snapshot(runtime: WebUiRuntime) -> dict:
     return {
         "app_root": str(runtime.app_root),
         "config_path": str(runtime.paths.local_config_file),
-        "config": {key: config.get(key) for key in DEFAULT_CONFIG},
+        "config": config.supported_values(),
         "fields": [_field_snapshot(field, config.get(field["key"]), runtime) for field in CONFIG_FIELDS],
         "unsupported": unsupported,
         "detected_sources": _detected_source_paths(),
@@ -472,13 +331,13 @@ def save_config_from_payload(runtime: WebUiRuntime, payload: dict) -> tuple[dict
     if not isinstance(draft, dict):
         return {"errors": {"config": "config must be a JSON object"}}, 400
 
-    supported, errors = _validate_supported_config(draft)
+    supported, errors = validate_supported_config(draft)
     if errors:
         return {"errors": errors, "snapshot": load_config_snapshot(runtime)}, 400
 
     existing = _read_saved_config(runtime)
     merged = dict(existing)
-    for key in DEFAULT_CONFIG:
+    for key in CONFIG_KEYS:
         merged[key] = supported[key]
     save_app_config(merged, app_root=runtime.app_root)
     return {"saved": True, "snapshot": load_config_snapshot(runtime)}, 200
@@ -521,8 +380,8 @@ def resolve_path_from_payload(runtime: WebUiRuntime, payload: dict) -> tuple[dic
 
 
 def load_summary_snapshot(runtime: WebUiRuntime) -> dict:
-    config = load_app_config(app_root=runtime.app_root)
-    db_path = resolve_app_path(config.get("app_db"), DEFAULT_CONFIG["app_db"], app_root=runtime.app_root)
+    config = AppRuntimeConfig.load(app_root=runtime.app_root)
+    db_path = config.app_db_path
     summary = {
         "database_path": str(db_path),
         "database_exists": db_path.exists(),
@@ -552,8 +411,8 @@ def load_summary_snapshot(runtime: WebUiRuntime) -> dict:
 def load_timeline_snapshot(runtime: WebUiRuntime, query: dict[str, list[str]]) -> dict:
     selected_date = (query.get("date") or [date.today().isoformat()])[0]
     source = (query.get("source") or ["official"])[0]
-    config = load_app_config(app_root=runtime.app_root)
-    db_path = resolve_app_path(config.get("app_db"), DEFAULT_CONFIG["app_db"], app_root=runtime.app_root)
+    config = AppRuntimeConfig.load(app_root=runtime.app_root)
+    db_path = config.app_db_path
     if not db_path.exists():
         return {"date": selected_date, "source": source, "records": [], "database_exists": False}
 
@@ -593,8 +452,8 @@ def load_timeline_snapshot(runtime: WebUiRuntime, query: dict[str, list[str]]) -
 
 
 def load_catalog_snapshot(runtime: WebUiRuntime, query: dict[str, list[str]]) -> dict:
-    config = load_app_config(app_root=runtime.app_root)
-    db_path = resolve_app_path(config.get("app_db"), DEFAULT_CONFIG["app_db"], app_root=runtime.app_root)
+    config = AppRuntimeConfig.load(app_root=runtime.app_root)
+    db_path = config.app_db_path
     search = (query.get("q") or [""])[0].strip().casefold()
     try:
         limit = min(max(int((query.get("limit") or ["100"])[0]), 1), 500)
@@ -611,12 +470,8 @@ def load_catalog_snapshot(runtime: WebUiRuntime, query: dict[str, list[str]]) ->
 
 
 def load_lists_snapshot(runtime: WebUiRuntime) -> dict:
-    config = load_app_config(app_root=runtime.app_root)
-    queued_dir = resolve_app_path(
-        config.get("queued_self_dir"),
-        DEFAULT_CONFIG["queued_self_dir"],
-        app_root=runtime.app_root,
-    )
+    config = AppRuntimeConfig.load(app_root=runtime.app_root)
+    queued_dir = config.queued_self_dir
     manifests = []
     if queued_dir.exists() and queued_dir.is_dir():
         for path in sorted(queued_dir.glob("*"))[:100]:
@@ -648,8 +503,8 @@ def load_lists_snapshot(runtime: WebUiRuntime) -> dict:
 
 
 def load_insights_snapshot(runtime: WebUiRuntime) -> dict:
-    config = load_app_config(app_root=runtime.app_root)
-    db_path = resolve_app_path(config.get("app_db"), DEFAULT_CONFIG["app_db"], app_root=runtime.app_root)
+    config = AppRuntimeConfig.load(app_root=runtime.app_root)
+    db_path = config.app_db_path
     if not db_path.exists():
         return {"database_exists": False, "source_distribution": [], "top_tracks": [], "recommendations": []}
     try:
@@ -719,88 +574,10 @@ def _field_snapshot(field: dict[str, Any], value: Any, runtime: WebUiRuntime) ->
 
 
 def _path_value_preview(field: dict[str, Any], value: Any, runtime: WebUiRuntime) -> dict:
-    if value in (None, "") and not field.get("required"):
+    resolved = resolve_config_path(field["key"], value, app_root=runtime.app_root)
+    if resolved is None:
         return {"resolved": None, "exists": None}
-    default = DEFAULT_CONFIG.get(field["key"])
-    if default is None:
-        default = ""
-    resolved = resolve_app_path(value, default, app_root=runtime.app_root)
     return _safe_path_preview(resolved)
-
-
-def _validate_supported_config(raw: dict) -> tuple[dict[str, Any], dict[str, str]]:
-    config: dict[str, Any] = {}
-    errors: dict[str, str] = {}
-    for key, default in DEFAULT_CONFIG.items():
-        field = CONFIG_FIELD_BY_KEY.get(key)
-        value = raw.get(key, default)
-        if key == "config_version":
-            config[key] = 1
-            continue
-        if field is None:
-            config[key] = value
-            continue
-        field_type = field.get("type")
-        if field_type == "path":
-            config[key] = _validate_path_field(field, value, errors)
-        elif field_type == "text":
-            config[key] = _validate_text_field(field, value, errors)
-        elif field_type == "boolean":
-            if isinstance(value, bool):
-                config[key] = value
-            else:
-                errors[key] = "value must be true or false"
-                config[key] = bool(default)
-        elif field_type == "integer":
-            config[key] = _validate_integer_field(field, value, errors)
-        else:
-            config[key] = value
-    if config.get("auto_start_overlay"):
-        config["auto_start_watcher"] = True
-    return config, errors
-
-
-def _validate_path_field(field: dict[str, Any], value: Any, errors: dict[str, str]) -> str | None:
-    key = field["key"]
-    if value is None or value == "":
-        if field.get("required"):
-            errors[key] = "path is required"
-            return DEFAULT_CONFIG.get(key)
-        return None
-    if not isinstance(value, str):
-        errors[key] = "path must be text"
-        return DEFAULT_CONFIG.get(key)
-    cleaned = value.strip()
-    if not cleaned:
-        if field.get("required"):
-            errors[key] = "path is required"
-            return DEFAULT_CONFIG.get(key)
-        return None
-    return cleaned
-
-
-def _validate_text_field(field: dict[str, Any], value: Any, errors: dict[str, str]) -> str | None:
-    key = field["key"]
-    if value is None or value == "":
-        return None
-    if not isinstance(value, str):
-        errors[key] = "value must be text"
-        return None
-    return value.strip() or None
-
-
-def _validate_integer_field(field: dict[str, Any], value: Any, errors: dict[str, str]) -> int:
-    key = field["key"]
-    default = int(DEFAULT_CONFIG[key])
-    if isinstance(value, bool) or not isinstance(value, int):
-        errors[key] = "value must be an integer"
-        return default
-    minimum = int(field.get("min", 1))
-    maximum = int(field.get("max", 65535))
-    if value < minimum or value > maximum:
-        errors[key] = f"value must be between {minimum} and {maximum}"
-        return default
-    return value
 
 
 def _read_saved_config(runtime: WebUiRuntime) -> dict:

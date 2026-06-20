@@ -10,8 +10,7 @@ import json
 import sqlite3
 import urllib.request
 
-from dancing_log.app_paths import DEFAULT_CONFIG, resolve_app_path
-from dancing_log.local_config import load_local_config
+from dancing_log.app_paths import AppRuntimeConfig
 from dancing_log.storage import (
     DATA_DIR,
     WANNA_SYSTEM_KEY,
@@ -155,17 +154,9 @@ def sync_wanna_catalog(
     write_files: bool = False,
 ) -> SyncStats:
     """Synchronize WannaDance catalog data into SQLite and optional artifacts."""
-    config = load_local_config()
-    configured_cache_dir = cache_dir if cache_dir is not None else config.get("wanna_cache_dir")
-    resolved_cache_dir = (
-        resolve_app_path(configured_cache_dir, configured_cache_dir)
-        if configured_cache_dir
-        else None
-    )
-    resolved_db_path = resolve_app_path(
-        db_path,
-        config.get("app_db") or DEFAULT_CONFIG["app_db"],
-    )
+    config = AppRuntimeConfig.load(migrate_legacy=True)
+    resolved_cache_dir = config.optional_path("wanna_cache_dir", override=cache_dir)
+    resolved_db_path = config.path("app_db", override=db_path)
 
     api_songs: list[dict] = []
     used_api = False

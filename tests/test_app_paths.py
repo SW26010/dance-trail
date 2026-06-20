@@ -4,10 +4,13 @@ import unittest
 from pathlib import Path
 
 from dancing_log.app_paths import (
+    AppRuntimeConfig,
+    CONFIG_FIELDS,
     DEFAULT_CONFIG,
     load_app_config,
     resolve_app_path,
     save_app_config,
+    validate_supported_config,
 )
 from main import _resolve_recording_path
 
@@ -81,6 +84,65 @@ class AppPathTests(unittest.TestCase):
             raw = json.loads(path.read_text(encoding="utf-8"))
             self.assertTrue(raw["auto_start_overlay"])
             self.assertTrue(raw["auto_start_watcher"])
+
+    def test_config_fields_describe_default_config_keys(self):
+        self.assertEqual([field["key"] for field in CONFIG_FIELDS], list(DEFAULT_CONFIG))
+
+    def test_validate_supported_config_preserves_overlay_watcher_dependency(self):
+        config, errors = validate_supported_config(
+            {
+                "auto_start_watcher": False,
+                "auto_start_overlay": True,
+                "overlay_port": 8765,
+            }
+        )
+
+        self.assertEqual(errors, {})
+        self.assertTrue(config["auto_start_overlay"])
+        self.assertTrue(config["auto_start_watcher"])
+
+    def test_runtime_config_resolves_internal_and_external_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime = AppRuntimeConfig.from_config(
+                {
+                    "app_db": "db/app.sqlite3",
+                    "wanna_cache_dir": "cache/wanna",
+                    "vrcx_db_path": "",
+                    "overlay_port": 9911,
+                },
+                app_root=root,
+            )
+
+            self.assertEqual(runtime.app_db_path, root / "db" / "app.sqlite3")
+            self.assertEqual(runtime.wanna_cache_dir, root / "cache" / "wanna")
+            self.assertIsNone(runtime.vrcx_db_path)
+            self.assertEqual(runtime.overlay_port, 9911)
+            self.assertEqual(runtime.supported_values()["app_db"], "db/app.sqlite3")
+
+    def test_runtime_watcher_config_preserves_defaults_and_empty_override_fallback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime = AppRuntimeConfig.from_config(
+                {
+                    "app_db": "data/custom.sqlite3",
+                    "capture_dir": "logs/custom-captures",
+                    "source_vrc_log_dir": "logs/custom-source",
+                    "overlay_port": 9911,
+                },
+                app_root=root,
+            )
+
+            watcher = runtime.watcher_config(
+                default_log_dir=root / "LocalLow" / "VRChat",
+                output_dir="",
+            )
+
+            self.assertEqual(watcher.log_dir, root / "LocalLow" / "VRChat")
+            self.assertEqual(watcher.output_dir, root / "logs" / "custom-captures")
+            self.assertEqual(watcher.app_db_path, root / "data" / "custom.sqlite3")
+            self.assertEqual(watcher.source_log_dir, root / "logs" / "custom-source")
+            self.assertEqual(watcher.overlay_port, 9911)
 
     def test_recording_path_prefers_existing_configured_recordings_dir(self):
         with tempfile.TemporaryDirectory() as tmp:

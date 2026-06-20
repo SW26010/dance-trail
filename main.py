@@ -4,12 +4,12 @@ from pathlib import Path, PureWindowsPath
 import subprocess
 import sys
 
-from dancing_log.app_paths import DEFAULT_CONFIG, resolve_app_path
-from dancing_log.local_config import CONFIG_FILE, load_local_config
+from dancing_log.app_paths import AppRuntimeConfig, resolve_app_path
+from dancing_log.local_config import CONFIG_FILE
 
 
-def _get_local_config() -> dict:
-    return load_local_config()
+def _get_runtime_config() -> AppRuntimeConfig:
+    return AppRuntimeConfig.load(migrate_legacy=True)
 
 
 def _is_frozen() -> bool:
@@ -39,11 +39,11 @@ def _pick_value(cli_value, config_value):
     return cli_value if cli_value is not None else config_value
 
 
-def _configured_path(cli_value, config: dict, key: str) -> Path:
-    return resolve_app_path(cli_value, config.get(key) or DEFAULT_CONFIG[key])
+def _configured_path(cli_value, config: AppRuntimeConfig, key: str) -> Path:
+    return config.path(key, override=cli_value)
 
 
-def _configured_db_path(cli_value, config: dict) -> Path:
+def _configured_db_path(cli_value, config: AppRuntimeConfig) -> Path:
     return _configured_path(cli_value, config, "app_db")
 
 
@@ -67,7 +67,7 @@ def cmd_sync_wanna():
     """Sync WannaDance tracks into SQLite."""
     import argparse
 
-    config = _get_local_config()
+    config = _get_runtime_config()
     parser = argparse.ArgumentParser(description="Sync WannaDance catalog into SQLite")
     parser.add_argument("--app-db", default=None, help="SQLite database path")
     parser.add_argument("--cache-dir", default=None, help="Local wannadance-song cache directory")
@@ -77,9 +77,7 @@ def cmd_sync_wanna():
     args = parser.parse_args(sys.argv[2:])
 
     db_path = _configured_db_path(args.app_db, config)
-    cache_dir = _pick_value(args.cache_dir, config.get("wanna_cache_dir"))
-    if cache_dir:
-        cache_dir = resolve_app_path(cache_dir, cache_dir)
+    cache_dir = config.optional_path("wanna_cache_dir", override=args.cache_dir)
 
     from dancing_log.wanna_catalog import sync_wanna_catalog
 
@@ -105,7 +103,7 @@ def cmd_recommend():
     """Generate the daily recommendation playlist."""
     import argparse
 
-    config = _get_local_config()
+    config = _get_runtime_config()
     parser = argparse.ArgumentParser(description="Generate daily recommendation playlist")
     parser.add_argument("-n", "--count", type=int, default=20, help="Number of dance tracks to recommend")
     parser.add_argument("--app-db", default=None, help="SQLite path")
@@ -144,7 +142,7 @@ def cmd_day():
     import argparse
     from datetime import date
 
-    config = _get_local_config()
+    config = _get_runtime_config()
     parser = argparse.ArgumentParser(description="Print official dance history for one local day")
     parser.add_argument("date", help="Local date in YYYY-MM-DD format")
     parser.add_argument("--app-db", default=None, help="SQLite path")
@@ -176,7 +174,7 @@ def cmd_log():
     """Append one dance log record."""
     import argparse
 
-    config = _get_local_config()
+    config = _get_runtime_config()
     parser = argparse.ArgumentParser(description="Add one dance log record")
     parser.add_argument("--system", required=True, help="Dance system key, for example wannadance")
     parser.add_argument("--app-db", default=None, help="SQLite path")
@@ -241,7 +239,7 @@ def cmd_import_favorites():
     """Import favorite flags from a text file."""
     import argparse
 
-    config = _get_local_config()
+    config = _get_runtime_config()
     parser = argparse.ArgumentParser(description="Import favorite dance tracks from a text file")
     parser.add_argument(
         "favorites_file",
@@ -257,7 +255,7 @@ def cmd_import_favorites():
     parser.add_argument("--dry-run", action="store_true", help="Validate and report changes without writing")
     args = parser.parse_args(sys.argv[2:])
     db_path = _configured_db_path(args.app_db, config)
-    favorites_file = resolve_app_path(args.favorites_file, args.favorites_file)
+    favorites_file = config.resolve_path(args.favorites_file)
 
     from dancing_log.favorite_importer import FavoriteImportError, import_favorites_file
 
@@ -287,7 +285,7 @@ def cmd_import_vrcx():
     """Import historical playback rows from VRCX SQLite."""
     import argparse
 
-    config = _get_local_config()
+    config = _get_runtime_config()
     parser = argparse.ArgumentParser(description="Import historical playback rows from VRCX SQLite")
     parser.add_argument(
         "vrcx_db",
@@ -311,10 +309,8 @@ def cmd_import_vrcx():
     parser.add_argument("--dry-run", action="store_true", help="Scan only, do not write to the app database")
     args = parser.parse_args(sys.argv[2:])
 
-    vrcx_db_path = _pick_value(args.vrcx_db, config.get("vrcx_db_path"))
-    if vrcx_db_path:
-        vrcx_db_path = resolve_app_path(vrcx_db_path, vrcx_db_path)
-    self_user_id = _pick_value(args.self_user_id, config.get("self_user_id"))
+    vrcx_db_path = config.optional_path("vrcx_db_path", override=args.vrcx_db)
+    self_user_id = _pick_value(args.self_user_id, config.self_user_id)
     db_path = _configured_db_path(args.app_db, config)
     if not vrcx_db_path:
         parser.error(
@@ -345,7 +341,7 @@ def cmd_sync_queued_self():
     """Overlay queued-self manifests onto existing events."""
     import argparse
 
-    config = _get_local_config()
+    config = _get_runtime_config()
     parser = argparse.ArgumentParser(description="Sync queued_self Markdown manifests")
     parser.add_argument("--app-db", default=None, help="SQLite path")
     parser.add_argument("--manifest-dir", default=None, help="Manifest directory")
@@ -377,7 +373,7 @@ def cmd_sample_recording_frames():
     """Sample top-cropped frames from a recording for overlay checks."""
     import argparse
 
-    config = _get_local_config()
+    config = _get_runtime_config()
     parser = argparse.ArgumentParser(description="Sample top-cropped frames from a recording")
     parser.add_argument(
         "recording",
@@ -396,7 +392,11 @@ def cmd_sample_recording_frames():
     args = parser.parse_args(sys.argv[2:])
     output_dir = _configured_path(args.output_dir, config, "recording_frames_dir")
 
-    recording_path = _resolve_recording_path(args.recording, config.get("recordings_dir"))
+    recording_path = _resolve_recording_path(
+        args.recording,
+        config.get("recordings_dir"),
+        app_root=config.app_root,
+    )
 
     from dancing_log.recordings import sample_top_frames
 
@@ -417,7 +417,7 @@ def cmd_watch_vrc_log():
     """Capture live VRChat output logs for video playback forensics."""
     import argparse
 
-    config = _get_local_config()
+    config = _get_runtime_config()
     parser = argparse.ArgumentParser(description="Watch VRChat output logs for video playback lines")
     parser.add_argument(
         "--log-dir",
@@ -483,22 +483,21 @@ def cmd_watch_vrc_log():
 
     from dancing_log.vrc_log_watcher import default_vrc_log_dir, watch_vrc_logs
 
-    configured_log_dir = _pick_value(args.log_dir, config.get("vrc_log_dir"))
-    if configured_log_dir:
-        log_dir = resolve_app_path(configured_log_dir, configured_log_dir)
-    else:
-        log_dir = default_vrc_log_dir()
-    output_dir = _configured_path(args.output_dir, config, "capture_dir")
-    source_log_dir = _configured_path(args.source_log_dir, config, "source_vrc_log_dir")
-    db_path = _configured_db_path(args.app_db, config)
-    print(f"Watching VRChat logs: {log_dir}")
+    watcher_config = config.watcher_config(
+        default_log_dir=default_vrc_log_dir(),
+        log_dir=args.log_dir,
+        output_dir=args.output_dir,
+        source_log_dir=args.source_log_dir,
+        app_db_path=args.app_db,
+    )
+    print(f"Watching VRChat logs: {watcher_config.log_dir}")
     print("Press Ctrl+C to stop.")
 
     stats = watch_vrc_logs(
-        log_dir=log_dir,
-        output_dir=output_dir,
+        log_dir=watcher_config.log_dir,
+        output_dir=watcher_config.output_dir,
         session_name=args.session_name,
-        app_db_path=db_path,
+        app_db_path=watcher_config.app_db_path,
         from_start=args.from_start,
         include_raw=not args.no_raw,
         live_db=args.live_db,
@@ -507,7 +506,7 @@ def cmd_watch_vrc_log():
         poll_seconds=args.poll_seconds,
         stop_after_idle_seconds=args.stop_after_idle_seconds,
         archive_source_logs=not args.no_source_archive,
-        source_log_dir=source_log_dir,
+        source_log_dir=watcher_config.source_log_dir,
     )
 
     print("VRChat log capture complete")
@@ -584,7 +583,7 @@ def cmd_rebuild_data():
     if not args.archive_existing:
         parser.error("--archive-existing is required to avoid accidental data loss")
 
-    config = _get_local_config()
+    config = _get_runtime_config()
     db_path = _configured_db_path(args.app_db, config)
     queued_self_dir = _configured_path(None, config, "queued_self_dir")
     from dancing_log.queued_self_importer import sync_queued_self_manifests
@@ -592,7 +591,7 @@ def cmd_rebuild_data():
     from dancing_log.vrcx_importer import import_vrcx_database
     from dancing_log.wanna_catalog import sync_wanna_catalog
 
-    archive = archive_existing_data(resolve_app_path(None, "data"), app_db_path=db_path)
+    archive = archive_existing_data(config.paths.data_dir, app_db_path=db_path)
     print(f"Archived generated data to: {archive.archive_dir}")
     for path in archive.archived:
         print(f"  {path.name}")
@@ -601,12 +600,12 @@ def cmd_rebuild_data():
     print("WannaDance catalog sync complete")
     print(f"  database tracks after: {sync_stats.db_after}")
 
-    vrcx_db_path = config.get("vrcx_db_path")
+    vrcx_db_path = config.vrcx_db_path
     if vrcx_db_path:
         import_stats = import_vrcx_database(
-            vrcx_db_path=resolve_app_path(vrcx_db_path, vrcx_db_path),
+            vrcx_db_path=vrcx_db_path,
             app_db_path=db_path,
-            self_user_id=config.get("self_user_id"),
+            self_user_id=config.self_user_id,
             limit=args.limit_vrcx,
         )
         print("VRCX import complete")
