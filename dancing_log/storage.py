@@ -14,6 +14,7 @@ import sqlite3
 import unicodedata
 
 from dancing_log.app_paths import DATA_DIR, DB_FILE
+from dancing_log.live_playback_settlement import is_live_playback_promotable
 
 WANNA_SYSTEM_KEY = "wannadance"
 WANNA_SYSTEM_NAME = "WannaDance"
@@ -916,14 +917,7 @@ def _external_id_text(value: object) -> str:
 
 
 def _live_event_is_promotable(row: sqlite3.Row) -> bool:
-    return bool(
-        row["completion_status"] == "completed"
-        and row["actual_play_at"]
-        and row["dance_system_key"]
-        and row["dance_external_id"]
-        and row["duration_seconds"] is not None
-        and not bool(row["observed_mid_play"])
-    )
+    return is_live_playback_promotable(row)
 
 
 def _live_dance_source(source_type: str | None) -> tuple[str, float]:

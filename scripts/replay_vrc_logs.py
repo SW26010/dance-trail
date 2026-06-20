@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
@@ -25,6 +26,65 @@ KNOWN_OUTPUTS = (
     "live.sqlite3",
     "live.sqlite3-wal",
     "live.sqlite3-shm",
+)
+REPLAY_STARTED_AT = "1970-01-01T00:00:00+00:00"
+REPLAY_LIVE_SESSION_ID = "vrc-log-replay-parity"
+IGNORED_JSON_FIELDS = {"captured_at", "received_at"}
+LIVE_PLAYBACK_COLUMNS = (
+    "event_key",
+    "session_id",
+    "playback_event_key",
+    "canonical_key",
+    "first_seen_at",
+    "request_at",
+    "load_started_at",
+    "resolve_attempt_at",
+    "resolved_at",
+    "video_loaded_at",
+    "expected_ready_at",
+    "last_seen_at",
+    "actual_play_at",
+    "actual_play_signal_at",
+    "actual_play_offset_seconds",
+    "actual_play_method",
+    "on_video_start_at",
+    "synced_play_at",
+    "observed_mid_play",
+    "elapsed_at_first_seen_seconds",
+    "delay_to_actual_seconds",
+    "load_to_actual_seconds",
+    "request_to_resolve_seconds",
+    "video_url",
+    "routed_url",
+    "resolved_url",
+    "dance_system_key",
+    "dance_external_id",
+    "url_kind",
+    "video_name",
+    "video_id",
+    "display_name",
+    "requester_marker",
+    "source_hint",
+    "source_type",
+    "source_display_name",
+    "world_parser",
+    "duration_seconds",
+    "duration_source",
+    "load_seconds",
+    "wait_seconds",
+    "source_file",
+    "first_line_number",
+    "last_line_number",
+    "signal_count",
+    "parser_names_json",
+    "raw_event_types_json",
+    "event_json",
+    "completion_status",
+    "completion_reason",
+    "completed_at",
+    "interrupted_at",
+    "played_seconds",
+    "required_played_seconds",
 )
 MANUAL_GT_DATE = (2026, 5, 17)
 MANUAL_MATCH_TOLERANCE_SECONDS = 90
@@ -104,7 +164,32 @@ def run_compare(args) -> None:
         f"- promotion threshold: {_promotion_threshold_label()} of known duration",
         "",
     ]
-    report.extend(_playback_diff_section(baseline, output))
+    failed_sections: list[str] = []
+
+    parsed_section, parsed_failed = _ordered_jsonl_diff_section(
+        baseline,
+        output,
+        filename="parsed_events.jsonl",
+        label="Parsed Events Diff",
+    )
+    report.extend(parsed_section)
+    if parsed_failed:
+        failed_sections.append("parsed_events.jsonl")
+
+    playback_section, playback_failed = _playback_diff_section(baseline, output)
+    report.extend(playback_section)
+    if playback_failed:
+        failed_sections.append("playback_events.jsonl")
+
+    live_section, live_failed = _live_playback_diff_section(baseline, output)
+    report.extend(live_section)
+    if live_failed:
+        failed_sections.append("live.sqlite3:live_playback_events")
+
+    dance_section, dance_failed = _dance_events_diff_section(baseline, output)
+    report.extend(dance_section)
+    if dance_failed:
+        failed_sections.append("live.sqlite3:dance_events")
 
     if args.manual_gt:
         report.extend(_manual_gt_section(Path(args.manual_gt), output / "live.sqlite3"))
@@ -112,7 +197,18 @@ def run_compare(args) -> None:
         report.extend(_vrcx_section(Path(args.vrcx_db), args.manual_gt))
 
     (output / "diff_report.md").write_text("\n".join(report) + "\n", encoding="utf-8")
-    print(json.dumps({"output": str(output), "diff_report": str(output / "diff_report.md")}))
+    print(
+        json.dumps(
+            {
+                "output": str(output),
+                "diff_report": str(output / "diff_report.md"),
+                "ok": not failed_sections,
+                "failed_sections": failed_sections,
+            }
+        )
+    )
+    if failed_sections:
+        raise SystemExit(1)
 
 
 def _run_replay(*, log_dir: Path, pattern: str, output: Path):
@@ -125,6 +221,8 @@ def _run_replay(*, log_dir: Path, pattern: str, output: Path):
         log_files=log_files,
         output_dir=output,
         app_db_path=output / "live.sqlite3",
+        started_at=REPLAY_STARTED_AT,
+        live_session_id=REPLAY_LIVE_SESSION_ID,
         live_db=True,
         promote_live=True,
     )
@@ -144,11 +242,59 @@ def _prepare_output(output: Path) -> None:
             path.unlink()
 
 
-def _playback_diff_section(baseline: Path, output: Path) -> list[str]:
+def _ordered_jsonl_diff_section(
+    baseline: Path,
+    output: Path,
+    *,
+    filename: str,
+    label: str,
+) -> tuple[list[str], bool]:
+    base_path = baseline / filename
+    run_path = output / filename
+    if not base_path.exists():
+        return [f"## {label}", "", f"- baseline missing: {base_path}", ""], True
+    if not run_path.exists():
+        return [f"## {label}", "", f"- replay output missing: {run_path}", ""], True
+
+    base_rows = _read_jsonl(base_path)
+    run_rows = _read_jsonl(run_path)
+    comparable_count = min(len(base_rows), len(run_rows))
+    changed = [
+        index
+        for index in range(comparable_count)
+        if _stable_event(base_rows[index]) != _stable_event(run_rows[index])
+    ]
+    added = max(0, len(run_rows) - len(base_rows))
+    removed = max(0, len(base_rows) - len(run_rows))
+    changed_field_counts = _changed_field_counts_for_pairs(
+        (base_rows[index], run_rows[index]) for index in changed
+    )
+
+    lines = [
+        f"## {label}",
+        "",
+        f"- baseline rows: {len(base_rows)}",
+        f"- replay rows: {len(run_rows)}",
+        f"- added rows: {added}",
+        f"- removed rows: {removed}",
+        f"- changed rows: {len(changed)}",
+    ]
+    if changed:
+        display_indexes = ", ".join(str(index + 1) for index in changed[:20])
+        lines.append(f"- changed row numbers: {display_indexes}")
+        if changed_field_counts:
+            lines.append(f"- changed field counts: {_field_count_summary(changed_field_counts)}")
+    lines.append("")
+    return lines, bool(added or removed or changed)
+
+
+def _playback_diff_section(baseline: Path, output: Path) -> tuple[list[str], bool]:
     base_path = baseline / "playback_events.jsonl"
     run_path = output / "playback_events.jsonl"
     if not base_path.exists():
-        return ["## Playback Diff", "", f"- baseline missing: {base_path}", ""]
+        return ["## Playback Diff", "", f"- baseline missing: {base_path}", ""], True
+    if not run_path.exists():
+        return ["## Playback Diff", "", f"- replay output missing: {run_path}", ""], True
 
     base_events = _index_events(_read_jsonl(base_path))
     run_events = _index_events(_read_jsonl(run_path))
@@ -182,10 +328,7 @@ def _playback_diff_section(baseline: Path, output: Path) -> list[str]:
     if changed:
         lines.append(f"- changed keys: {', '.join(changed[:20])}")
         if changed_field_counts:
-            field_summary = ", ".join(
-                f"{name}={count}" for name, count in changed_field_counts[:12]
-            )
-            lines.append(f"- changed field counts: {field_summary}")
+            lines.append(f"- changed field counts: {_field_count_summary(changed_field_counts)}")
         explained = [
             key
             for key in changed
@@ -197,7 +340,141 @@ def _playback_diff_section(baseline: Path, output: Path) -> list[str]:
                 f"({', '.join(explained[:20])}; duration from VRChat log metadata)"
             )
     lines.append("")
-    return lines
+    return lines, bool(added or removed or changed)
+
+
+def _live_playback_diff_section(baseline: Path, output: Path) -> tuple[list[str], bool]:
+    return _sqlite_indexed_diff_section(
+        label="Live Playback SQLite Diff",
+        baseline=baseline,
+        output=output,
+        rows_reader=_read_live_playback_rows,
+        key_field="event_key",
+    )
+
+
+def _dance_events_diff_section(baseline: Path, output: Path) -> tuple[list[str], bool]:
+    return _sqlite_indexed_diff_section(
+        label="Promoted Dance Events SQLite Diff",
+        baseline=baseline,
+        output=output,
+        rows_reader=_read_dance_event_rows,
+        key_field="event_key",
+    )
+
+
+def _sqlite_indexed_diff_section(
+    *,
+    label: str,
+    baseline: Path,
+    output: Path,
+    rows_reader,
+    key_field: str,
+) -> tuple[list[str], bool]:
+    base_db = baseline / "live.sqlite3"
+    run_db = output / "live.sqlite3"
+    if not base_db.exists():
+        return [f"## {label}", "", f"- baseline DB missing: {base_db}", ""], True
+    if not run_db.exists():
+        return [f"## {label}", "", f"- replay DB missing: {run_db}", ""], True
+
+    try:
+        base_rows = rows_reader(base_db)
+        run_rows = rows_reader(run_db)
+    except sqlite3.Error as exc:
+        return [f"## {label}", "", f"- SQLite read failed: {exc}", ""], True
+
+    base_by_key = _index_rows(base_rows, key_field)
+    run_by_key = _index_rows(run_rows, key_field)
+    added = sorted(set(run_by_key) - set(base_by_key))
+    removed = sorted(set(base_by_key) - set(run_by_key))
+    changed = [
+        key
+        for key in sorted(set(base_by_key) & set(run_by_key))
+        if _stable_event(base_by_key[key]) != _stable_event(run_by_key[key])
+    ]
+    changed_field_counts = _changed_field_counts(base_by_key, run_by_key, changed)
+
+    lines = [
+        f"## {label}",
+        "",
+        f"- baseline rows: {len(base_rows)}",
+        f"- replay rows: {len(run_rows)}",
+        f"- added rows: {len(added)}",
+        f"- removed rows: {len(removed)}",
+        f"- changed rows: {len(changed)}",
+    ]
+    if added:
+        lines.append(f"- added keys: {', '.join(added[:20])}")
+    if removed:
+        lines.append(f"- removed keys: {', '.join(removed[:20])}")
+    if changed:
+        lines.append(f"- changed keys: {', '.join(changed[:20])}")
+        if changed_field_counts:
+            lines.append(f"- changed field counts: {_field_count_summary(changed_field_counts)}")
+    lines.append("")
+    return lines, bool(added or removed or changed)
+
+
+def _read_live_playback_rows(db_path: Path) -> list[dict]:
+    columns = ", ".join(LIVE_PLAYBACK_COLUMNS)
+    with closing(sqlite3.connect(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f"""
+            SELECT {columns}
+            FROM live_playback_events
+            ORDER BY event_key
+            """
+        ).fetchall()
+    return [_decode_sqlite_json_columns(dict(row)) for row in rows]
+
+
+def _read_dance_event_rows(db_path: Path) -> list[dict]:
+    with closing(sqlite3.connect(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT
+                de.event_key,
+                de.played_at,
+                ds.key AS dance_system_key,
+                dt.external_id AS dance_external_id,
+                de.source,
+                de.confidence,
+                de.event_source,
+                de.video_url,
+                de.video_name,
+                de.requester_display_name,
+                de.requester_user_id,
+                de.location,
+                de.note,
+                de.recording_id,
+                de.recording_offset_seconds
+            FROM dance_events de
+            LEFT JOIN dance_tracks dt ON dt.id = de.dance_track_id
+            LEFT JOIN dance_systems ds ON ds.id = dt.system_id
+            ORDER BY de.event_key
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _decode_sqlite_json_columns(row: dict) -> dict:
+    for field_name, default in (
+        ("parser_names_json", []),
+        ("raw_event_types_json", []),
+        ("event_json", {}),
+    ):
+        value = row.get(field_name)
+        if not isinstance(value, str):
+            row[field_name] = default
+            continue
+        try:
+            row[field_name] = json.loads(value)
+        except json.JSONDecodeError:
+            row[field_name] = value
+    return row
 
 
 def _manual_gt_section(manual_gt: Path, db_path: Path) -> list[str]:
@@ -207,7 +484,7 @@ def _manual_gt_section(manual_gt: Path, db_path: Path) -> list[str]:
     if not db_path.exists():
         return ["## Manual GT", "", f"- live DB missing: {db_path}", ""]
 
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         promoted = conn.execute(
             """
@@ -292,7 +569,7 @@ def _vrcx_section(vrcx_db: Path, manual_gt: str | None) -> list[str]:
         return ["## VRCX", "", f"- missing VRCX DB: {vrcx_db}", ""]
     start, end = _manual_window_utc(manual_gt)
     try:
-        with sqlite3.connect(f"file:{vrcx_db}?mode=ro", uri=True) as conn:
+        with closing(sqlite3.connect(f"file:{vrcx_db}?mode=ro", uri=True)) as conn:
             count = conn.execute(
                 """
                 SELECT count(*)
@@ -464,9 +741,24 @@ def _index_events(events: list[dict]) -> dict[str, dict]:
     return {str(event.get("event_key")): event for event in events if event.get("event_key")}
 
 
+def _index_rows(rows: list[dict], key_field: str) -> dict[str, dict]:
+    return {str(row.get(key_field)): row for row in rows if row.get(key_field)}
+
+
 def _stable_event(event: dict) -> dict:
-    ignored = {"captured_at", "received_at"}
-    return {key: value for key, value in event.items() if key not in ignored}
+    return _stable_value(event)
+
+
+def _stable_value(value):
+    if isinstance(value, dict):
+        return {
+            key: _stable_value(item)
+            for key, item in value.items()
+            if key not in IGNORED_JSON_FIELDS
+        }
+    if isinstance(value, list):
+        return [_stable_value(item) for item in value]
+    return value
 
 
 def _changed_field_counts(
@@ -482,6 +774,25 @@ def _changed_field_counts(
             if base.get(field_name) != run.get(field_name):
                 counts[field_name] = counts.get(field_name, 0) + 1
     return sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+
+
+def _changed_field_counts_for_pairs(pairs) -> list[tuple[str, int]]:
+    counts: dict[str, int] = {}
+    for base_event, run_event in pairs:
+        base = _stable_event(base_event)
+        run = _stable_event(run_event)
+        if not isinstance(base, dict) or not isinstance(run, dict):
+            if base != run:
+                counts["<row>"] = counts.get("<row>", 0) + 1
+            continue
+        for field_name in set(base) | set(run):
+            if base.get(field_name) != run.get(field_name):
+                counts[field_name] = counts.get(field_name, 0) + 1
+    return sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+
+
+def _field_count_summary(changed_field_counts: list[tuple[str, int]]) -> str:
+    return ", ".join(f"{name}={count}" for name, count in changed_field_counts[:12])
 
 
 def _read_jsonl(path: Path) -> list[dict]:
