@@ -2,13 +2,19 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from dancing_log.webui_server import (
+    FOS_FILEMUSTEXIST,
+    FOS_FORCEFILESYSTEM,
+    FOS_PATHMUSTEXIST,
+    FOS_PICKFOLDERS,
     WebUiRuntime,
     WebUiServer,
-    _windows_picker_script,
+    _file_dialog_options,
+    _run_windows_picker,
     load_catalog_snapshot,
     load_config_snapshot,
     load_insights_snapshot,
@@ -305,13 +311,25 @@ class WebUiServerTest(unittest.TestCase):
             self.assertEqual(snapshot["config"]["app_db"], "data/legacy.sqlite3")
             self.assertFalse(new_path.exists())
 
-    def test_windows_picker_script_uses_topmost_owner(self):
-        script = _windows_picker_script()
+    def test_windows_picker_options_use_ifileopendialog_modes(self):
+        directory_options = _file_dialog_options("directory", 0)
+        file_options = _file_dialog_options("file", 0)
 
-        self.assertIn("$owner.TopMost = $true", script)
-        self.assertIn("$owner.Show()", script)
-        self.assertIn(".ShowDialog($owner)", script)
-        self.assertNotIn(".ShowDialog()", script)
+        self.assertTrue(directory_options & FOS_PICKFOLDERS)
+        self.assertTrue(directory_options & FOS_FORCEFILESYSTEM)
+        self.assertTrue(directory_options & FOS_PATHMUSTEXIST)
+        self.assertFalse(directory_options & FOS_FILEMUSTEXIST)
+        self.assertTrue(file_options & FOS_FILEMUSTEXIST)
+        self.assertTrue(file_options & FOS_FORCEFILESYSTEM)
+        self.assertTrue(file_options & FOS_PATHMUSTEXIST)
+        self.assertFalse(file_options & FOS_PICKFOLDERS)
+
+    def test_windows_picker_delegates_to_ifileopendialog_backend(self):
+        with patch("dancing_log.webui_server._show_windows_file_open_dialog", return_value="C:\\temp\\x.sqlite3") as picker:
+            selected = _run_windows_picker({"picker": "file", "label": "App database"}, "C:\\temp")
+
+        self.assertEqual(selected, "C:\\temp\\x.sqlite3")
+        picker.assert_called_once_with(mode="file", title="App database", initial="C:\\temp")
 
 
 if __name__ == "__main__":
