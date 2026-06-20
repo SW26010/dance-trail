@@ -112,8 +112,8 @@ def run_tray_webui_app(
 
     from dancing_log._win_tray import WindowsTrayApp
 
-    server = WebUiServer(port=port, app_root=app_root)
     runtime = TrayRuntime(app_root=app_root)
+    server = WebUiServer(port=port, app_root=app_root, session_runtime=runtime.session)
     server.start()
     try:
         WindowsTrayApp(server, runtime).run(open_browser=open_browser)

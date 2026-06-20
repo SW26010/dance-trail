@@ -5,7 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 import ctypes
 from ctypes import wintypes
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -29,6 +29,11 @@ from dancing_log.app_paths import (
     resolve_config_path,
     save_app_config,
     validate_supported_config,
+)
+from dancing_log.live_app_session import (
+    LiveAppSessionRuntime,
+    LiveAppSessionStatus,
+    WatchVrcLogsFunc,
 )
 from dancing_log.read_snapshots import LocalReadSnapshots
 from dancing_log.vrc_log_watcher import default_vrc_log_dir
@@ -87,11 +92,25 @@ class WebUiRuntime:
 
     app_root: Path
     csrf_token: str
+    session: LiveAppSessionRuntime
 
     @classmethod
-    def from_root(cls, app_root: Path | str | None = None) -> "WebUiRuntime":
+    def from_root(
+        cls,
+        app_root: Path | str | None = None,
+        *,
+        session_runtime: LiveAppSessionRuntime | None = None,
+        watch_vrc_logs_func: WatchVrcLogsFunc | None = None,
+    ) -> "WebUiRuntime":
+        if session_runtime is not None and watch_vrc_logs_func is not None:
+            raise ValueError("pass either session_runtime or watch_vrc_logs_func, not both")
         root = Path(app_root) if app_root is not None else default_app_root()
-        return cls(root.resolve(), secrets.token_urlsafe(32))
+        resolved_root = root.resolve()
+        session = session_runtime or LiveAppSessionRuntime(
+            app_root=resolved_root,
+            watch_vrc_logs_func=watch_vrc_logs_func,
+        )
+        return cls(resolved_root, secrets.token_urlsafe(32), session)
 
     @property
     def paths(self) -> AppPaths:
@@ -107,12 +126,19 @@ class WebUiServer:
         host: str = WEBUI_HOST,
         port: int = DEFAULT_WEBUI_PORT,
         app_root: Path | str | None = None,
+        session_runtime: LiveAppSessionRuntime | None = None,
+        watch_vrc_logs_func: WatchVrcLogsFunc | None = None,
     ) -> None:
         if host != WEBUI_HOST:
             raise ValueError("web UI server must bind to 127.0.0.1")
         self.host = host
         self.port = port
-        self.runtime = WebUiRuntime.from_root(app_root)
+        self.runtime = WebUiRuntime.from_root(
+            app_root,
+            session_runtime=session_runtime,
+            watch_vrc_logs_func=watch_vrc_logs_func,
+        )
+        self._owns_session = session_runtime is None
         self._server: _WebUiHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -134,6 +160,8 @@ class WebUiServer:
         if self._thread is not None:
             self._thread.join(timeout=2.0)
             self._thread = None
+        if self._owns_session:
+            self.runtime.session.close()
 
 
 class _WebUiHTTPServer(ThreadingHTTPServer):
@@ -200,6 +228,12 @@ class _WebUiHandler(BaseHTTPRequestHandler):
                 self._send_json(status, response)
             elif parsed.path == "/api/pick-path":
                 response, status = pick_path_from_payload(self.server.runtime, payload)
+                self._send_json(status, response)
+            elif parsed.path == "/api/live/watcher":
+                response, status = control_live_watcher_from_payload(self.server.runtime, payload)
+                self._send_json(status, response)
+            elif parsed.path == "/api/live/overlay":
+                response, status = control_live_overlay_from_payload(self.server.runtime, payload)
                 self._send_json(status, response)
             else:
                 self._send_json(404, {"error": "not found"})
@@ -372,9 +406,68 @@ def resolve_path_from_payload(runtime: WebUiRuntime, payload: dict) -> tuple[dic
 
 
 def load_summary_snapshot(runtime: WebUiRuntime) -> dict:
-    return LocalReadSnapshots(runtime.app_root).home(
+    snapshot = LocalReadSnapshots(runtime.app_root).home(
         config_warnings=load_config_snapshot(runtime).get("warnings", []),
     )
+    snapshot["session"] = live_session_status_snapshot(runtime.session.status())
+    return snapshot
+
+
+def control_live_watcher_from_payload(runtime: WebUiRuntime, payload: dict) -> tuple[dict, int]:
+    action = str(payload.get("action") or "").strip().lower()
+    if action == "start":
+        runtime.session.start_watcher()
+    elif action == "stop":
+        runtime.session.stop_watcher()
+    else:
+        return {"error": "action must be start or stop"}, 400
+    return {"session": live_session_status_snapshot(runtime.session.status())}, 200
+
+
+def control_live_overlay_from_payload(runtime: WebUiRuntime, payload: dict) -> tuple[dict, int]:
+    action = str(payload.get("action") or "").strip().lower()
+    if action == "start":
+        runtime.session.start_overlay()
+    elif action == "stop":
+        runtime.session.stop_overlay()
+    else:
+        return {"error": "action must be start or stop"}, 400
+    return {"session": live_session_status_snapshot(runtime.session.status())}, 200
+
+
+def live_session_status_snapshot(status: LiveAppSessionStatus) -> dict:
+    return {
+        "watcher_running": status.watcher_running,
+        "overlay_running": status.overlay_running,
+        "last_error": status.last_error,
+        "last_watcher_stats": _watcher_stats_snapshot(status.last_watcher_stats),
+    }
+
+
+def _watcher_stats_snapshot(stats: object | None) -> object | None:
+    if stats is None:
+        return None
+    if hasattr(stats, "to_dict"):
+        return _json_safe_value(stats.to_dict())
+    if is_dataclass(stats):
+        return _json_safe_value(asdict(stats))
+    if isinstance(stats, dict):
+        return _json_safe_value(stats)
+    if hasattr(stats, "__dict__"):
+        return _json_safe_value(vars(stats))
+    return str(stats)
+
+
+def _json_safe_value(value: object) -> object:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(key): _json_safe_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe_value(item) for item in value]
+    return str(value)
 
 
 def load_timeline_snapshot(runtime: WebUiRuntime, query: dict[str, list[str]]) -> dict:
@@ -965,6 +1058,16 @@ h1 { margin: 0; font-size: 24px; line-height: 1.2; }
 .metric { display: grid; gap: 4px; padding: 14px; }
 .metric span { color: var(--muted); font-size: 12px; }
 .metric strong { font-size: 24px; line-height: 1.1; }
+.status-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.status-item {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-alt);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+.status-item span { color: var(--muted); font-size: 12px; }
 .pill-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .pill {
   min-height: 24px;
@@ -1065,7 +1168,7 @@ tr:last-child td { border-bottom: 0; }
   .sidebar { position: sticky; top: 0; z-index: 2; grid-template-rows: auto auto; }
   .nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sidebar-foot { display: none; }
-  .summary-grid, .two-col { grid-template-columns: 1fr; }
+  .summary-grid, .two-col, .status-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 680px) {
   .main { padding: 14px; }
@@ -1193,7 +1296,23 @@ const TEXT = {
     recommendations: "Recommendations",
     noData: "No data",
     name: "Name",
-    count: "Count"
+    count: "Count",
+    liveStatus: "Live status",
+    watcher: "Watcher",
+    overlay: "Overlay",
+    running: "Running",
+    stopped: "Stopped",
+    refresh: "Refresh",
+    startWatcher: "Start watcher",
+    stopWatcher: "Stop watcher",
+    startOverlay: "Start overlay",
+    stopOverlay: "Stop overlay",
+    databaseState: "Database state",
+    currentLiveRow: "Current live row",
+    lastRuntimeError: "Last runtime error",
+    lastWatcherStats: "Last watcher stats",
+    noWatcherStats: "No watcher stats yet",
+    liveControlFailed: "Live control failed"
   },
   zh: {
     brandSubtitle: "本地 Web UI",
@@ -1278,7 +1397,23 @@ const TEXT = {
     recommendations: "推荐",
     noData: "没有数据",
     name: "名称",
-    count: "数量"
+    count: "数量",
+    liveStatus: "\u5b9e\u65f6\u72b6\u6001",
+    watcher: "Watcher",
+    overlay: "Overlay",
+    running: "\u8fd0\u884c\u4e2d",
+    stopped: "\u5df2\u505c\u6b62",
+    refresh: "\u5237\u65b0",
+    startWatcher: "\u542f\u52a8 watcher",
+    stopWatcher: "\u505c\u6b62 watcher",
+    startOverlay: "\u542f\u52a8 overlay",
+    stopOverlay: "\u505c\u6b62 overlay",
+    databaseState: "\u6570\u636e\u5e93\u72b6\u6001",
+    currentLiveRow: "\u5f53\u524d\u5b9e\u65f6\u64ad\u653e\u8bb0\u5f55",
+    lastRuntimeError: "\u6700\u8fd1\u8fd0\u884c\u9519\u8bef",
+    lastWatcherStats: "\u6700\u8fd1 watcher \u7edf\u8ba1",
+    noWatcherStats: "\u5c1a\u65e0 watcher \u7edf\u8ba1",
+    liveControlFailed: "\u5b9e\u65f6\u63a7\u5236\u5931\u8d25"
   }
 };
 const FIELD_TEXT = {
@@ -1752,7 +1887,10 @@ async function renderHome() {
   const node = document.getElementById("view-home");
   node.innerHTML = `<div class="panel"><div class="empty">${esc(ui("loading"))}</div></div>`;
   const data = await api("/api/summary").catch(error => ({ error: error.message, counts: {}, recent: [] }));
+  if (state.active !== "home") return;
+  toolbarNode.innerHTML = renderHomeToolbar(data.session || {});
   node.innerHTML = `
+    <div class="message" id="home-message"></div>
     <div class="grid summary-grid">
       ${metric(ui("danceTracks"), data.counts?.dance_tracks ?? 0, "blue")}
       ${metric(ui("officialRecords"), data.counts?.dance_events ?? 0, "green")}
@@ -1760,17 +1898,91 @@ async function renderHome() {
       ${metric(ui("vrcxRows"), data.counts?.vrcx_import_events ?? 0, "orange")}
     </div>
     <div class="grid two-col">
+      ${renderLiveStatus(data.session || {})}
       <section class="panel">
-        <div class="panel-head"><h2>${esc(ui("runtimeState"))}</h2>${data.database_exists ? `<span class="pill green">${esc(ui("dbFound"))}</span>` : `<span class="pill orange">${esc(ui("noDb"))}</span>`}</div>
+        <div class="panel-head"><h2>${esc(ui("currentLiveRow"))}</h2></div>
+        <div class="panel-body">
+          ${data.current_live ? `<pre class="readonly-json">${esc(JSON.stringify(data.current_live, null, 2))}</pre>` : `<div class="empty">${esc(ui("noLiveRow"))}</div>`}
+        </div>
+      </section>
+    </div>
+    <div class="grid two-col">
+      <section class="panel">
+        <div class="panel-head"><h2>${esc(ui("databaseState"))}</h2>${data.database_exists ? `<span class="pill green">${esc(ui("dbFound"))}</span>` : `<span class="pill orange">${esc(ui("noDb"))}</span>`}</div>
         <div class="panel-body">
           <div class="resolved">${esc(data.database_path || "")}</div>
-          ${data.current_live ? `<pre class="readonly-json">${esc(JSON.stringify(data.current_live, null, 2))}</pre>` : `<div class="empty">${esc(ui("noLiveRow"))}</div>`}
         </div>
       </section>
       <section class="panel">
         <div class="panel-head"><h2>${esc(ui("recentOfficial"))}</h2></div>
         <div class="panel-body">${renderRecent(data.recent || [])}</div>
       </section>
+    </div>
+  `;
+  bindHomeControls();
+}
+
+function renderHomeToolbar(session) {
+  const watcherRunning = Boolean(session.watcher_running);
+  const overlayRunning = Boolean(session.overlay_running);
+  return `
+    <button class="button" type="button" id="home-refresh">${esc(ui("refresh"))}</button>
+    <button class="button ${watcherRunning ? "danger" : "primary"}" type="button" data-live-control="watcher" data-live-action="${watcherRunning ? "stop" : "start"}">
+      ${esc(ui(watcherRunning ? "stopWatcher" : "startWatcher"))}
+    </button>
+    <button class="button ${overlayRunning ? "danger" : "primary"}" type="button" data-live-control="overlay" data-live-action="${overlayRunning ? "stop" : "start"}">
+      ${esc(ui(overlayRunning ? "stopOverlay" : "startOverlay"))}
+    </button>
+  `;
+}
+
+function bindHomeControls() {
+  const refresh = document.getElementById("home-refresh");
+  if (refresh) refresh.onclick = renderHome;
+  for (const button of document.querySelectorAll("[data-live-control]")) {
+    button.onclick = () => controlLive(button.dataset.liveControl, button.dataset.liveAction);
+  }
+}
+
+async function controlLive(kind, action) {
+  const controls = [...document.querySelectorAll("[data-live-control], #home-refresh")];
+  for (const control of controls) control.disabled = true;
+  showMessage("home-message", "");
+  try {
+    await api(`/api/live/${kind}`, {
+      method: "POST",
+      body: { action }
+    });
+    await renderHome();
+  } catch (error) {
+    showMessage("home-message", `${ui("liveControlFailed")}: ${error.message}`, "error");
+  } finally {
+    for (const control of controls) control.disabled = false;
+  }
+}
+
+function renderLiveStatus(session) {
+  const stats = session.last_watcher_stats;
+  return `
+    <section class="panel">
+      <div class="panel-head"><h2>${esc(ui("liveStatus"))}</h2></div>
+      <div class="panel-body">
+        <div class="status-grid">
+          ${statusItem(ui("watcher"), Boolean(session.watcher_running))}
+          ${statusItem(ui("overlay"), Boolean(session.overlay_running))}
+        </div>
+        ${session.last_error ? `<div class="message show error"><strong>${esc(ui("lastRuntimeError"))}</strong><br>${esc(session.last_error)}</div>` : ""}
+        ${stats ? `<div><div class="resolved">${esc(ui("lastWatcherStats"))}</div><pre class="readonly-json">${esc(JSON.stringify(stats, null, 2))}</pre></div>` : `<div class="empty">${esc(ui("noWatcherStats"))}</div>`}
+      </div>
+    </section>
+  `;
+}
+
+function statusItem(label, running) {
+  return `
+    <div class="status-item">
+      <span>${esc(label)}</span>
+      <strong><span class="pill ${running ? "green" : "orange"}">${esc(ui(running ? "running" : "stopped"))}</span></strong>
     </div>
   `;
 }

@@ -1,11 +1,13 @@
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from dancing_log.app_paths import DEFAULT_CONFIG
 from dancing_log.webui_server import (
     FOS_FILEMUSTEXIST,
     FOS_FORCEFILESYSTEM,
@@ -20,6 +22,15 @@ from dancing_log.webui_server import (
     load_insights_snapshot,
     load_timeline_snapshot,
 )
+
+
+def wait_for_call_count(calls: list[dict], count: int) -> None:
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        if len(calls) >= count:
+            return
+        time.sleep(0.01)
+    raise AssertionError(f"expected {count} watcher calls, got {len(calls)}")
 
 
 class WebUiServerTest(unittest.TestCase):
@@ -244,6 +255,119 @@ class WebUiServerTest(unittest.TestCase):
 
                 saved = json.loads(config_path.read_text(encoding="utf-8"))
                 self.assertEqual(saved["app_db"], "data/original.sqlite3")
+            finally:
+                server.stop()
+
+    def test_webui_live_controls_use_session_runtime(self):
+        calls: list[dict] = []
+
+        def fake_watch_vrc_logs(**kwargs):
+            calls.append(kwargs)
+            kwargs["stop_event"].wait(timeout=2.0)
+            return {"overlay_port": kwargs["overlay_port"]}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "logs").mkdir()
+            config = dict(DEFAULT_CONFIG)
+            config["vrc_log_dir"] = str(root / "logs")
+            config["overlay_port"] = 9911
+            config_path = root / "config" / "dancing-log.local.json"
+            config_path.parent.mkdir()
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+
+            server = WebUiServer(
+                port=0,
+                app_root=root,
+                watch_vrc_logs_func=fake_watch_vrc_logs,
+            )
+            server.start()
+            try:
+                token = self._csrf_token(server)
+                with urlopen(f"{server.url}api/summary", timeout=2) as response:
+                    summary = json.loads(response.read().decode("utf-8"))
+                self.assertFalse(summary["session"]["watcher_running"])
+                self.assertFalse(summary["session"]["overlay_running"])
+
+                watcher_start = self._json_request(
+                    server,
+                    "api/live/watcher",
+                    {"action": "start"},
+                    token=token,
+                    origin=server.url.rstrip("/"),
+                )
+                with urlopen(watcher_start, timeout=2) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+                wait_for_call_count(calls, 1)
+                self.assertTrue(result["session"]["watcher_running"])
+                self.assertFalse(result["session"]["overlay_running"])
+                self.assertTrue(calls[-1]["live_db"])
+                self.assertIsNone(calls[-1]["overlay_port"])
+
+                overlay_start = self._json_request(
+                    server,
+                    "api/live/overlay",
+                    {"action": "start"},
+                    token=token,
+                    origin=server.url.rstrip("/"),
+                )
+                with urlopen(overlay_start, timeout=2) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+                wait_for_call_count(calls, 2)
+                self.assertTrue(result["session"]["watcher_running"])
+                self.assertTrue(result["session"]["overlay_running"])
+                self.assertEqual(calls[-1]["overlay_port"], 9911)
+
+                overlay_stop = self._json_request(
+                    server,
+                    "api/live/overlay",
+                    {"action": "stop"},
+                    token=token,
+                    origin=server.url.rstrip("/"),
+                )
+                with urlopen(overlay_stop, timeout=2) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+                wait_for_call_count(calls, 3)
+                self.assertTrue(result["session"]["watcher_running"])
+                self.assertFalse(result["session"]["overlay_running"])
+                self.assertIsNone(calls[-1]["overlay_port"])
+
+                watcher_stop = self._json_request(
+                    server,
+                    "api/live/watcher",
+                    {"action": "stop"},
+                    token=token,
+                    origin=server.url.rstrip("/"),
+                )
+                with urlopen(watcher_stop, timeout=2) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+                self.assertFalse(result["session"]["watcher_running"])
+                self.assertFalse(result["session"]["overlay_running"])
+
+                with urlopen(f"{server.url}api/summary", timeout=2) as response:
+                    summary = json.loads(response.read().decode("utf-8"))
+                self.assertEqual(
+                    summary["session"]["last_watcher_stats"],
+                    {"overlay_port": None},
+                )
+            finally:
+                server.stop()
+
+    def test_webui_live_controls_reject_unknown_actions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server = WebUiServer(port=0, app_root=tmp, watch_vrc_logs_func=lambda **_kwargs: None)
+            server.start()
+            try:
+                token = self._csrf_token(server)
+                request = self._json_request(
+                    server,
+                    "api/live/watcher",
+                    {"action": "toggle"},
+                    token=token,
+                    origin=server.url.rstrip("/"),
+                )
+                body = self._http_error_json(request, 400)
+                self.assertEqual(body["error"], "action must be start or stop")
             finally:
                 server.stop()
 
