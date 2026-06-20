@@ -5,6 +5,12 @@ import subprocess
 import sys
 
 from dancing_log.app_paths import AppRuntimeConfig, resolve_app_path
+from dancing_log.data_operations import (
+    DEFAULT_QUEUED_SYSTEM,
+    DataOperationError,
+    operation_cli_descriptions,
+    run_data_operation,
+)
 from dancing_log.local_config import CONFIG_FILE
 
 
@@ -35,16 +41,17 @@ def _command_prefix() -> str:
     return "uv run python main.py"
 
 
-def _pick_value(cli_value, config_value):
-    return cli_value if cli_value is not None else config_value
-
-
 def _configured_path(cli_value, config: AppRuntimeConfig, key: str) -> Path:
     return config.path(key, override=cli_value)
 
 
 def _configured_db_path(cli_value, config: AppRuntimeConfig) -> Path:
     return _configured_path(cli_value, config, "app_db")
+
+
+def _print_data_operation_result(result) -> None:
+    for line in result.lines:
+        print(line)
 
 
 def _resolve_recording_path(recording, recordings_dir, app_root=None) -> Path:
@@ -67,7 +74,6 @@ def cmd_sync_wanna():
     """Sync WannaDance tracks into SQLite."""
     import argparse
 
-    config = _get_runtime_config()
     parser = argparse.ArgumentParser(description="Sync WannaDance catalog into SQLite")
     parser.add_argument("--app-db", default=None, help="SQLite database path")
     parser.add_argument("--cache-dir", default=None, help="Local wannadance-song cache directory")
@@ -76,27 +82,15 @@ def cmd_sync_wanna():
     parser.add_argument("--no-files", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(sys.argv[2:])
 
-    db_path = _configured_db_path(args.app_db, config)
-    cache_dir = config.optional_path("wanna_cache_dir", override=args.cache_dir)
-
-    from dancing_log.wanna_catalog import sync_wanna_catalog
-
-    stats = sync_wanna_catalog(
-        db_path=db_path,
-        cache_dir=cache_dir,
-        use_api=not args.offline,
+    result = run_data_operation(
+        "sync-wanna",
+        config=_get_runtime_config(),
+        app_db=args.app_db,
+        cache_dir=args.cache_dir,
+        offline=args.offline,
         write_files=args.write_files and not args.no_files,
     )
-    source = "API + cache" if stats.used_api else "cache only"
-    print("WannaDance catalog sync complete")
-    print(f"  source: {source}")
-    print(f"  API songs: {stats.api_count}")
-    print(f"  cached songs: {stats.cache_count}")
-    print(f"  database tracks before: {stats.db_before}")
-    print(f"  database tracks after: {stats.db_after}")
-    print(f"  inserted: {stats.inserted}")
-    print(f"  updated/touched: {stats.updated}")
-    print(f"  catalog rows without local cache: {stats.missing_in_cache}")
+    _print_data_operation_result(result)
 
 
 def cmd_recommend():
@@ -285,7 +279,6 @@ def cmd_import_vrcx():
     """Import historical playback rows from VRCX SQLite."""
     import argparse
 
-    config = _get_runtime_config()
     parser = argparse.ArgumentParser(description="Import historical playback rows from VRCX SQLite")
     parser.add_argument(
         "vrcx_db",
@@ -309,64 +302,44 @@ def cmd_import_vrcx():
     parser.add_argument("--dry-run", action="store_true", help="Scan only, do not write to the app database")
     args = parser.parse_args(sys.argv[2:])
 
-    vrcx_db_path = config.optional_path("vrcx_db_path", override=args.vrcx_db)
-    self_user_id = _pick_value(args.self_user_id, config.self_user_id)
-    db_path = _configured_db_path(args.app_db, config)
-    if not vrcx_db_path:
-        parser.error(
-            f"Missing VRCX database path. Pass it explicitly or set `vrcx_db_path` in {CONFIG_FILE}."
+    try:
+        result = run_data_operation(
+            "import-vrcx",
+            config=_get_runtime_config(),
+            vrcx_db=args.vrcx_db,
+            app_db=args.app_db,
+            self_user_id=args.self_user_id,
+            blank_requester_source=args.blank_requester_source,
+            limit=args.limit,
+            dry_run=args.dry_run,
         )
-
-    from dancing_log.vrcx_importer import import_vrcx_database
-
-    stats = import_vrcx_database(
-        vrcx_db_path=vrcx_db_path,
-        app_db_path=db_path,
-        self_user_id=self_user_id,
-        blank_requester_source=args.blank_requester_source,
-        limit=args.limit,
-        dry_run=args.dry_run,
-    )
-
-    print("VRCX dry run complete" if args.dry_run else "VRCX import complete")
-    print(f"  scanned candidate rows: {stats.scanned}")
-    print(f"  candidate events: {stats.candidate_events}")
-    print(f"  skipped unsupported URLs: {stats.skipped_unsupported}")
-    if not args.dry_run:
-        print(f"  staging inserts/updates: {stats.staging_changed}")
-        print(f"  dance_events inserts/updates: {stats.dance_events_changed}")
+    except DataOperationError as exc:
+        parser.error(str(exc))
+    _print_data_operation_result(result)
 
 
 def cmd_sync_queued_self():
     """Overlay queued-self manifests onto existing events."""
     import argparse
 
-    config = _get_runtime_config()
     parser = argparse.ArgumentParser(description="Sync queued_self Markdown manifests")
     parser.add_argument("--app-db", default=None, help="SQLite path")
     parser.add_argument("--manifest-dir", default=None, help="Manifest directory")
-    parser.add_argument("--system", required=True, help="Dance system key for bare manifest ids")
-    args = parser.parse_args(sys.argv[2:])
-    db_path = _configured_db_path(args.app_db, config)
-    manifest_dir = _configured_path(args.manifest_dir, config, "queued_self_dir")
-
-    from dancing_log.queued_self_importer import sync_queued_self_manifests
-
-    stats = sync_queued_self_manifests(
-        app_db_path=db_path,
-        manifest_dir=manifest_dir,
-        system_key=args.system,
+    parser.add_argument(
+        "--system",
+        default=DEFAULT_QUEUED_SYSTEM,
+        help="Dance system key for bare manifest ids",
     )
+    args = parser.parse_args(sys.argv[2:])
 
-    print("queued_self sync complete")
-    print(f"  scanned files: {stats.files_scanned}")
-    print(f"  manifest entries: {stats.entries_seen}")
-    print(f"  entries with track ref: {stats.entries_with_track_ref}")
-    print(f"  entries without track ref: {stats.entries_without_track_ref}")
-    print(f"  matched entries: {stats.matched_entries}")
-    print(f"  unmatched entries: {stats.unmatched_entries}")
-    print(f"  existing events updated: {stats.existing_events_updated}")
-    print(f"  stale manifest events deleted: {stats.stale_manifest_events_deleted}")
+    result = run_data_operation(
+        "sync-queued-self",
+        config=_get_runtime_config(),
+        app_db=args.app_db,
+        manifest_dir=args.manifest_dir,
+        system=args.system,
+    )
+    _print_data_operation_result(result)
 
 
 def cmd_sample_recording_frames():
@@ -574,48 +547,19 @@ def cmd_rebuild_data():
     )
     args = parser.parse_args(sys.argv[2:])
 
-    if not args.archive_existing:
-        parser.error("--archive-existing is required to avoid accidental data loss")
-
-    config = _get_runtime_config()
-    db_path = _configured_db_path(args.app_db, config)
-    queued_self_dir = _configured_path(None, config, "queued_self_dir")
-    from dancing_log.queued_self_importer import sync_queued_self_manifests
-    from dancing_log.rebuild import archive_existing_data
-    from dancing_log.vrcx_importer import import_vrcx_database
-    from dancing_log.wanna_catalog import sync_wanna_catalog
-
-    archive = archive_existing_data(config.paths.data_dir, app_db_path=db_path)
-    print(f"Archived generated data to: {archive.archive_dir}")
-    for path in archive.archived:
-        print(f"  {path.name}")
-
-    sync_stats = sync_wanna_catalog(db_path=db_path, use_api=not args.offline)
-    print("WannaDance catalog sync complete")
-    print(f"  database tracks after: {sync_stats.db_after}")
-
-    vrcx_db_path = config.vrcx_db_path
-    if vrcx_db_path:
-        import_stats = import_vrcx_database(
-            vrcx_db_path=vrcx_db_path,
-            app_db_path=db_path,
-            self_user_id=config.self_user_id,
-            limit=args.limit_vrcx,
+    try:
+        result = run_data_operation(
+            "rebuild-data",
+            config=_get_runtime_config(),
+            archive_existing=args.archive_existing,
+            offline=args.offline,
+            app_db=args.app_db,
+            limit_vrcx=args.limit_vrcx,
+            queued_system=args.queued_system,
         )
-        print("VRCX import complete")
-        print(f"  dance_events inserts/updates: {import_stats.dance_events_changed}")
-        print(f"  skipped unsupported URLs: {import_stats.skipped_unsupported}")
-    else:
-        print("VRCX import skipped: vrcx_db_path is not configured")
-
-    queued_stats = sync_queued_self_manifests(
-        app_db_path=db_path,
-        manifest_dir=queued_self_dir,
-        system_key=args.queued_system,
-    )
-    print("queued_self sync complete")
-    print(f"  matched entries: {queued_stats.matched_entries}")
-    print(f"  unmatched entries: {queued_stats.unmatched_entries}")
+    except DataOperationError as exc:
+        parser.error(str(exc))
+    _print_data_operation_result(result)
 
 
 def main():
@@ -623,18 +567,19 @@ def main():
         run_desktop_tray_entry()
         return
 
+    operation_descriptions = operation_cli_descriptions()
     user_script_commands = {}
     user_builtin_commands = {
-        "sync-wanna": ("Sync WannaDance tracks into SQLite", cmd_sync_wanna),
+        "sync-wanna": (operation_descriptions["sync-wanna"], cmd_sync_wanna),
         "recommend": ("Generate daily recommendation playlist", cmd_recommend),
         "day": ("Print official dance history for one local day", cmd_day),
         "log": ("Append one dance log record", cmd_log),
         "import-favorites": ("Import favorite track flags from text", cmd_import_favorites),
-        "import-vrcx": ("Import historical playback rows from VRCX SQLite", cmd_import_vrcx),
-        "sync-queued-self": ("Sync queued_self manifests", cmd_sync_queued_self),
+        "import-vrcx": (operation_descriptions["import-vrcx"], cmd_import_vrcx),
+        "sync-queued-self": (operation_descriptions["sync-queued-self"], cmd_sync_queued_self),
         "watch-vrc-log": ("Capture live VRChat output logs", cmd_watch_vrc_log),
         "webui": ("Start the local Web UI", cmd_webui),
-        "rebuild-data": ("Archive and rebuild generated local data", cmd_rebuild_data),
+        "rebuild-data": (operation_descriptions["rebuild-data"], cmd_rebuild_data),
     }
     research_script_commands = {}
     if not _is_frozen():

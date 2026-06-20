@@ -30,6 +30,7 @@ from dancing_log.app_paths import (
     save_app_config,
     validate_supported_config,
 )
+from dancing_log.data_operations import operation_catalog_snapshot
 from dancing_log.live_app_session import (
     LiveAppSessionRuntime,
     LiveAppSessionStatus,
@@ -487,34 +488,7 @@ def load_insights_snapshot(runtime: WebUiRuntime) -> dict:
 
 
 def load_operations_snapshot() -> dict:
-    return {
-        "operations": [
-            {
-                "key": "import-vrcx",
-                "title": "Import VRCX history",
-                "command": "uv run python main.py import-vrcx",
-                "risk": "writes playback history",
-            },
-            {
-                "key": "sync-wanna",
-                "title": "Sync WannaDance catalog",
-                "command": "uv run python main.py sync-wanna",
-                "risk": "updates catalog rows",
-            },
-            {
-                "key": "sync-queued-self",
-                "title": "Sync queued-self manifests",
-                "command": "uv run python main.py sync-queued-self --system wannadance",
-                "risk": "updates planned-list derived rows",
-            },
-            {
-                "key": "rebuild-data",
-                "title": "Rebuild generated data",
-                "command": "uv run python main.py rebuild-data --archive-existing",
-                "risk": "archives and recreates generated database state",
-            },
-        ]
-    }
+    return operation_catalog_snapshot()
 
 
 def _field_snapshot(field: dict[str, Any], value: Any, runtime: WebUiRuntime) -> dict:
@@ -1433,12 +1407,6 @@ const FIELD_TEXT = {
   auto_start_overlay: { zh: { label: "自动启动 overlay", group: "运行默认值", summary: "启用后会同步启用 watcher 自动启动。" } },
   overlay_port: { zh: { label: "Overlay 端口", group: "运行默认值", summary: "本地 OBS overlay 端口。" } }
 };
-const OPERATION_TEXT = {
-  "import-vrcx": { zh: { title: "导入 VRCX 历史", risk: "写入播放历史" } },
-  "sync-wanna": { zh: { title: "同步 WannaDance 目录", risk: "更新目录记录" } },
-  "sync-queued-self": { zh: { title: "同步自选队列清单", risk: "更新清单派生记录" } },
-  "rebuild-data": { zh: { title: "重建生成数据", risk: "归档并重建生成的数据库状态" } }
-};
 const state = {
   active: "settings",
   lang: initialLanguage(),
@@ -1490,7 +1458,7 @@ function fieldText(field, part) {
 }
 
 function operationText(operation, part) {
-  return OPERATION_TEXT[operation.key]?.[state.lang]?.[part] || operation[part] || "";
+  return operation.text?.[state.lang]?.[part] || operation[part] || "";
 }
 
 function pickerKind(kind) {

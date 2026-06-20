@@ -8,6 +8,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from dancing_log.app_paths import DEFAULT_CONFIG
+from dancing_log.data_operations import operation_catalog_snapshot
 from dancing_log.webui_server import (
     FOS_FILEMUSTEXIST,
     FOS_FORCEFILESYSTEM,
@@ -20,6 +21,7 @@ from dancing_log.webui_server import (
     load_catalog_snapshot,
     load_config_snapshot,
     load_insights_snapshot,
+    load_operations_snapshot,
     load_timeline_snapshot,
 )
 
@@ -434,6 +436,14 @@ class WebUiServerTest(unittest.TestCase):
 
             self.assertEqual(snapshot["config"]["app_db"], "data/legacy.sqlite3")
             self.assertFalse(new_path.exists())
+
+    def test_webui_operations_snapshot_uses_shared_catalog(self):
+        snapshot = load_operations_snapshot()
+
+        self.assertEqual(snapshot, operation_catalog_snapshot())
+        operations = {operation["key"]: operation for operation in snapshot["operations"]}
+        self.assertEqual(operations["rebuild-data"]["parameters"][0]["key"], "archive_existing")
+        self.assertEqual(operations["sync-wanna"]["text"]["zh"]["risk"], "更新目录记录")
 
     def test_windows_picker_options_use_ifileopendialog_modes(self):
         directory_options = _file_dialog_options("directory", 0)
