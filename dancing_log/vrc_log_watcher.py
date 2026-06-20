@@ -18,10 +18,10 @@ from dancing_log.live_playback_folding import (
     PlaybackEventBuilder,
     playback_delay_metrics,
 )
+from dancing_log.live_playback_runtime import LivePlaybackRuntime
 from dancing_log.live_playback_settlement import (
     COMPLETION_EPSILON_SECONDS,
     PROMOTION_COMPLETION_RATIO,
-    decide_live_playback_settlement,
 )
 from dancing_log.vrc_log_utils import (
     extract_timestamp,
@@ -226,306 +226,6 @@ class _SourceLogMirror:
         return self._files[key]
 
 
-class _LivePlaybackRuntime:
-    """Shared live DB and overlay side effects for tailing and offline replay."""
-
-    def __init__(
-        self,
-        *,
-        stats: WatchStats,
-        app_db_path: Path | str | None,
-        live_db: bool,
-        promote_live: bool,
-        overlay_port: int | None,
-    ) -> None:
-        self.stats = stats
-        self.promote_live = promote_live
-        self.app_conn = None
-        self.overlay_server = None
-        self.playback_builder = None
-        self.live_events: dict[str, dict] = {}
-        self.finalized_live_keys: set[str] = set()
-        self.promoted_keys: set[str] = set()
-        self.current_room_name: str | None = None
-
-        if live_db or promote_live:
-            from dancing_log.storage import (
-                connect_db,
-                mark_live_playback_event_completed,
-                mark_live_playback_event_interrupted,
-                make_live_playback_event_key,
-                promote_live_playback_event,
-                upsert_live_playback_event,
-            )
-
-            self.app_conn = connect_db(app_db_path)
-            self.mark_live_playback_event_completed = mark_live_playback_event_completed
-            self.mark_live_playback_event_interrupted = mark_live_playback_event_interrupted
-            self.make_live_playback_event_key = make_live_playback_event_key
-            self.promote_live_playback_event = promote_live_playback_event
-            self.upsert_live_playback_event = upsert_live_playback_event
-        else:
-            self.mark_live_playback_event_completed = None
-            self.mark_live_playback_event_interrupted = None
-            self.make_live_playback_event_key = None
-            self.promote_live_playback_event = None
-            self.upsert_live_playback_event = None
-
-        if overlay_port is not None:
-            from dancing_log.overlay_server import OverlayServer
-
-            self.overlay_server = OverlayServer(port=overlay_port)
-            self.overlay_server.start()
-            self.stats.overlay_url = self.overlay_server.url
-
-    def close(self) -> None:
-        if self.overlay_server is not None:
-            self.overlay_server.stop()
-            self.overlay_server = None
-        if self.app_conn is not None:
-            self.app_conn.close()
-            self.app_conn = None
-
-    def is_stale_observation(self, observed_at: str | None) -> bool:
-        return timestamp_before(observed_at, self.stats.last_log_timestamp)
-
-    def promote_completed_event(self, live_event_key: str) -> None:
-        if not self.promote_live or self.app_conn is None:
-            return
-        dance_event_id = self.promote_live_playback_event(self.app_conn, live_event_key)
-        if dance_event_id is not None and live_event_key not in self.promoted_keys:
-            self.promoted_keys.add(live_event_key)
-            self.stats.live_promotions += 1
-
-    def publish_live_settlement(
-        self,
-        event: dict,
-        *,
-        completion_status: str,
-        observed_at: str,
-        played_seconds: float | None,
-        required_played_seconds: float | None,
-        reason: str,
-    ) -> None:
-        event["completion_status"] = completion_status
-        event["completion_reason"] = reason
-        event["played_seconds"] = played_seconds
-        event["required_played_seconds"] = required_played_seconds
-        if completion_status == "completed":
-            event["completed_at"] = observed_at
-            event["interrupted_at"] = None
-        else:
-            event["completed_at"] = None
-            event["interrupted_at"] = observed_at
-        if self.overlay_server is not None:
-            self.overlay_server.publish(event)
-
-    def settle_live_event(
-        self,
-        event: dict,
-        *,
-        observed_at: str,
-        interrupt_if_incomplete: bool,
-        completion_reason: str,
-        interrupt_reason: str,
-    ) -> bool:
-        if self.app_conn is None:
-            return False
-        live_event_key = event.get("live_event_key")
-        if not live_event_key or live_event_key in self.finalized_live_keys:
-            return False
-
-        settlement = decide_live_playback_settlement(
-            event,
-            observed_at=observed_at,
-            interrupt_if_incomplete=interrupt_if_incomplete,
-            completion_reason=completion_reason,
-            interrupt_reason=interrupt_reason,
-        )
-        if settlement is None:
-            return False
-
-        if settlement.completion_status == "completed":
-            changed = self.mark_live_playback_event_completed(
-                self.app_conn,
-                live_event_key,
-                completed_at=settlement.observed_at,
-                played_seconds=settlement.played_seconds,
-                required_played_seconds=settlement.required_played_seconds,
-                reason=settlement.reason,
-            )
-            self.promote_completed_event(live_event_key)
-        else:
-            changed = self.mark_live_playback_event_interrupted(
-                self.app_conn,
-                live_event_key,
-                interrupted_at=settlement.observed_at,
-                played_seconds=settlement.played_seconds,
-                required_played_seconds=settlement.required_played_seconds,
-                reason=settlement.reason,
-            )
-        self.finalized_live_keys.add(live_event_key)
-        if changed:
-            self.publish_live_settlement(
-                event,
-                completion_status=settlement.completion_status,
-                observed_at=settlement.observed_at,
-                played_seconds=settlement.played_seconds,
-                required_played_seconds=settlement.required_played_seconds,
-                reason=settlement.reason,
-            )
-        return changed
-
-    def settle_pending_events(
-        self,
-        *,
-        observed_at: str,
-        current_live_event_key: str | None = None,
-        interrupt_others: bool = False,
-        interrupt_started_others: bool = False,
-        completion_reason: str = "observed_completion_threshold",
-        interrupt_reason: str = "superseded_before_completion",
-    ) -> bool:
-        if self.is_stale_observation(observed_at):
-            return False
-        changed = False
-        for live_event_key, event in list(self.live_events.items()):
-            if live_event_key == current_live_event_key:
-                continue
-            interrupt_if_incomplete = interrupt_others or (
-                interrupt_started_others and bool(event.get("actual_play_at"))
-            )
-            changed = (
-                self.settle_live_event(
-                    event,
-                    observed_at=observed_at,
-                    interrupt_if_incomplete=interrupt_if_incomplete,
-                    completion_reason=completion_reason,
-                    interrupt_reason=interrupt_reason,
-                )
-                or changed
-            )
-        return changed
-
-    def handle_log_progress(self, timestamp: str | None) -> None:
-        if not timestamp:
-            return
-        self.stats.last_log_timestamp = timestamp
-        if self.app_conn is None:
-            return
-        try:
-            if self.settle_pending_events(observed_at=timestamp):
-                self.app_conn.commit()
-        except Exception as exc:
-            _record_error(self.stats.errors, f"live completion check failed: {exc}")
-            self.app_conn.rollback()
-
-    def handle_playback_update(self, event: dict) -> None:
-        update = dict(event)
-        update["live_session_id"] = self.stats.live_session_id
-        if self.app_conn is not None:
-            live_event_key = self.make_live_playback_event_key(
-                self.stats.live_session_id,
-                str(event["event_key"]),
-            )
-            update["live_event_key"] = live_event_key
-            try:
-                self.upsert_live_playback_event(
-                    self.app_conn,
-                    event,
-                    session_id=self.stats.live_session_id,
-                    event_key=live_event_key,
-                )
-                self.stats.live_db_updates += 1
-                existing_update = self.live_events.get(live_event_key)
-                if existing_update is not None and existing_update.get("completion_status"):
-                    for field_name in (
-                        "completion_status",
-                        "completion_reason",
-                        "completed_at",
-                        "interrupted_at",
-                        "played_seconds",
-                        "required_played_seconds",
-                    ):
-                        update[field_name] = existing_update.get(field_name)
-                self.live_events[live_event_key] = update
-                actual_observed_at = event.get("actual_play_at")
-                if actual_observed_at:
-                    self.settle_pending_events(
-                        observed_at=actual_observed_at,
-                        current_live_event_key=live_event_key,
-                        interrupt_others=True,
-                    )
-                else:
-                    first_observed_at = event.get("first_seen_at")
-                    if first_observed_at:
-                        self.settle_pending_events(
-                            observed_at=first_observed_at,
-                            current_live_event_key=live_event_key,
-                            interrupt_started_others=True,
-                        )
-                current_observed_at = event.get("last_seen_at") or actual_observed_at
-                if current_observed_at and not self.is_stale_observation(current_observed_at):
-                    self.settle_live_event(
-                        update,
-                        observed_at=current_observed_at,
-                        interrupt_if_incomplete=False,
-                        completion_reason="observed_completion_threshold",
-                        interrupt_reason="superseded_before_completion",
-                    )
-                self.app_conn.commit()
-            except Exception as exc:
-                _record_error(self.stats.errors, f"live DB update failed: {exc}")
-                self.app_conn.rollback()
-        if self.overlay_server is not None:
-            self.overlay_server.publish(update)
-
-    def handle_lifecycle_event(self, event: dict) -> None:
-        event_type = event.get("event_type")
-        if event.get("room_name"):
-            self.current_room_name = event.get("room_name")
-
-        if event_type == "room-entering":
-            if self.overlay_server is not None:
-                self.overlay_server.publish_status(event)
-            return
-
-        if event_type not in {"room-left", "application-quit", "video-shutdown"}:
-            return
-
-        if self.playback_builder is not None:
-            self.playback_builder.close_open_events()
-
-        observed_at = event.get("observed_at") or event.get("timestamp") or self.stats.last_log_timestamp
-        interrupt_reason = {
-            "room-left": "room_left",
-            "application-quit": "application_quit",
-            "video-shutdown": "application_quit",
-        }.get(str(event_type), "playback_stopped")
-
-        if observed_at and self.app_conn is not None:
-            try:
-                if self.settle_pending_events(
-                    observed_at=observed_at,
-                    interrupt_others=True,
-                    completion_reason="observed_completion_threshold",
-                    interrupt_reason=interrupt_reason,
-                ):
-                    self.app_conn.commit()
-            except Exception as exc:
-                _record_error(self.stats.errors, f"live lifecycle settlement failed: {exc}")
-                self.app_conn.rollback()
-
-        if self.overlay_server is not None:
-            status = dict(event)
-            status["room_name"] = status.get("room_name") or self.current_room_name
-            status["clear_current"] = True
-            self.overlay_server.publish_status(status)
-
-        if event_type in {"room-left", "application-quit"}:
-            self.current_room_name = None
-
-
 def default_vrc_log_dir() -> Path:
     """Return VRChat's default Windows output log directory."""
     local_appdata = os.environ.get("LOCALAPPDATA")
@@ -578,15 +278,14 @@ def watch_vrc_logs(
     current_handle = None
     current_line_number = 0
     idle_since = time.monotonic()
-    runtime = _LivePlaybackRuntime(
+    runtime = LivePlaybackRuntime(
         stats=stats,
         app_db_path=app_db_path,
         live_db=live_db,
         promote_live=promote_live,
         overlay_port=overlay_port,
     )
-    playback_builder = PlaybackEventBuilder(update_callback=runtime.handle_playback_update)
-    runtime.playback_builder = playback_builder
+    playback_builder = runtime.create_playback_builder()
 
     raw_handle = None
     candidates_handle = None
@@ -667,8 +366,7 @@ def watch_vrc_logs(
                     stats=stats,
                     playback_builder=playback_builder,
                     line_number=current_line_number,
-                    line_timestamp_callback=runtime.handle_log_progress,
-                    lifecycle_event_callback=runtime.handle_lifecycle_event,
+                    lifecycle_event_callback=runtime.observe_lifecycle_event,
                 )
 
                 try:
@@ -741,15 +439,14 @@ def replay_vrc_log_files(
     stats = WatchStats(session_dir=session_dir, started_at=started_at or _utc_now())
     stats.live_session_id = live_session_id or _live_session_id(session_dir, stats.started_at)
     stats.replayed_files = [str(path) for path in replay_files]
-    runtime = _LivePlaybackRuntime(
+    runtime = LivePlaybackRuntime(
         stats=stats,
         app_db_path=app_db_path,
         live_db=live_db,
         promote_live=promote_live,
         overlay_port=None,
     )
-    playback_builder = PlaybackEventBuilder(update_callback=runtime.handle_playback_update)
-    runtime.playback_builder = playback_builder
+    playback_builder = runtime.create_playback_builder()
 
     raw_handle = None
     candidates_handle = None
@@ -788,8 +485,7 @@ def replay_vrc_log_files(
                     stats=stats,
                     playback_builder=playback_builder,
                     line_number=0,
-                    line_timestamp_callback=runtime.handle_log_progress,
-                    lifecycle_event_callback=runtime.handle_lifecycle_event,
+                    lifecycle_event_callback=runtime.observe_lifecycle_event,
                 )
     finally:
         stats.ended_at = _utc_now()
@@ -816,7 +512,6 @@ def _drain_handle(
     stats: WatchStats,
     playback_builder: PlaybackEventBuilder,
     line_number: int,
-    line_timestamp_callback: Callable[[str | None], None] | None = None,
     lifecycle_event_callback: Callable[[dict], None] | None = None,
 ) -> tuple[bool, int]:
     made_progress = False
@@ -837,8 +532,14 @@ def _drain_handle(
             stats.last_log_timestamp = timestamp
         elif timestamp:
             timestamp_for_settlement = None
-        if line_timestamp_callback is not None:
-            line_timestamp_callback(timestamp_for_settlement)
+        if timestamp_for_settlement is not None and lifecycle_event_callback is not None:
+            lifecycle_event_callback(
+                {
+                    "event_type": "log-progress",
+                    "observed_at": timestamp_for_settlement,
+                    "timestamp": timestamp_for_settlement,
+                }
+            )
 
         if raw_handle is not None:
             raw_handle.write(line)

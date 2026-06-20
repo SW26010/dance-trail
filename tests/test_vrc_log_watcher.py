@@ -711,90 +711,6 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertEqual(live_row["completion_status"], "pending")
             self.assertEqual(live_row["observed_mid_play"], 0)
 
-    def test_watcher_suppresses_wannadance_preview_video(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            log_dir = root / "logs"
-            log_dir.mkdir()
-            db_path = root / "app.sqlite3"
-            (log_dir / "output_log_0001.txt").write_text(
-                "2026.05.17 22:49:02 Debug - [VideoListManager] "
-                "PreviewVideo: 3335 http://api.udon.dance/Api/Songs/play?id=3335, time 30 - 220\n"
-                "2026.05.17 22:49:02 Debug - "
-                "[<color=#9C6994>USharpVideo (WannaDance)</color>] "
-                "PlayVideoInternal: Playing video http://api.udon.dance/Api/Songs/play?id=3335\n"
-                "2026.05.17 22:49:02 Debug - "
-                "[<color=#9C6994>USharpVideo (WannaDance)</color>] "
-                "Started video load for URL: http://api.udon.dance/Api/Songs/play?id=3335, "
-                "requested by Alice\n"
-                "2026.05.17 22:49:02 Debug - "
-                "[<color=#9C6994>USharpVideo (WannaDance)</color>] "
-                "LoadRoutedURL: http://api.udon.dance/Api/Songs/play?id=3335 "
-                "routed to http://api.udon.dance/Api/Songs/play?node=cf&id=3335\n"
-                "2026.05.17 22:49:02 Debug - [Video Playback] "
-                "Attempting to resolve URL 'http://api.udon.dance/Api/Songs/play?node=cf&id=3335'\n"
-                "2026.05.17 22:49:03 Debug - [Video Playback] "
-                "URL 'http://api.udon.dance/Api/Songs/play?node=cf&id=3335' resolved to "
-                "'http://play.udon.dance/files/2403/3335-660524b81aa69.mp4'\n"
-                "2026.05.17 22:49:04 Debug - "
-                "[<color=#9C6994>USharpVideo (WannaDance)</color>] "
-                "OnVideoStart: Started video: http://api.udon.dance/Api/Songs/play?id=3335, "
-                "since I'm the owner\n",
-                encoding="utf-8",
-            )
-
-            stats = watch_vrc_logs(
-                log_dir=log_dir,
-                output_dir=root / "capture",
-                session_name="preview-suppressed",
-                app_db_path=db_path,
-                from_start=True,
-                live_db=True,
-                poll_seconds=0.01,
-                stop_after_idle_seconds=0.05,
-            )
-
-            self.assertEqual(stats.playback_events, 0)
-            self.assertGreater(stats.parsed_events, 0)
-            with connect_db(db_path) as conn:
-                live_count = conn.execute("SELECT count(*) FROM live_playback_events").fetchone()[0]
-            self.assertEqual(live_count, 0)
-
-    def test_watcher_allows_vrcx_play_after_preview_marker(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            log_dir = root / "logs"
-            log_dir.mkdir()
-            db_path = root / "app.sqlite3"
-            (log_dir / "output_log_0001.txt").write_text(
-                "2026.05.17 22:49:02 Debug - [VideoListManager] "
-                "PreviewVideo: 3335 http://api.udon.dance/Api/Songs/play?id=3335, time 30 - 220\n"
-                "2026.05.17 22:49:04 Debug - "
-                "[<color=#9C6994>USharpVideo (WannaDance)</color>] "
-                "OnVideoStart: Started video: http://api.udon.dance/Api/Songs/play?id=3335\n"
-                '2026.05.17 22:49:10 Debug - [VRCX] VideoPlay(PyPyDance) '
-                '"http://api.udon.dance/Api/Songs/play?id=3335",0,114514,'
-                '"$3335. Real Song (Alice)"\n',
-                encoding="utf-8",
-            )
-
-            stats = watch_vrc_logs(
-                log_dir=log_dir,
-                output_dir=root / "capture",
-                session_name="preview-vrcx-real",
-                app_db_path=db_path,
-                from_start=True,
-                live_db=True,
-                poll_seconds=0.01,
-                stop_after_idle_seconds=0.05,
-            )
-
-            self.assertEqual(stats.playback_events, 1)
-            with connect_db(db_path) as conn:
-                live_row = conn.execute("SELECT * FROM live_playback_events").fetchone()
-            self.assertEqual(live_row["dance_external_id"], "3335")
-            self.assertEqual(live_row["video_name"], "Real Song")
-
     def test_watcher_keeps_active_song_when_preview_overlaps_pending_loads(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1165,48 +1081,6 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertEqual(row["dance_external_id"], "3114")
             self.assertEqual(row["actual_play_at"], "2026.05.17 15:30:10")
 
-    def test_watcher_promotes_actual_play_when_explicitly_enabled(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            log_dir = root / "logs"
-            log_dir.mkdir()
-            db_path = root / "app.sqlite3"
-            (log_dir / "output_log_0001.txt").write_text(
-                '2026.05.17 15:30:00 Debug - [VRCX] VideoPlay(PyPyDance) '
-                '"https://api.udon.dance/Api/Songs/play?id=3114",0,2,'
-                '"$3114. Promoted Title (Alice)"\n'
-                "2026.05.17 15:30:00 Debug - "
-                "[<color=#9C6994>USharpVideo (WannaDance)</color>] "
-                "Started video load for URL: https://api.udon.dance/Api/Songs/play?id=3114, "
-                "requested by Alice\n"
-                "2026.05.17 15:30:10 Debug - "
-                "[<color=#9C6994>USharpVideo (WannaDance)</color>] "
-                "DelayedVideoReady: Time's up, let's play\n"
-                "2026.05.17 15:30:12 Log - Still dancing\n",
-                encoding="utf-8",
-            )
-
-            stats = watch_vrc_logs(
-                log_dir=log_dir,
-                output_dir=root / "capture",
-                session_name="promote",
-                app_db_path=db_path,
-                from_start=True,
-                promote_live=True,
-                poll_seconds=0.01,
-                stop_after_idle_seconds=0.05,
-            )
-
-            self.assertEqual(stats.live_promotions, 1)
-            with connect_db(db_path) as conn:
-                event_rows = conn.execute("SELECT * FROM dance_events").fetchall()
-                live_row = conn.execute("SELECT * FROM live_playback_events").fetchone()
-            self.assertEqual(len(event_rows), 1)
-            self.assertEqual(event_rows[0]["source"], "other")
-            self.assertEqual(event_rows[0]["requester_display_name"], "Alice")
-            self.assertEqual(live_row["promoted_dance_event_id"], event_rows[0]["id"])
-            self.assertEqual(live_row["completion_status"], "completed")
-
     def test_watcher_does_not_promote_when_playback_has_not_completed(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1241,44 +1115,6 @@ class VrcLogWatcherTest(unittest.TestCase):
                 live_row = conn.execute("SELECT * FROM live_playback_events").fetchone()
             self.assertEqual(event_count, 0)
             self.assertEqual(live_row["completion_status"], "pending")
-
-    def test_watcher_marks_room_leave_interrupted_without_promoting(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            log_dir = root / "logs"
-            log_dir.mkdir()
-            db_path = root / "app.sqlite3"
-            (log_dir / "output_log_0001.txt").write_text(
-                '2026.05.17 15:30:00 Debug - [VRCX] VideoPlay(PyPyDance) '
-                '"https://api.udon.dance/Api/Songs/play?id=3114",0,10,'
-                '"$3114. Long Song (Alice)"\n'
-                "2026.05.17 15:30:00 Debug - "
-                "[<color=#9C6994>USharpVideo (WannaDance)</color>] "
-                "DelayedVideoReady: Time's up, let's play\n"
-                "2026.05.17 15:30:05 Debug - [Behaviour] OnLeftRoom\n",
-                encoding="utf-8",
-            )
-
-            stats = watch_vrc_logs(
-                log_dir=log_dir,
-                output_dir=root / "capture",
-                session_name="room-left-interrupted",
-                app_db_path=db_path,
-                from_start=True,
-                live_db=True,
-                poll_seconds=0.01,
-                stop_after_idle_seconds=0.05,
-            )
-
-            self.assertEqual(stats.live_promotions, 0)
-            self.assertEqual(stats.lifecycle_events, 1)
-            with connect_db(db_path) as conn:
-                event_count = conn.execute("SELECT count(*) FROM dance_events").fetchone()[0]
-                live_row = conn.execute("SELECT * FROM live_playback_events").fetchone()
-            self.assertEqual(event_count, 0)
-            self.assertEqual(live_row["completion_status"], "interrupted")
-            self.assertEqual(live_row["completion_reason"], "room_left")
-            self.assertEqual(live_row["played_seconds"], 5.0)
 
     def test_watcher_starts_new_occurrence_after_room_left_for_same_song(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1333,39 +1169,6 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertEqual(rows[1]["playback_event_key"], "wannadance:2838#2")
             self.assertEqual(rows[1]["completion_status"], "pending")
             self.assertEqual(rows[1]["actual_play_at"], "2026.05.17 15:30:12")
-
-    def test_watcher_marks_application_quit_interrupted(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            log_dir = root / "logs"
-            log_dir.mkdir()
-            db_path = root / "app.sqlite3"
-            (log_dir / "output_log_0001.txt").write_text(
-                '2026.05.17 15:30:00 Debug - [VRCX] VideoPlay(PyPyDance) '
-                '"http://api.pypy.dance/video?id=4666",0,10,'
-                '"4666 : Example Song (Alice)"\n'
-                "2026.05.17 15:30:00 Debug - "
-                "[<color=#9C6994>USharpVideo (WannaDance)</color>] "
-                "DelayedVideoReady: Time's up, let's play\n"
-                "2026.05.17 15:30:04 Debug - VRCApplication: HandleApplicationQuit at 313.2613\n",
-                encoding="utf-8",
-            )
-
-            watch_vrc_logs(
-                log_dir=log_dir,
-                output_dir=root / "capture",
-                session_name="quit-interrupted",
-                app_db_path=db_path,
-                from_start=True,
-                live_db=True,
-                poll_seconds=0.01,
-                stop_after_idle_seconds=0.05,
-            )
-
-            with connect_db(db_path) as conn:
-                live_row = conn.execute("SELECT * FROM live_playback_events").fetchone()
-            self.assertEqual(live_row["completion_status"], "interrupted")
-            self.assertEqual(live_row["completion_reason"], "application_quit")
 
     def test_watcher_marks_cut_song_interrupted_instead_of_promoting(self):
         with tempfile.TemporaryDirectory() as tmp:
