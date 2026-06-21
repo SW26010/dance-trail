@@ -100,6 +100,26 @@ _Avoid_: internal app path, generated output path
 A candidate external source path found from the local machine environment. It may be offered to the user in Settings, but it does not become saved configuration unless the user explicitly chooses it.
 _Avoid_: saved configuration, default internal path
 
+**Automatic Source Path**:
+An External Source Path resolved from the current local machine environment when a workflow needs that source. A preview in Settings shows the current detection result only; it is not a saved value or a promise of what a later run will detect.
+_Avoid_: saved configuration, one-time setup result, internal app path
+
+**Manual Source Path**:
+An External Source Path explicitly saved by the user for cases where automatic detection is missing, wrong, or not specific enough.
+_Avoid_: detected source path, internal app path, generated output path
+
+**Self User Identity**:
+The stable VRChat user id for the local user, used to distinguish the user's own playback requests from other requester identities.
+_Avoid_: display name, source path, VRCX database path
+
+**Detected User Identity**:
+A candidate Self User Identity found from local source metadata. It may be shown with a display-name label for confirmation, but the display name is not the identity key.
+_Avoid_: saved configuration, display-name preference, source path
+
+**Manual User Identity**:
+A Self User Identity explicitly provided or corrected by the user when detection is unavailable, ambiguous, or stale.
+_Avoid_: detected source path, display name, generated default
+
 **Draft Configuration**:
 The unsaved Settings form state being edited by the user before it is written to the local app configuration file. Draft configuration can be validated and reset without changing the currently saved configuration.
 _Avoid_: active configuration, autosaved settings

@@ -11,6 +11,37 @@ Configuration precedence is:
 2. `config/dancing-log.local.json`.
 3. Auto-detected or built-in defaults.
 
+Command-line path arguments affect only the current run and take precedence over
+saved paths. Saved manual source paths take precedence over automatic source-path
+detection. Automatic detection is used only when a workflow needs an external
+source path and neither the current command nor saved configuration provides one.
+
+Automatic source-path detection applies only to external source paths. The app
+may preview the current detection result in Settings, but previews are not saved
+configuration and a later workflow may detect a different result. When detection
+finds multiple plausible candidates, the corresponding saved field remains empty
+until the user explicitly chooses one.
+
+`vrc_log_dir` defaults to automatic detection each time the watcher is enabled.
+If the resolved log directory is missing or inaccessible at watcher startup, the
+watcher should fail with a visible missing-path error rather than run without an
+input source.
+
+`vrcx_db_path` defaults to automatic detection each time a VRCX import or rebuild
+operation needs it. The primary automatic candidate is
+`%APPDATA%/VRCX/VRCX.sqlite3`, normally
+`C:/Users/<user>/AppData/Roaming/VRCX/VRCX.sqlite3`. VRCX detection is
+intentionally narrow and should not search for backups, migrated copies, or
+other non-standard databases. If the standard database exists, the operation may
+use it for the current run without saving it to configuration. If it is missing,
+the saved field remains empty and the user is responsible for choosing or
+passing a manual path.
+
+`recordings_dir` is optional. Settings may offer an automatic candidate from OBS
+output configuration, but missing or ambiguous OBS configuration should leave the
+field empty. Recording tools can still accept absolute recording paths, and only
+need `recordings_dir` when resolving relative recording file names.
+
 ## Directory Roles
 
 - `config/`: local machine configuration. `dancing-log.local.json` is ignored by

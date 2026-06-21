@@ -97,6 +97,18 @@ SQLite 更合适的原因：
 
 这说明 VRCX 已经保存了一份可用的本地播放历史。
 
+2026-06-21 追加检查了本地身份相关线索；检查范围只包括 schema、配置 key 名和聚合
+计数，不读取配置值、cookie 或完整 `VRCX.json`：
+
+- VRCX 会创建形如 `usr<32 hex>_...` 的本地账号作用域表。单一账号前缀可以转换回
+  标准 VRChat `usr_00000000-0000-0000-0000-000000000000` 形状。
+- `configs` 表是 key/value 结构，但身份候选检测只需要看 key 名，不需要读取 value。
+- `gamelog_video_play`、`gamelog_join_leave` 和账号作用域 friend log 表都能提供
+  `display_name` + `user_id` 映射。
+- 实测样本中，`gamelog_video_play` 有 387 个 distinct `display_name` / `user_id`
+  pair，`display_name` 对多个 `user_id` 的情况为 0，`user_id` 对多个 display name
+  的情况为 14。这更像是改名历史，而不是显示名歧义。
+
 ## VRCX 源码确认的信息
 
 已检查仓库：
@@ -339,12 +351,34 @@ JSON 没有携带 duration；WannaDance 的 VRCX `VideoPlay` payload 里 duratio
 
 所以剩下的难点不是“能不能拿到播放历史”，而是“能不能以足够置信度推断来源语义”。
 
+## 从 VRCX 检测本机身份
+
+从 VRCX 只读推断 `self_user_id` 候选是可行的。
+
+推荐流程：
+
+1. 从 VRCX 的账号作用域表名和安全的配置 key 名里提取候选 `usr_...`。
+2. 如果只找到一个候选 id，再从 `gamelog_video_play` 和 `gamelog_join_leave` 查它
+   最近或最常见的 `display_name`。
+3. UI 用 display name 让用户确认，因为它比原始 `usr_...` 更直观。
+4. 保存时仍保存稳定的 `self_user_id`，不要把 display name 当身份主键。
+
+display name 只适合做确认标签。它可能改名，也理论上可能重复；真正用于 VRCX 导入和
+后续回填判断 `self` / `other` 的，仍然应该是稳定的 `usr_...`。
+
+如果 VRCX 里出现多个本地账号候选，或一个 display name 对应多个 `user_id`，辅助检测
+应该让用户明确选择，或者保持手动填写；不要静默猜测。
+
 ## 推荐下一步
 
 1. 继续收集真实 PyPyDance、Dudu、VRDancing 和其他舞蹈系统的 VRCX 行作为 fixture。
 2. 为带正 playback offset 的真实 PyPyDance 半路进房行为增加 fixture。
-3. 看到输入形状后，再为每个新舞蹈系统设计自己的扩展表。
-4. 增加一个修正或回填命令，用来处理现有 `unknown` 来源。
+3. 增加一个只读 VRCX 身份辅助检测，用 display name 给用户确认，背后写入
+   `self_user_id`。
+4. 看到输入形状后，再为每个新舞蹈系统设计自己的扩展表。
+5. 增加一个修正或回填命令，用来处理现有 `unknown` 来源。身份辅助检测也可以用于
+   回填：当附近播放或 player-history 风格记录里的 `display_name` 映射无歧义时，
+   恢复稳定 VRChat `user_id`，再回填 `self` 或 `other`。
 
 ## 结论
 

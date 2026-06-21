@@ -295,6 +295,22 @@ PATH_FIELD_KEYS = {
 }
 
 
+def default_vrcx_db_path() -> Path:
+    """Return the intentionally narrow standard VRCX SQLite location."""
+    appdata = os.environ.get("APPDATA")
+    root = Path(appdata) if appdata else Path.home() / "AppData" / "Roaming"
+    return root / "VRCX" / "VRCX.sqlite3"
+
+
+def detect_vrcx_db_path() -> Path | None:
+    """Return the standard VRCX database only when it currently exists."""
+    candidate = default_vrcx_db_path()
+    try:
+        return candidate if candidate.is_file() else None
+    except OSError:
+        return None
+
+
 @dataclass(frozen=True)
 class WatcherRuntimeConfig:
     log_dir: Path
@@ -364,6 +380,19 @@ class AppRuntimeConfig:
     @property
     def vrcx_db_path(self) -> Path | None:
         return self.optional_path("vrcx_db_path")
+
+    def resolve_vrcx_db_path(
+        self,
+        *,
+        override: Path | str | None = None,
+        auto_detect: bool = True,
+    ) -> Path | None:
+        configured = self.optional_path("vrcx_db_path", override=override)
+        if configured is not None:
+            return configured
+        if not auto_detect:
+            return None
+        return detect_vrcx_db_path()
 
     @property
     def vrc_log_dir(self) -> Path | None:

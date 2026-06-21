@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from dancing_log.app_paths import AppRuntimeConfig, DEFAULT_CONFIG
 from dancing_log.data_operations import (
@@ -10,6 +11,7 @@ from dancing_log.data_operations import (
     operation_catalog_snapshot,
     run_data_operation,
 )
+from dancing_log.vrcx_importer import ImportStats
 
 
 class DataOperationsTests(unittest.TestCase):
@@ -64,12 +66,37 @@ class DataOperationsTests(unittest.TestCase):
 
     def test_import_vrcx_requires_configured_source_database(self):
         with tempfile.TemporaryDirectory() as tmp:
-            runtime_config = AppRuntimeConfig.from_config(DEFAULT_CONFIG, app_root=tmp)
+            root = Path(tmp)
+            runtime_config = AppRuntimeConfig.from_config(DEFAULT_CONFIG, app_root=root)
 
-            with self.assertRaises(DataOperationError) as context:
-                run_data_operation("import-vrcx", config=runtime_config)
+            with patch.dict("os.environ", {"APPDATA": str(root / "Roaming")}):
+                with self.assertRaises(DataOperationError) as context:
+                    run_data_operation("import-vrcx", config=runtime_config)
 
             self.assertIn("Missing VRCX database path", str(context.exception))
+
+    def test_import_vrcx_uses_standard_vrcx_database_for_current_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            appdata = root / "Roaming"
+            standard = appdata / "VRCX" / "VRCX.sqlite3"
+            standard.parent.mkdir(parents=True)
+            standard.write_bytes(b"")
+            runtime_config = AppRuntimeConfig.from_config(DEFAULT_CONFIG, app_root=root)
+
+            with (
+                patch.dict("os.environ", {"APPDATA": str(appdata)}),
+                patch(
+                    "dancing_log.vrcx_importer.import_vrcx_database",
+                    return_value=ImportStats(scanned=1, candidate_events=1),
+                ) as importer,
+            ):
+                result = run_data_operation("import-vrcx", config=runtime_config, dry_run=True)
+
+            importer.assert_called_once()
+            self.assertEqual(importer.call_args.kwargs["vrcx_db_path"], standard)
+            self.assertIsNone(runtime_config.config["vrcx_db_path"])
+            self.assertEqual(result.status, "dry-run")
 
     def test_request_builder_coerces_payload_values_and_defaults(self):
         request = build_data_operation_request_from_payload(

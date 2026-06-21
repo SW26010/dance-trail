@@ -140,7 +140,7 @@ uv run python main.py import-vrcx "path/to/vrcx-snapshot/VRCX.sqlite3"
 uv run python main.py import-vrcx --dry-run
 ```
 
-如果 `config/dancing-log.local.json` 里配置了 `vrcx_db_path`，路径可以省略：
+如果 `config/dancing-log.local.json` 里配置了 `vrcx_db_path`，路径可以省略。该字段为空时，importer 也会在本次运行中尝试标准 VRCX 数据库 `%APPDATA%/VRCX/VRCX.sqlite3`，但不会把自动检测结果写入配置：
 
 ```bash
 uv run python main.py import-vrcx

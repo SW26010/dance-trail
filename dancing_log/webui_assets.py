@@ -237,6 +237,7 @@ h1 { margin: 0; font-size: 24px; line-height: 1.2; }
 .field-summary { color: var(--muted); font-size: 12px; line-height: 1.35; }
 .field-control { display: grid; gap: 7px; min-width: 0; }
 .input-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.path-mode-line { grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; }
 input[type="text"], input[type="number"], input[type="date"], select {
   width: 100%;
   min-height: 36px;
@@ -247,7 +248,7 @@ input[type="text"], input[type="number"], input[type="date"], select {
   padding: 0 10px;
 }
 input[type="checkbox"] { accent-color: var(--blue); }
-input[readonly] { background: var(--input-readonly); color: var(--muted); }
+input[readonly], input:disabled { background: var(--input-readonly); color: var(--muted); }
 .toggle-line {
   min-height: 36px;
   display: inline-flex;
@@ -384,12 +385,17 @@ const TEXT = {
     disabled: "Disabled",
     loadingConfig: "Loading configuration...",
     saved: "Saved",
+    unsaved: "Unsaved",
     saveFailed: "Save failed",
     savedNull: "Saved as null",
+    automatic: "Automatic",
+    customPath: "Custom",
+    useAsManual: "Use as manual",
     exists: "exists",
     missing: "missing",
     inaccessible: "inaccessible",
-    detectedSources: "Detected source paths",
+    detectedSources: "Automatic source path previews",
+    defaultVrcxDb: "Standard VRCX database",
     defaultVrcLogDir: "Default VRChat log directory",
     unsupportedKeys: "Unsupported configuration keys",
     preserved: "Preserved",
@@ -489,12 +495,17 @@ const TEXT = {
     disabled: "已禁用",
     loadingConfig: "正在加载配置...",
     saved: "已保存",
+    unsaved: "未保存",
     saveFailed: "保存失败",
     savedNull: "保存为空值",
+    automatic: "自动",
+    customPath: "自定义",
+    useAsManual: "设为手动路径",
     exists: "存在",
     missing: "缺失",
     inaccessible: "不可访问",
-    detectedSources: "检测到的来源路径",
+    detectedSources: "自动来源路径预览",
+    defaultVrcxDb: "标准 VRCX 数据库",
     defaultVrcLogDir: "默认 VRChat 日志目录",
     unsupportedKeys: "不支持的配置键",
     preserved: "已保留",
@@ -578,6 +589,7 @@ const FIELD_TEXT = {
   auto_start_overlay: { zh: { label: "自动启动 overlay", group: "运行默认值", summary: "启用后会同步启用 watcher 自动启动。" } },
   overlay_port: { zh: { label: "Overlay 端口", group: "运行默认值", summary: "本地 OBS overlay 端口。" } }
 };
+const AUTOMATIC_SOURCE_PATH_KEYS = new Set(["vrcx_db_path", "vrc_log_dir"]);
 const state = {
   active: "settings",
   lang: initialLanguage(),
@@ -859,6 +871,9 @@ function renderFieldControl(field, value) {
     `;
   }
   if (field.type === "path") {
+    if (isAutomaticSourcePath(field.key)) {
+      return renderAutomaticSourcePathControl(field, value);
+    }
     return `
       <div class="input-line">
         <input type="text" data-key="${esc(field.key)}" placeholder="${field.required ? "" : "null"}" value="${esc(value ?? "")}">
@@ -869,9 +884,67 @@ function renderFieldControl(field, value) {
   return `<input type="text" data-key="${esc(field.key)}" placeholder="${esc(field.placeholder || "")}" value="${esc(value ?? "")}">`;
 }
 
+function isAutomaticSourcePath(key) {
+  return AUTOMATIC_SOURCE_PATH_KEYS.has(key);
+}
+
+function isCustomPathEnabled(key) {
+  const value = state.draft[key];
+  return value !== null && value !== "";
+}
+
+function renderAutomaticSourcePathControl(field, value) {
+  const custom = isCustomPathEnabled(field.key);
+  const automatic = automaticSourceForField(field.key);
+  const displayValue = custom ? value : (automatic?.value || "");
+  return `
+    <div class="input-line path-mode-line">
+      <label class="toggle-line">
+        <input type="checkbox" data-path-custom="${esc(field.key)}" ${custom ? "checked" : ""}>
+        <span>${esc(ui("customPath"))}</span>
+      </label>
+      <input type="text" data-key="${esc(field.key)}" placeholder="${custom ? "" : esc(ui("automatic"))}" value="${esc(displayValue ?? "")}" ${custom ? "" : "disabled"}>
+      <button class="button" type="button" data-pick="${esc(field.key)}" title="${esc(ui("browseTitle").replace("{kind}", pickerKind(field.picker)))}" ${custom ? "" : "disabled"}>${esc(ui("browse"))}</button>
+      ${renderFieldSaveStatus(field.key)}
+    </div>
+  `;
+}
+
+function normalizeDraftValue(value) {
+  return value === "" ? null : value;
+}
+
+function fieldStatusId(key) {
+  return `field-status-${String(key).replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+}
+
+function isFieldDirty(key) {
+  return normalizeDraftValue(state.draft[key]) !== normalizeDraftValue(state.configSnapshot?.config?.[key]);
+}
+
+function renderFieldSaveStatus(key) {
+  const dirty = isFieldDirty(key);
+  return `<span id="${fieldStatusId(key)}" class="pill ${dirty ? "orange" : "green"}">${esc(ui(dirty ? "unsaved" : "saved"))}</span>`;
+}
+
+function updateFieldStatusNode(key) {
+  const node = document.getElementById(fieldStatusId(key));
+  if (!node) return;
+  node.outerHTML = renderFieldSaveStatus(key);
+}
+
 function renderPathPreview(field) {
   const rawValue = state.draft[field.key];
   const preview = state.pathPreviews[field.key] || field.path || {};
+  if (isAutomaticSourcePath(field.key) && !isCustomPathEnabled(field.key)) {
+    const automatic = automaticSourceForField(field.key);
+    if (automatic) {
+      const cls = automatic.exists ? "ok" : "missing";
+      const suffix = pathStatusLabel(automatic);
+      return `<span id="${pathPreviewId(field.key)}" class="resolved ${cls}">${esc(ui("automatic"))}: ${esc(automatic.value)} (${esc(suffix)})</span>`;
+    }
+    return `<span id="${pathPreviewId(field.key)}" class="resolved missing">${esc(ui("automatic"))}: ${esc(ui("missing"))}</span>`;
+  }
   if ((rawValue === null || rawValue === "") && !field.required) {
     return `<span id="${pathPreviewId(field.key)}" class="resolved">${esc(ui("savedNull"))}</span>`;
   }
@@ -881,6 +954,10 @@ function renderPathPreview(field) {
   const cls = preview.exists ? "ok" : "missing";
   const suffix = pathStatusLabel(preview);
   return `<span id="${pathPreviewId(field.key)}" class="resolved ${cls}">${esc(preview.resolved)} (${esc(suffix)})</span>`;
+}
+
+function automaticSourceForField(key) {
+  return (state.configSnapshot?.detected_sources || []).find(candidate => candidate.field === key) || null;
 }
 
 function pathPreviewId(key) {
@@ -927,21 +1004,36 @@ function schedulePathPreview(key, value) {
 }
 
 function renderDetectedSources(candidates) {
-  if (!candidates.length) return "";
+  const externalCandidates = candidates.filter(candidate => !isAutomaticSourcePath(candidate.field));
+  if (!externalCandidates.length) return "";
   return `
     <section class="panel">
       <div class="panel-head"><h2>${esc(ui("detectedSources"))}</h2></div>
       <div class="panel-body">
         <div class="pill-row">
-          ${candidates.map(candidate => `
-            <button class="button" type="button" data-use-detected="${esc(candidate.field)}" data-value="${esc(candidate.value)}" title="${esc(candidate.value)}">
-              ${esc(candidate.field === "vrc_log_dir" ? ui("defaultVrcLogDir") : candidate.label)} ${candidate.exists ? "" : `(${esc(candidate.error ? ui("inaccessible") : ui("missing"))})`}
-            </button>
-          `).join("")}
+          ${externalCandidates.map(renderDetectedSourceCandidate).join("")}
         </div>
       </div>
     </section>
   `;
+}
+
+function renderDetectedSourceCandidate(candidate) {
+  const label = `${detectedSourceLabel(candidate)} ${candidate.exists ? "" : `(${ui(candidate.error ? "inaccessible" : "missing")})`}`;
+  if (!candidate.exists) {
+    return `<span class="pill orange" title="${esc(candidate.value)}">${esc(label)}</span>`;
+  }
+  return `
+    <button class="button" type="button" data-use-detected="${esc(candidate.field)}" data-value="${esc(candidate.value)}" title="${esc(candidate.value)}">
+      ${esc(ui("useAsManual"))}: ${esc(label)}
+    </button>
+  `;
+}
+
+function detectedSourceLabel(candidate) {
+  if (candidate.field === "vrcx_db_path") return ui("defaultVrcxDb");
+  if (candidate.field === "vrc_log_dir") return ui("defaultVrcLogDir");
+  return candidate.label;
 }
 
 function renderUnsupported(unsupported) {
@@ -962,6 +1054,9 @@ function bindFieldControls() {
     control.oninput = () => updateDraftFromControl(control, false);
     control.onchange = () => updateDraftFromControl(control, control.type === "checkbox");
   }
+  for (const control of document.querySelectorAll("[data-path-custom]")) {
+    control.onchange = () => updatePathCustomToggle(control);
+  }
   for (const button of document.querySelectorAll("[data-pick]")) {
     button.onclick = () => pickPath(button.dataset.pick);
   }
@@ -972,6 +1067,20 @@ function bindFieldControls() {
       renderSettings();
     };
   }
+}
+
+function updatePathCustomToggle(control) {
+  const key = control.dataset.pathCustom;
+  if (!key) return;
+  if (control.checked) {
+    const automatic = automaticSourceForField(key);
+    state.draft[key] = state.draft[key] || automatic?.value || "";
+    schedulePathPreview(key, state.draft[key]);
+  } else {
+    state.draft[key] = null;
+    state.pathPreviews[key] = { resolved: null, exists: null };
+  }
+  renderSettings();
 }
 
 function updateDraftFromControl(control, redraw) {
@@ -987,6 +1096,7 @@ function updateDraftFromControl(control, redraw) {
     state.draft[key] = field && !field.required && text.trim() === "" ? null : text;
   }
   if (field?.type === "path") schedulePathPreview(key, state.draft[key]);
+  if (field?.type === "path" && isAutomaticSourcePath(key)) updateFieldStatusNode(key);
   if (redraw) renderSettings();
 }
 

@@ -215,6 +215,21 @@ class VrcLogParserTest(unittest.TestCase):
 
 
 class VrcLogWatcherTest(unittest.TestCase):
+    def test_watcher_fails_when_log_directory_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            with self.assertRaises(FileNotFoundError) as context:
+                watch_vrc_logs(
+                    log_dir=root / "missing-logs",
+                    output_dir=root / "capture",
+                    session_name="missing",
+                    archive_source_logs=False,
+                )
+
+            self.assertIn("VRChat log directory is missing", str(context.exception))
+            self.assertFalse((root / "capture").exists())
+
     def test_watcher_stops_when_stop_event_is_set(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

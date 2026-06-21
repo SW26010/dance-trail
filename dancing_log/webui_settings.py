@@ -13,6 +13,7 @@ from dancing_log.app_paths import (
     CONFIG_FIELD_BY_KEY,
     CONFIG_FIELDS,
     CONFIG_KEYS,
+    default_vrcx_db_path,
     resolve_config_path,
     save_app_config,
     validate_supported_config,
@@ -142,6 +143,21 @@ def _read_json_file(path: Path) -> dict:
 
 def _detected_source_paths() -> list[dict[str, Any]]:
     candidates = []
+    try:
+        vrcx_db_path = default_vrcx_db_path()
+        preview = _safe_path_preview(vrcx_db_path)
+        candidates.append(
+            {
+                "field": "vrcx_db_path",
+                "label": "Standard VRCX database",
+                "value": str(vrcx_db_path),
+                "exists": preview["exists"],
+                "kind": preview["kind"],
+                "error": preview.get("error"),
+            }
+        )
+    except Exception:
+        pass
     try:
         vrc_log_dir = default_vrc_log_dir()
         preview = _safe_path_preview(vrc_log_dir)

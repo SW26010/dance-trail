@@ -67,7 +67,11 @@ Implemented direction:
 
 ## Local VRCX Findings
 
-Analyzed from a copied local snapshot of `path/to/vrcx-snapshot`.
+Analyzed from a copied local snapshot of `path/to/vrcx-snapshot`. That path was the
+inspection sample, not the default detection location; normal automatic VRCX
+database detection should check `%APPDATA%\VRCX\VRCX.sqlite3`. Non-standard
+database locations are user-owned overrides and should be handled by manually
+setting `vrcx_db_path`, not by broad automatic searching.
 
 Important files found:
 
@@ -104,6 +108,22 @@ Observed local counts from the copied database:
 - `api.udon.dance` rows with blank `display_name`: 1052
 
 This is strong evidence that VRCX already stores a usable local playback history for dance-world song events.
+
+Additional local identity observations from 2026-06-21, using only schema,
+configuration key names, and aggregate counts:
+
+- VRCX creates account-scoped tables named like `usr<32 hex>_...`. A single
+  local account prefix can be converted back to the canonical VRChat
+  `usr_00000000-0000-0000-0000-000000000000` shape.
+- The `configs` table is key/value-shaped, but identity detection should only
+  inspect key names. It is not necessary to read config values, cookies, or the
+  whole `VRCX.json`.
+- `gamelog_video_play`, `gamelog_join_leave`, and the account-scoped friend log
+  tables expose `display_name` plus `user_id` mappings.
+- In the inspected local sample, `gamelog_video_play` had 387 distinct
+  `display_name` / `user_id` pairs, no `display_name` mapping to multiple
+  `user_id` values, and 14 `user_id` values with multiple display names. That
+  points to rename history rather than display-name ambiguity.
 
 ## What VRCX Source Code Confirms
 
@@ -466,25 +486,46 @@ captures:
   These rows can remain visible as pending overlay current playback, but they
   remain ineligible for promotion into official history.
 
+## Self Identity Detection
+
+It is feasible to use VRCX as a read-only source for a `self_user_id` candidate.
+
+The preferred flow is:
+
+1. Infer candidate user ids from VRCX account-scoped table names and safe config
+   key names.
+2. If exactly one candidate `usr_...` id is found, look up its most recent or
+   most common `display_name` from `gamelog_video_play` and `gamelog_join_leave`.
+3. Ask the user to confirm the display name, because that is more legible than a
+   raw `usr_...` id.
+4. Persist the stable `self_user_id`, not the display name.
+
+The helper should run from Settings when `self_user_id` is not saved yet. VRCX
+import and rebuild operations may use a saved `self_user_id`, but they should
+not silently detect and persist one as a side effect of a data operation.
+
+The display name is only a confirmation label. It can change and is not a stable
+identity key. The `usr_...` value remains the source of truth for self-vs-other
+inference during VRCX import and later backfill.
+
+If VRCX exposes multiple candidate accounts, or if a display name maps to more
+than one `user_id`, the helper should present explicit choices or leave
+`self_user_id` manual. It should not silently guess.
+
 ## Recommended Next Steps
 
 1. Keep collecting inspection fixtures for real PyPyDance, Dudu, VRDancing, and
    other dance-system VRCX rows.
 2. Add a fixture for true PyPyDance mid-room-join behavior with positive
    playback offsets.
-3. Design one extension table per additional dance system only after the input
+3. Add a read-only VRCX identity helper that proposes `self_user_id` with a
+   display-name confirmation label.
+4. Design one extension table per additional dance system only after the input
    shape is known.
-4. Add a correction/backfill command for existing `unknown` source rows.
-
-Deferred follow-up:
-
-- after blank-requester rows are promoted to `random`, the remaining `unknown` rows are mostly "has `display_name`, missing `user_id`"
-- current volume is small enough to defer
-- a plausible next pass is:
-  - use VRCX player-history style tables keyed by local account
-  - search for rows near the playback timestamp with the same `display_name`
-  - recover the stable VRChat `user_id` when the match is unambiguous
-  - then backfill `self` or `other`
+5. Add a correction/backfill command for existing `unknown` source rows. The
+   identity helper can support this by recovering stable `user_id` values when a
+   nearby playback or player-history row has an unambiguous `display_name`
+   mapping.
 
 ## Conservative Conclusion
 

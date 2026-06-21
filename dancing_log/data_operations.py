@@ -124,7 +124,7 @@ DATA_OPERATIONS: tuple[DataOperation, ...] = (
         title="Import VRCX history",
         cli_description="Import historical playback rows from VRCX SQLite",
         risk="writes playback history",
-        summary="Import supported dance playback rows from the saved or supplied VRCX SQLite database.",
+        summary="Import supported dance playback rows from the saved, supplied, or standard VRCX SQLite database.",
         command_args=("import-vrcx",),
         title_zh="导入 VRCX 历史",
         risk_zh="写入播放历史",
@@ -136,7 +136,7 @@ DATA_OPERATIONS: tuple[DataOperation, ...] = (
                 value_type="path",
                 flag="<vrcx_db>",
                 config_key="vrcx_db_path",
-                summary="Source VRCX SQLite database; defaults to the Saved Configuration.",
+                summary="Source VRCX SQLite database; defaults to Saved Configuration, then the standard VRCX path.",
             ),
             APP_DB_PARAMETER,
             OperationParameter(
@@ -415,10 +415,12 @@ def _run_import_vrcx(
     config: AppRuntimeConfig,
     params: dict[str, Any],
 ) -> DataOperationResult:
-    vrcx_db_path = config.optional_path("vrcx_db_path", override=params.get("vrcx_db"))
+    vrcx_db_path = config.resolve_vrcx_db_path(override=params.get("vrcx_db"))
     if not vrcx_db_path:
         raise DataOperationError(
-            f"Missing VRCX database path. Pass it explicitly or set `vrcx_db_path` in {CONFIG_FILE}."
+            "Missing VRCX database path. Pass it explicitly, set "
+            f"`vrcx_db_path` in {CONFIG_FILE}, or install VRCX at the standard "
+            "%APPDATA%\\VRCX\\VRCX.sqlite3 location."
         )
 
     from dancing_log.vrcx_importer import import_vrcx_database
@@ -554,7 +556,7 @@ def _run_rebuild_data(
         ]
     )
 
-    vrcx_db_path = config.vrcx_db_path
+    vrcx_db_path = config.resolve_vrcx_db_path()
     import_stats = None
     if vrcx_db_path:
         import_stats = import_vrcx_database(
@@ -571,7 +573,7 @@ def _run_rebuild_data(
             ]
         )
     else:
-        lines.append("VRCX import skipped: vrcx_db_path is not configured")
+        lines.append("VRCX import skipped: no saved or standard VRCX database path found")
 
     queued_stats = sync_queued_self_manifests(
         app_db_path=db_path,

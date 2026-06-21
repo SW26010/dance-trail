@@ -99,6 +99,11 @@ class WebUiServerTest(unittest.TestCase):
                 self.assertIn("color-scheme: dark", html)
                 self.assertNotIn("https://", html)
                 self.assertIn('const CSRF_TOKEN = "', html)
+                self.assertIn("AUTOMATIC_SOURCE_PATH_KEYS", html)
+                self.assertIn("data-path-custom", html)
+                self.assertNotIn("data-save-settings", html)
+                self.assertIn("isFieldDirty", html)
+                self.assertNotIn("autoSaveConfigKey", html)
                 self.assertNotIn("__DANCING_LOG_CSRF_TOKEN__", html)
 
                 with urlopen(f"{server.url}api/config", timeout=2) as response:
@@ -117,6 +122,8 @@ class WebUiServerTest(unittest.TestCase):
                 json.dumps(
                     {
                         "app_db": "data/old.sqlite3",
+                        "vrcx_db_path": "D:/old/VRCX.sqlite3",
+                        "vrc_log_dir": "C:/old/VRChat",
                         "custom_future_key": {"keep": True},
                     }
                 ),
@@ -161,6 +168,9 @@ class WebUiServerTest(unittest.TestCase):
                 self.assertTrue(saved["auto_start_overlay"])
                 self.assertTrue(saved["auto_start_watcher"])
                 self.assertIsNone(saved["vrcx_db_path"])
+                self.assertIsNone(saved["vrc_log_dir"])
+                self.assertIsNone(result["snapshot"]["config"]["vrcx_db_path"])
+                self.assertIsNone(result["snapshot"]["config"]["vrc_log_dir"])
             finally:
                 server.stop()
 
@@ -437,6 +447,26 @@ class WebUiServerTest(unittest.TestCase):
 
             self.assertEqual(snapshot["config"]["app_db"], "data/legacy.sqlite3")
             self.assertFalse(new_path.exists())
+
+    def test_webui_config_snapshot_previews_standard_vrcx_database_without_saving(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            appdata = root / "Roaming"
+            standard = appdata / "VRCX" / "VRCX.sqlite3"
+            standard.parent.mkdir(parents=True)
+            standard.write_bytes(b"")
+
+            with patch.dict("os.environ", {"APPDATA": str(appdata)}):
+                snapshot = load_config_snapshot(WebUiRuntime.from_root(root))
+
+            candidates = {
+                candidate["field"]: candidate
+                for candidate in snapshot["detected_sources"]
+            }
+            self.assertEqual(candidates["vrcx_db_path"]["value"], str(standard))
+            self.assertTrue(candidates["vrcx_db_path"]["exists"])
+            self.assertIsNone(snapshot["config"]["vrcx_db_path"])
+            self.assertFalse((root / "config" / "dancing-log.local.json").exists())
 
     def test_webui_operations_snapshot_uses_shared_catalog(self):
         snapshot = load_operations_snapshot()

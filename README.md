@@ -172,7 +172,10 @@ uv run python main.py import-vrcx "path/to/vrcx-snapshot/VRCX.sqlite3"
 uv run python main.py import-vrcx --dry-run
 ```
 
-If `config/dancing-log.local.json` contains `vrcx_db_path`, the path can be omitted:
+If `config/dancing-log.local.json` contains `vrcx_db_path`, the path can be
+omitted. When that field is empty, the importer also tries the standard VRCX
+database at `%APPDATA%/VRCX/VRCX.sqlite3` for the current run without saving it
+to config:
 
 ```bash
 uv run python main.py import-vrcx

@@ -257,6 +257,7 @@ def watch_vrc_logs(
 ) -> WatchStats:
     """Tail VRChat output logs and write raw/candidate/parsed capture artifacts."""
     resolved_log_dir = Path(log_dir) if log_dir is not None else default_vrc_log_dir()
+    _validate_log_dir(resolved_log_dir)
     app_paths = AppPaths.from_root()
     capture_root = Path(output_dir) if output_dir is not None else app_paths.capture_dir
     resolved_source_log_dir = _resolve_source_log_dir(
@@ -595,6 +596,18 @@ def _latest_log_file(log_dir: Path, errors: list[str]) -> Path | None:
     if not candidates:
         return None
     return max(candidates, key=lambda path: (_mtime_ns(path), path.name))
+
+
+def _validate_log_dir(log_dir: Path) -> None:
+    if not log_dir.exists():
+        raise FileNotFoundError(f"VRChat log directory is missing: {log_dir}")
+    if not log_dir.is_dir():
+        raise NotADirectoryError(f"VRChat log path is not a directory: {log_dir}")
+    try:
+        with os.scandir(log_dir):
+            pass
+    except OSError as exc:
+        raise OSError(f"VRChat log directory is inaccessible: {log_dir}: {exc}") from exc
 
 
 def _is_newer_log(candidate: Path, current: Path) -> bool:

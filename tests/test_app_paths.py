@@ -2,11 +2,14 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from dancing_log.app_paths import (
     AppRuntimeConfig,
     CONFIG_FIELDS,
     DEFAULT_CONFIG,
+    default_vrcx_db_path,
+    detect_vrcx_db_path,
     load_app_config,
     resolve_app_path,
     save_app_config,
@@ -119,6 +122,25 @@ class AppPathTests(unittest.TestCase):
             self.assertIsNone(runtime.vrcx_db_path)
             self.assertEqual(runtime.overlay_port, 9911)
             self.assertEqual(runtime.supported_values()["app_db"], "db/app.sqlite3")
+
+    def test_vrcx_db_path_auto_detection_uses_only_standard_appdata_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            appdata = root / "Roaming"
+            standard = appdata / "VRCX" / "VRCX.sqlite3"
+            runtime = AppRuntimeConfig.from_config(DEFAULT_CONFIG, app_root=root)
+
+            with patch.dict("os.environ", {"APPDATA": str(appdata)}):
+                self.assertEqual(default_vrcx_db_path(), standard)
+                self.assertIsNone(detect_vrcx_db_path())
+                self.assertIsNone(runtime.resolve_vrcx_db_path())
+
+                standard.parent.mkdir(parents=True)
+                standard.write_bytes(b"")
+
+                self.assertEqual(detect_vrcx_db_path(), standard)
+                self.assertEqual(runtime.resolve_vrcx_db_path(), standard)
+                self.assertIsNone(runtime.config["vrcx_db_path"])
 
     def test_runtime_config_resolves_standard_app_root_directories(self):
         with tempfile.TemporaryDirectory() as tmp:
