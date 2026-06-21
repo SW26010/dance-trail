@@ -9,14 +9,13 @@ from urllib.request import Request, urlopen
 
 from dancing_log.app_paths import DEFAULT_CONFIG
 from dancing_log.data_operations import DataOperationResult, operation_catalog_snapshot
-from dancing_log.webui_server import (
-    WebUiRuntime,
-    WebUiServer,
+from dancing_log.webui_endpoints import (
     load_catalog_snapshot,
     load_insights_snapshot,
     load_operations_snapshot,
     load_timeline_snapshot,
 )
+from dancing_log.webui_server import WebUiRuntime, WebUiServer
 from dancing_log.webui_settings import load_config_snapshot
 from dancing_log.windows_picker import (
     FOS_FILEMUSTEXIST,
@@ -463,7 +462,7 @@ class WebUiServerTest(unittest.TestCase):
                     metrics={"count": 1},
                 )
                 with patch(
-                    "dancing_log.webui_server.run_data_operation_request",
+                    "dancing_log.webui_endpoints.run_data_operation_request",
                     return_value=fake_result,
                 ) as runner:
                     request = self._json_request(
@@ -495,7 +494,7 @@ class WebUiServerTest(unittest.TestCase):
             server.start()
             try:
                 token = self._csrf_token(server)
-                with patch("dancing_log.webui_server.run_data_operation_request") as runner:
+                with patch("dancing_log.webui_endpoints.run_data_operation_request") as runner:
                     request = self._json_request(
                         server,
                         "api/operations/run",
