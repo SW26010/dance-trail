@@ -148,12 +148,16 @@ _Avoid_: status buckets, live monitor, insights, data operations
 The Web UI timeline item representing one parsed playback-related record, whether it comes from historical import, live observation, interrupted observation, or another parsed source. It is not the same as a raw VRChat log line.
 _Avoid_: raw log line, database row
 
+**Request Source Type**:
+The request/playback-source classification stored on a playback record, such as queued_self, recommend, self, other, random, or unknown. Request Source Type is stored today in `source_type`; it is not evidence strength and does not decide whether the record is effectively accepted, excluded, or needs attention.
+_Avoid_: evidence source priority, acceptance status, review status
+
 **Accepted Playback Record**:
 A playback record included in normal history and Insights under the trust-by-default policy. A record may be accepted because it comes from a supported source, was automatically settled, or was manually confirmed; manual confirmation is not required for ordinary inclusion.
 _Avoid_: manually confirmed only, promotion-only record, raw parser row
 
 **Default Acceptance Result**:
-The accepted, excluded, or attention-needed result inferred from playback evidence and Playback Source Priority before any active manual decision is applied. Restoring the default result means removing the manual decision overlay and letting the evidence rules decide again.
+The accepted, excluded, or attention-needed result inferred from playback evidence and Evidence Source Priority before any active manual decision is applied. Restoring the default result means removing the manual decision overlay and letting the evidence rules decide again.
 _Avoid_: stored truth, permanent user state, raw parser status
 
 **Manual Playback Decision**:
@@ -172,9 +176,9 @@ _Avoid_: required confirmation, acceptance status, parser status
 The product rule that supported playback evidence is accepted unless stronger evidence or explicit user judgment excludes it. This policy keeps day-to-day use lightweight: the user handles exceptions instead of confirming every dance.
 _Avoid_: manual-only history, review-everything workflow, raw import
 
-**Playback Source Priority**:
-The precedence used when overlapping playback records disagree. Active Manual Playback Decision is strongest, automatic acceptance or promotion is stronger than ordinary playback evidence, and ordinary watcher evidence is preferred over VRCX history when review or analysis must choose one representative record. Higher-priority evidence can negate lower-priority overlapping records; without that stronger negation, ordinary records remain accepted under the trust-by-default policy.
-_Avoid_: filesystem order, newest-row-wins, source path priority
+**Evidence Source Priority**:
+The evidence-strength precedence used when overlapping playback records disagree. Evidence Source Priority is stored today in `source_priority`. Active Manual Playback Decision is strongest, automatic acceptance or promotion is stronger than ordinary playback evidence, and ordinary watcher evidence is preferred over VRCX history when review or analysis must choose one representative record. Higher-priority evidence can negate lower-priority overlapping records; without that stronger negation, ordinary records remain accepted under the trust-by-default policy.
+_Avoid_: request source type, filesystem order, newest-row-wins
 
 **Automatic Acceptance**:
 A system-derived acceptance decision for a playback record, based on supported source semantics or conservative settlement rules. Automatic Acceptance is not limited to an elapsed-time threshold; future rules may use additional conservative signals. Automatic Acceptance lets normal records count without manual confirmation, but it is weaker than an active Manual Playback Decision or Manual Record Update.

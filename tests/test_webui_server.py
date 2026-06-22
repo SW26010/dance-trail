@@ -9,6 +9,11 @@ from urllib.request import Request, urlopen
 
 from dancing_log.app_paths import DEFAULT_CONFIG
 from dancing_log.data_operations import DataOperationResult, operation_catalog_snapshot
+from dancing_log.playback_projection import (
+    EFFECTIVE_PLAYBACK_ACCEPTED,
+    EFFECTIVE_PLAYBACK_EXCLUDED,
+    set_manual_playback_decision,
+)
 from dancing_log.webui_endpoints import (
     load_catalog_snapshot,
     load_insights_snapshot,
@@ -103,6 +108,7 @@ class WebUiServerTest(unittest.TestCase):
                 self.assertIn("dancing-log.language", html)
                 self.assertIn("中文", html)
                 self.assertIn("本地 Web UI", html)
+                self.assertNotIn("timeline-source", html)
                 self.assertIn("prefers-color-scheme: dark", html)
                 self.assertIn("color-scheme: dark", html)
                 self.assertNotIn("https://", html)
@@ -468,19 +474,31 @@ class WebUiServerTest(unittest.TestCase):
                     "300",
                     {"title": "Attention Song", "artist": "Attention Artist"},
                 )
+                excluded_track = ensure_dance_track(
+                    conn,
+                    WANNA_SYSTEM_KEY,
+                    "500",
+                    {"title": "False Positive", "artist": "Excluded Artist"},
+                )
+                manual_accepted_track = ensure_dance_track(
+                    conn,
+                    WANNA_SYSTEM_KEY,
+                    "600",
+                    {"title": "Manual Keep", "artist": "Manual Artist"},
+                )
                 live_track = ensure_dance_track(
                     conn,
                     WANNA_SYSTEM_KEY,
                     "400",
                     {"title": "Live Evidence", "artist": "Live Artist"},
                 )
-                insert_playback_record(
+                evidence_record = insert_playback_record(
                     conn,
                     track_id=evidence_track,
                     played_at="2026-06-18T20:00:00+08:00",
                     source_type="self",
                 )
-                insert_playback_record(
+                attention_record = insert_playback_record(
                     conn,
                     track_id=attention_track,
                     played_at="2026-06-18T20:10:00+08:00",
@@ -490,13 +508,41 @@ class WebUiServerTest(unittest.TestCase):
                     status_reason="interrupted",
                     catalog_attention=1,
                 )
-                insert_playback_record(
+                excluded_record = insert_playback_record(
+                    conn,
+                    track_id=excluded_track,
+                    played_at="2026-06-18T20:15:00+08:00",
+                    source_type="self",
+                    catalog_attention=1,
+                )
+                manual_accepted_record = insert_playback_record(
+                    conn,
+                    track_id=manual_accepted_track,
+                    played_at="2026-06-18T20:18:00+08:00",
+                    source_type="player",
+                    playback_status="needs_attention",
+                    counts_in_history=0,
+                    status_reason="low_confidence",
+                )
+                live_record = insert_playback_record(
                     conn,
                     track_id=live_track,
                     played_at="2026-06-18T20:20:00+08:00",
                     source_kind="live_watcher",
                     source_table="live_playback_events",
                     source_type="player",
+                )
+                set_manual_playback_decision(
+                    conn,
+                    excluded_record,
+                    EFFECTIVE_PLAYBACK_EXCLUDED,
+                    reason="false_positive",
+                )
+                set_manual_playback_decision(
+                    conn,
+                    manual_accepted_record,
+                    EFFECTIVE_PLAYBACK_ACCEPTED,
+                    reason="confirmed",
                 )
                 upsert_live_playback_event(
                     conn,
@@ -537,17 +583,43 @@ class WebUiServerTest(unittest.TestCase):
             )
             insights = load_insights_snapshot(runtime)
 
-            self.assertEqual(timeline["source"], "accepted")
+            self.assertEqual(timeline["source"], "all")
             self.assertEqual(live_timeline["source"], "live")
-            self.assertEqual(summary["counts"]["playback_records"], 3)
-            self.assertEqual(summary["counts"]["accepted_playback_records"], 2)
+            self.assertEqual(summary["counts"]["playback_records"], 5)
+            self.assertEqual(summary["counts"]["accepted_playback_records"], 3)
             self.assertEqual(summary["counts"]["needs_attention_playback_records"], 1)
             self.assertEqual(summary["counts"]["legacy_dance_events"], 1)
             self.assertEqual(summary["counts"]["legacy_live_playback_events"], 1)
             self.assertEqual(
+                {
+                    record_id: next(
+                        record["review_status"]
+                        for record in timeline["records"]
+                        if record["id"] == record_id
+                    )
+                    for record_id in (
+                        evidence_record,
+                        attention_record,
+                        excluded_record,
+                        manual_accepted_record,
+                        live_record,
+                    )
+                },
+                {
+                    evidence_record: "accepted",
+                    attention_record: "needs_attention",
+                    excluded_record: "excluded",
+                    manual_accepted_record: "accepted",
+                    live_record: "accepted",
+                },
+            )
+            self.assertEqual(
                 [record["display"] for record in timeline["records"]],
                 [
                     "200. Evidence Song - Evidence Artist",
+                    "300. Attention Song - Attention Artist",
+                    "500. False Positive - Excluded Artist",
+                    "600. Manual Keep - Manual Artist",
                     "400. Live Evidence - Live Artist",
                 ],
             )
@@ -557,11 +629,11 @@ class WebUiServerTest(unittest.TestCase):
             )
             self.assertEqual(
                 {row["source"]: row["count"] for row in insights["source_distribution"]},
-                {"player": 1, "self": 1},
+                {"player": 2, "self": 1},
             )
             self.assertEqual(
                 {row["external_id"] for row in insights["top_tracks"]},
-                {"200", "400"},
+                {"200", "400", "600"},
             )
             self.assertEqual(
                 insights["attention_counts"],
@@ -575,6 +647,8 @@ class WebUiServerTest(unittest.TestCase):
             self.assertEqual(recommendation_counts["200"], 1)
             self.assertEqual(recommendation_counts["300"], 0)
             self.assertEqual(recommendation_counts["400"], 1)
+            self.assertEqual(recommendation_counts["500"], 0)
+            self.assertEqual(recommendation_counts["600"], 1)
 
     def test_webui_config_snapshot_does_not_migrate_legacy_config(self):
         with tempfile.TemporaryDirectory() as tmp:

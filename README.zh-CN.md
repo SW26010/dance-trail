@@ -43,8 +43,9 @@ WannaDance 专有缓存字段放在 `wannadance_songs`，不放在
 
 `dance_events`、`vrcx_import_events` 和 `live_playback_events` 在过渡期是
 Legacy Playback Root、staging 溯源或运行时观察表。它们可以继续用于兼容、迁移和
-排查，但普通 Timeline 和 Insights 读取 accepted `playback_records`。手动 log、
-VRCX import、queued-self sync 和默认 live promotion 现在都会把普通历史写入
+排查，但普通 Timeline 读取基于 `playback_records` 的 effective playback projection，
+Insights、daily report 和 recommendations 读取 effective accepted projection。
+手动 log、VRCX import、queued-self sync 和默认 live promotion 现在都会把普通历史写入
 `playback_records`。
 
 暂缓设计的表：
@@ -164,7 +165,7 @@ unsupported，不会误判成 WannaDance。
 ## 实时 VRChat 日志和 OBS Overlay
 
 监听 VRChat Unity 输出日志、写入 capture artifacts，并默认把符合条件的 completed
-playback promotion 到 accepted history：
+playback promotion 到默认 accepted 的 Local Playback Evidence：
 
 ```bash
 uv run python main.py watch-vrc-log
@@ -181,8 +182,10 @@ server-sent events 更新，不依赖外部字体、图片、CDN 或网络请求
 
 `live_playback_events` 会随着日志信号即时更新。符合条件的 completed live row 默认会
 promotion 到 accepted `playback_records`：要求播放到已知 `duration_seconds` 的至少 80%。
-普通 Timeline 和 Insights 历史读取 `playback_records`。`--live-db` 仍是运行时/取证 sink，
-默认 promotion 会隐含启用它；`--promote-live` 仍作为兼容写法保留。
+普通 Timeline 读取 effective playback projection，并显示 accepted、excluded 和
+needs-attention 状态。Insights、daily history 和 recommendation history 读取
+effective accepted projection。`--live-db` 仍是运行时/取证 sink，默认 promotion
+会隐含启用它；`--promote-live` 仍作为兼容写法保留。
 需要只写 capture artifacts、不写 SQLite 状态时：
 
 ```bash

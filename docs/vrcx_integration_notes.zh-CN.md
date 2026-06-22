@@ -47,10 +47,13 @@
 - `recommend` 不等同于 `self`，即使最后是用户确认跳的。
 - `random` 是一类真实来源，不应该合并进 `unknown` 或 `other`。
 
-这些值描述的是 `playback_records.source_type`。它们和
-`playback_records.source_priority` 分开：后者表示多条 playback record 重叠或冲突时的
-证据强度。重复导入可以刷新 VRCX staging 溯源，但不应该把 accepted row 上更强的
-`source_type`，例如 `queued_self`，降级回 VRCX 推断出的 `random`。
+这些值描述的是 Request Source Type，当前存储在 `playback_records.source_type`。
+它们和 Evidence Source Priority 分开，后者当前存储在
+`playback_records.source_priority`，表示多条 playback record 重叠或冲突时的证据强度。
+重复导入可以刷新 VRCX staging 溯源，但不应该把 accepted row 上更强的 Request Source
+Type，例如 `queued_self`，降级回 VRCX 推断出的 `random`。Request Source Type 不决定
+effective playback acceptance；accepted、excluded、needs-attention 投影属于 playback
+evidence、Evidence Source Priority 冲突规则和当前有效的 manual playback decision。
 
 ## 存储方向
 

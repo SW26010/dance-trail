@@ -40,9 +40,11 @@ Transition and forensic tables:
 `dance_events`, `vrcx_import_events`, and `live_playback_events` are Legacy
 Playback Roots, staging provenance, or runtime observation tables during the
 transition. They may be read for compatibility, migration, and diagnosis, but
-normal Timeline and Insights reads use accepted `playback_records`. Manual
-logging, VRCX import, queued-self sync, and default live promotion now write
-target-owned Local Playback Evidence into `playback_records`.
+normal Timeline reads use the effective playback projection over
+`playback_records`, while Insights, daily reports, and recommendations read the
+effective accepted projection. Manual logging, VRCX import, queued-self sync,
+and default live promotion now write target-owned Local Playback Evidence into
+`playback_records`.
 
 Deferred tables:
 
@@ -211,7 +213,7 @@ history rows in legacy `dance_events`.
 ## Live VRChat Log Capture
 
 Watch live VRChat Unity output logs, write capture artifacts, and promote
-eligible completed playbacks into accepted history by default:
+eligible completed playbacks into default accepted Local Playback Evidence:
 
 ```bash
 uv run python main.py watch-vrc-log
@@ -245,8 +247,8 @@ actual-play, source, mid-play progress, and delay fields when those signals appe
 in the VRChat log.
 
 Default promotion also writes live runtime state to `live_playback_events` and
-accepted Local Playback Evidence to `playback_records` when the completion rules
-pass. For capture-only runs, use:
+default accepted Local Playback Evidence to `playback_records` when the
+completion rules pass. For capture-only runs, use:
 
 ```bash
 uv run python main.py watch-vrc-log --no-promote-live
@@ -298,12 +300,14 @@ self-contained, binds only to localhost, and updates through server-sent events.
 `live_playback_events` is updated immediately as log signals arrive. Eligible
 completed live rows are promoted into accepted `playback_records` by default
 when the row has played at least 80% of the known `duration_seconds`. Normal
-Timeline, Insights, daily history, and recommendation history read accepted
-`playback_records` instead of the legacy source tables. `--live-db` remains the
-runtime/forensic live-status sink and is implied by default promotion. Use
-`--no-promote-live` for capture-only runs that should not write SQLite state, or
-`--live-db --no-promote-live` to keep `live_playback_events` without writing
-accepted history. `--promote-live` remains accepted as a compatibility spelling.
+Timeline reads the effective playback projection and shows accepted, excluded,
+and needs-attention status. Insights, daily history, and recommendation history
+read the effective accepted projection instead of the legacy source tables.
+`--live-db` remains the runtime/forensic live-status sink and is implied by
+default promotion. Use `--no-promote-live` for capture-only runs that should not
+write SQLite state, or `--live-db --no-promote-live` to keep
+`live_playback_events` without writing accepted history. `--promote-live`
+remains accepted as a compatibility spelling.
 
 Room leave and VRChat quit/shutdown log events clear the overlay's current
 playback and mark pending live rows as interrupted. Entering-room status is

@@ -96,9 +96,10 @@ A playback record is Local Playback Evidence that a dance track was observed,
 imported, cleaned, or merged at a time.
 
 It points to `playback_records.dance_track_id`, not to a WannaDance id directly.
-Acceptance state such as `accepted` or `needs_attention` lives on the playback
-record. Accepted rows with `counts_in_history = 1` are the normal source for
-Timeline and Insights.
+Default acceptance fields such as `playback_status` and `counts_in_history`
+live on the playback record. Normal Timeline, Insights, daily report, and
+recommendation reads use the effective playback projection: the default
+playback-record state plus any active Manual Playback Decision overlay.
 
 ### Legacy Dance Event
 
@@ -232,12 +233,12 @@ This table is the v0 read contract after the one-time legacy cleanup.
 | `source_event_key` | TEXT | Original source event key |
 | `source_fingerprint` | TEXT NOT NULL UNIQUE | Stable source-row fingerprint for dedupe |
 | `playback_status` | TEXT NOT NULL | `accepted`, `needs_attention`, or future status |
-| `counts_in_history` | INTEGER NOT NULL DEFAULT 0 | Whether normal Insights/history should count this row |
+| `counts_in_history` | INTEGER NOT NULL DEFAULT 0 | Default evidence-derived history inclusion before manual overlay |
 | `status_reason` | TEXT NOT NULL | Reason for the current default status |
-| `source_priority` | INTEGER NOT NULL DEFAULT 0 | Source priority used for overlap review |
+| `source_priority` | INTEGER NOT NULL DEFAULT 0 | Evidence Source Priority used for overlap review |
 | `confidence` | REAL | Source inference confidence |
 | `event_source` | TEXT | Legacy or parser event source |
-| `source_type` | TEXT | Inferred requester/source type |
+| `source_type` | TEXT | Request Source Type |
 | `source_display_name` | TEXT | Display name attached to source inference |
 | `video_url` | TEXT | Raw playback URL |
 | `video_name` | TEXT | Raw video name |
@@ -251,21 +252,51 @@ This table is the v0 read contract after the one-time legacy cleanup.
 | `provenance_json` | TEXT NOT NULL | Source evidence and cleanup provenance |
 | `imported_at` | TEXT NOT NULL | Import timestamp |
 
-`source_type` and `source_priority` are intentionally separate concepts.
-`source_type` is the requester/source classification, for example
-`queued_self`, `recommend`, `self`, `other`, `random`, or `unknown`. Its
-precedence is only used to preserve a stronger classification when the same
-playback record is replayed or reimported; for example, a queued-self overlay
-must not be downgraded back to VRCX-inferred `random`. `source_priority` is the
-evidence strength used when reviewing overlapping or conflicting playback
-records, such as live watcher evidence, VRCX history, a manual decision, or
-automatic acceptance. It is not the ordering of requester/source categories.
+Request Source Type and Evidence Source Priority are intentionally separate
+concepts. The current schema stores Request Source Type in `source_type`; it is
+the request/playback-source classification, for example `queued_self`,
+`recommend`, `self`, `other`, `random`, or `unknown`. Its precedence is only
+used to preserve a stronger classification when the same playback record is
+replayed or reimported; for example, a queued-self overlay must not be downgraded
+back to VRCX-inferred `random`. The current schema stores Evidence Source
+Priority in `source_priority`; it is the evidence strength used when reviewing
+overlapping or conflicting playback records, such as live watcher evidence, VRCX
+history, a manual decision, or automatic acceptance. It is not the ordering of
+request/source categories. Neither Request Source Type nor its classification
+precedence decides whether a row is effectively accepted, excluded, or needs
+attention; that acceptance projection is owned by playback evidence, Evidence
+Source Priority conflict rules, and active manual playback decisions.
 
 `source_root_path` should identify the source app root or database path when a
 row is tied to an external source. Project-owned or ADR 0004 compatibility rows
 may preserve the project/app root used by their stable source identity; raw
 external database paths should also be recorded in `provenance_json` when the
 source table is local staging.
+
+### `manual_playback_decisions`
+
+Stores the reversible Manual Playback Decision overlay for playback records.
+This table does not rewrite Local Playback Evidence. One active row, if present,
+overrides the default acceptance result projected from `playback_records`.
+
+| Column | Type | Meaning |
+|---|---|---|
+| `id` | INTEGER PRIMARY KEY AUTOINCREMENT | Manual decision id |
+| `playback_record_id` | INTEGER NOT NULL | References `playback_records.id` |
+| `decision_status` | TEXT NOT NULL | `accepted`, `excluded`, or `needs_attention` |
+| `decision_reason` | TEXT NOT NULL DEFAULT `''` | Reason for the manual decision |
+| `note` | TEXT NOT NULL DEFAULT `''` | Optional review note |
+| `active` | INTEGER NOT NULL DEFAULT 1 | Whether this overlay currently applies |
+| `decided_at` | TEXT NOT NULL DEFAULT `datetime('now')` | Original decision timestamp |
+| `updated_at` | TEXT NOT NULL DEFAULT `datetime('now')` | Last update timestamp |
+
+Constraint:
+
+```sql
+CREATE UNIQUE INDEX idx_manual_playback_decisions_active
+  ON manual_playback_decisions(playback_record_id)
+  WHERE active = 1;
+```
 
 ### `dance_events`
 
@@ -383,11 +414,12 @@ playback_records
   -> dance_systems
 ```
 
-From an accepted playback record to normal Insights/history:
+From an effectively accepted playback record to normal Insights/history:
 
 ```text
 playback_records
-  WHERE counts_in_history = 1
+  LEFT JOIN active manual_playback_decisions
+  WHERE effective_playback_status = 'accepted'
 ```
 
 From a WannaDance playback record to WannaDance cache fields:

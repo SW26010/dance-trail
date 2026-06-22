@@ -86,9 +86,10 @@ Timeline 和 Insights 查询使用的 Local Playback Evidence v0 读模型 contr
 播放记录是 Local Playback Evidence，表示某个时间点观察、导入、清洗或合并到的
 舞蹈播放证据。
 
-它指向 `playback_records.dance_track_id`，不直接指向 WannaDance id。`accepted`
-或 `needs_attention` 等接受状态存在播放记录上。`counts_in_history = 1` 的 accepted
-row 是普通 Timeline 和 Insights 的读取来源。
+它指向 `playback_records.dance_track_id`，不直接指向 WannaDance id。`playback_status`
+和 `counts_in_history` 等默认接受字段存在播放记录上。普通 Timeline、Insights、
+daily report 和 recommendation 读取 effective playback projection：播放记录默认状态
+加上当前有效的 Manual Playback Decision overlay。
 
 ### Legacy 跳舞事件
 
@@ -220,12 +221,12 @@ legacy cleanup 之后的 v0 读模型 contract。
 | `source_event_key` | TEXT | 原始来源 event key |
 | `source_fingerprint` | TEXT NOT NULL UNIQUE | 用于去重的稳定来源 row 指纹 |
 | `playback_status` | TEXT NOT NULL | `accepted`、`needs_attention` 或未来状态 |
-| `counts_in_history` | INTEGER NOT NULL DEFAULT 0 | 普通 Insights/history 是否统计该 row |
+| `counts_in_history` | INTEGER NOT NULL DEFAULT 0 | manual overlay 前，基于 evidence 推导出的默认历史统计状态 |
 | `status_reason` | TEXT NOT NULL | 当前默认状态的原因 |
-| `source_priority` | INTEGER NOT NULL DEFAULT 0 | overlap 复查时使用的来源优先级 |
+| `source_priority` | INTEGER NOT NULL DEFAULT 0 | overlap 复查时使用的 Evidence Source Priority |
 | `confidence` | REAL | 来源推断置信度 |
 | `event_source` | TEXT | legacy 或 parser event source |
-| `source_type` | TEXT | 推断出的 requester/source 类型 |
+| `source_type` | TEXT | Request Source Type |
 | `source_display_name` | TEXT | 来源推断关联的展示名 |
 | `video_url` | TEXT | 原始播放 URL |
 | `video_name` | TEXT | 原始视频名 |
@@ -239,18 +240,46 @@ legacy cleanup 之后的 v0 读模型 contract。
 | `provenance_json` | TEXT NOT NULL | 来源证据和 cleanup 溯源 |
 | `imported_at` | TEXT NOT NULL | 导入时间 |
 
-`source_type` 和 `source_priority` 是两个独立概念。`source_type` 是
-requester/source 分类，比如 `queued_self`、`recommend`、`self`、`other`、
-`random` 或 `unknown`。它的优先级只用于同一条 playback record 被重放或重导入时保留
-更强分类；例如 queued-self overlay 不应该被后续 VRCX 推断出的 `random` 降级。
-`source_priority` 是 overlap 或冲突复查时使用的证据强度，比如 live watcher evidence、
-VRCX history、manual decision 或 automatic acceptance 谁更可信。它不是 requester/source
-分类顺序。
+Request Source Type 和 Evidence Source Priority 是两个独立概念。当前 schema
+用 `source_type` 存 Request Source Type，也就是 request/playback-source 分类，
+比如 `queued_self`、`recommend`、`self`、`other`、`random` 或 `unknown`。
+它的优先级只用于同一条 playback record 被重放或重导入时保留更强分类；例如
+queued-self overlay 不应该被后续 VRCX 推断出的 `random` 降级。当前 schema
+用 `source_priority` 存 Evidence Source Priority，也就是 overlap 或冲突复查时使用的
+证据强度，比如 live watcher evidence、VRCX history、manual decision 或 automatic
+acceptance 谁更可信。它不是 request/source 分类顺序。Request Source Type 及其分类优先级
+都不决定一行最终是 accepted、excluded 还是 needs attention；这个接受投影由 playback
+evidence、Evidence Source Priority 冲突规则和当前有效的 manual playback decision 负责。
 
 `source_root_path` 在 row 绑定外部来源时应该标识 source app root 或数据库路径。
 项目自身写入的 row、或为兼容 ADR 0004 cleanup 身份而保留的 row，可能保存稳定身份使用的
 project/app root；如果 source table 是本地 staging，原始外部数据库路径也应该写进
 `provenance_json`。
+
+### `manual_playback_decisions`
+
+保存 playback record 上可撤销的 Manual Playback Decision overlay。这张表不改写
+Local Playback Evidence。如果某条 playback record 有一个 active decision，它会覆盖
+从 `playback_records` 推导出的默认接受结果。
+
+| 字段 | 类型 | 含义 |
+|---|---|---|
+| `id` | INTEGER PRIMARY KEY AUTOINCREMENT | 人工决定 id |
+| `playback_record_id` | INTEGER NOT NULL | 指向 `playback_records.id` |
+| `decision_status` | TEXT NOT NULL | `accepted`、`excluded` 或 `needs_attention` |
+| `decision_reason` | TEXT NOT NULL DEFAULT `''` | 人工决定原因 |
+| `note` | TEXT NOT NULL DEFAULT `''` | 可选 review 备注 |
+| `active` | INTEGER NOT NULL DEFAULT 1 | 这个 overlay 当前是否生效 |
+| `decided_at` | TEXT NOT NULL DEFAULT `datetime('now')` | 初次决定时间 |
+| `updated_at` | TEXT NOT NULL DEFAULT `datetime('now')` | 最后更新时间 |
+
+约束：
+
+```sql
+CREATE UNIQUE INDEX idx_manual_playback_decisions_active
+  ON manual_playback_decisions(playback_record_id)
+  WHERE active = 1;
+```
 
 ### `dance_events`
 
@@ -356,11 +385,12 @@ playback_records
   -> dance_systems
 ```
 
-从 accepted 播放记录查普通 Insights/history：
+从 effective accepted 播放记录查普通 Insights/history：
 
 ```text
 playback_records
-  WHERE counts_in_history = 1
+  LEFT JOIN active manual_playback_decisions
+  WHERE effective_playback_status = 'accepted'
 ```
 
 从 WannaDance 播放记录查专有缓存字段：

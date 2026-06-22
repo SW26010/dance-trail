@@ -20,7 +20,7 @@ Store merge audit data in the target app database using three tables:
 - `merge_sources`: one row per source database or app root in the merge source order, including source path, resolved database path, source fingerprint, and source-level summary.
 - `merge_record_actions`: one row per planned or executed record action, such as inserting a playback record, filling a user-editable field, accepting a record, excluding a record, creating Review Attention, reporting a manual conflict, or recording a warning.
 
-This ADR does not add promotion-origin fields. Playback acceptance, exclusion, and source-priority semantics are governed by the trust-by-default playback policy, and the local evidence root is governed by ADR 0003. This ADR only decides how merge plans and merge audit data are stored.
+This ADR does not add promotion-origin fields. Playback acceptance, exclusion, and Evidence Source Priority semantics are governed by the trust-by-default playback policy, and the local evidence root is governed by ADR 0003. This ADR only decides how merge plans and merge audit data are stored.
 
 Merge audit rows and snapshots may preserve enough source provenance to explain a merge later, but source provenance is not the same as retaining the source database's evidence tables as primary target evidence.
 
@@ -38,7 +38,7 @@ Data Operations can show merge history, source drill-down, and conflict details 
 
 Users can review a merge plan before executing it, while stale plans are blocked from writing against changed databases.
 
-Merge preserves and applies existing acceptance, exclusion, and source-priority state as reversible decisions, but it does not run new settlement or promotion from completed live evidence. Parser completion alone does not create new acceptance judgments during merge.
+Merge preserves and applies existing acceptance, exclusion, and Evidence Source Priority state as reversible decisions, but it does not run new settlement or promotion from completed live evidence. Parser completion alone does not create new acceptance judgments during merge.
 
 The target database owns the imported evidence after execution, so future Timeline and Insights queries should read target-local `playback_records` evidence and provenance rather than depend on attached or copied source tables.
 

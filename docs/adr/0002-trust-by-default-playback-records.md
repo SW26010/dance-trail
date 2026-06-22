@@ -20,7 +20,7 @@ Adopt a trust-by-default playback policy:
 
 - Supported playback evidence is accepted by default unless stronger evidence or explicit user judgment excludes it.
 - Active manual user judgment has the highest priority and can override automatic or parser-derived state.
-- Manual acceptance and exclusion are reversible overlays, not permanent rewrites of the underlying evidence. Removing the manual decision restores the default result inferred from evidence and source priority.
+- Manual acceptance and exclusion are reversible overlays, not permanent rewrites of the underlying evidence. Removing the manual decision restores the default result inferred from evidence and Evidence Source Priority.
 - Automatic acceptance, including automatic settlement or promotion, is stronger than ordinary playback evidence.
 - Watcher records that are not manually judged or automatically accepted and VRCX records are both ordinary playback evidence unless one carries stronger acceptance or exclusion state.
 - When review or analysis must choose one representative record from overlapping ordinary evidence, watcher evidence is preferred over VRCX history.
@@ -35,7 +35,7 @@ The implicit priority order is:
 - Ordinary watcher evidence that has not yet been judged.
 - VRCX history evidence.
 
-The final two categories are both ordinary evidence for trust-by-default inclusion, but watcher evidence has the higher source priority when overlapping ordinary records must be resolved for review or analysis.
+The final two categories are both ordinary evidence for trust-by-default inclusion, but watcher evidence has the higher Evidence Source Priority when overlapping ordinary records must be resolved for review or analysis.
 
 The normal user-facing states should be simple:
 
@@ -59,4 +59,4 @@ The product must provide a clear Manual Exclusion path so the user can quickly r
 
 The product must also provide a clear way to remove a manual acceptance or exclusion and return the record to its default inferred result, because manual decisions can be mistakes.
 
-Merge and review logic must preserve source priority and provenance so stronger judgments can override weaker evidence without destroying raw evidence.
+Merge and review logic must preserve Evidence Source Priority and provenance so stronger judgments can override weaker evidence without destroying raw evidence.

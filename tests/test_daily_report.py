@@ -9,6 +9,11 @@ from dancing_log.daily_report import (
     load_daily_live_dances,
     parse_played_at_local,
 )
+from dancing_log.playback_projection import (
+    EFFECTIVE_PLAYBACK_ACCEPTED,
+    EFFECTIVE_PLAYBACK_EXCLUDED,
+    set_manual_playback_decision,
+)
 from dancing_log.storage import (
     WANNA_SYSTEM_KEY,
     connect_db,
@@ -67,6 +72,67 @@ class DailyReportTest(unittest.TestCase):
                 [
                     "18:04:57 8378. Party In The U.S.A. - Miley Cyrus | Just Dance 2025",
                     "18:12:08 11253. Mmchk - NEXZ | Golfy",
+                ],
+            )
+
+    def test_daily_report_reads_effective_accepted_projection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "app.sqlite3"
+            with connect_db(db_path) as conn:
+                default_track = ensure_dance_track(
+                    conn,
+                    WANNA_SYSTEM_KEY,
+                    "100",
+                    {"title": "Default Keep"},
+                )
+                excluded_track = ensure_dance_track(
+                    conn,
+                    WANNA_SYSTEM_KEY,
+                    "200",
+                    {"title": "Manual Drop"},
+                )
+                accepted_track = ensure_dance_track(
+                    conn,
+                    WANNA_SYSTEM_KEY,
+                    "300",
+                    {"title": "Manual Keep"},
+                )
+                insert_playback_record(
+                    conn,
+                    track_id=default_track,
+                    played_at="2026.06.07 18:00:00",
+                )
+                excluded_record = insert_playback_record(
+                    conn,
+                    track_id=excluded_track,
+                    played_at="2026.06.07 18:05:00",
+                )
+                accepted_record = insert_playback_record(
+                    conn,
+                    track_id=accepted_track,
+                    played_at="2026.06.07 18:10:00",
+                    playback_status="needs_attention",
+                    counts_in_history=0,
+                )
+                set_manual_playback_decision(
+                    conn,
+                    excluded_record,
+                    EFFECTIVE_PLAYBACK_EXCLUDED,
+                )
+                set_manual_playback_decision(
+                    conn,
+                    accepted_record,
+                    EFFECTIVE_PLAYBACK_ACCEPTED,
+                )
+                conn.commit()
+
+            dances = load_daily_dances(date(2026, 6, 7), db_path)
+
+            self.assertEqual(
+                [format_daily_dance_line(dance) for dance in dances],
+                [
+                    "18:00:00 100. Default Keep",
+                    "18:10:00 300. Manual Keep",
                 ],
             )
 

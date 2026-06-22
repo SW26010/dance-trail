@@ -421,6 +421,8 @@ const TEXT = {
     record: "Record",
     reviewStatus: "Status",
     status_accepted: "accepted",
+    status_excluded: "excluded",
+    status_needs_attention: "needs attention",
     searchCatalog: "Search catalog",
     search: "Search",
     noTracks: "No tracks",
@@ -529,6 +531,8 @@ const TEXT = {
     record: "记录",
     reviewStatus: "状态",
     status_accepted: "已接受",
+    status_excluded: "已排除",
+    status_needs_attention: "需注意",
     searchCatalog: "搜索目录",
     search: "搜索",
     noTracks: "没有条目",
@@ -658,6 +662,12 @@ function pathStatusLabel(resolved) {
 function reviewStatusLabel(value) {
   const key = `status_${String(value || "").replaceAll(" ", "_")}`;
   return ui(key);
+}
+
+function reviewStatusClass(value) {
+  if (value === "accepted") return "green";
+  if (value === "excluded") return "red";
+  return "orange";
 }
 
 function translatedError(message) {
@@ -1251,14 +1261,12 @@ function renderRecent(rows) {
 async function renderTimeline() {
   toolbarNode.innerHTML = `
     <input type="date" id="timeline-date" value="${new Date().toISOString().slice(0, 10)}">
-    <select id="timeline-source"><option value="accepted">${esc(ui("accepted"))}</option><option value="live">${esc(ui("live"))}</option></select>
     <button class="button" type="button" id="timeline-load">${esc(ui("load"))}</button>
   `;
   const node = document.getElementById("view-timeline");
   async function load() {
     const selectedDate = document.getElementById("timeline-date").value;
-    const source = document.getElementById("timeline-source").value;
-    const data = await api(`/api/timeline?date=${encodeURIComponent(selectedDate)}&source=${encodeURIComponent(source)}`);
+    const data = await api(`/api/timeline?date=${encodeURIComponent(selectedDate)}`);
     node.innerHTML = `<section class="panel"><div class="panel-body">${renderTimelineRows(data.records || [])}</div></section>`;
   }
   document.getElementById("timeline-load").onclick = load;
@@ -1268,7 +1276,7 @@ async function renderTimeline() {
 function renderTimelineRows(rows) {
   if (!rows.length) return `<div class="empty">${esc(ui("noTimelineRecords"))}</div>`;
   return `<table><thead><tr><th style="width:110px">${esc(ui("time"))}</th><th>${esc(ui("record"))}</th><th style="width:150px">${esc(ui("reviewStatus"))}</th></tr></thead><tbody>
-    ${rows.map(row => `<tr><td>${esc(row.time)}</td><td>${esc(row.display)}</td><td><span class="pill ${row.review_status === "accepted" ? "green" : "orange"}">${esc(reviewStatusLabel(row.review_status))}</span></td></tr>`).join("")}
+    ${rows.map(row => `<tr><td>${esc(row.time)}</td><td>${esc(row.display)}</td><td><span class="pill ${reviewStatusClass(row.review_status)}">${esc(reviewStatusLabel(row.review_status))}</span></td></tr>`).join("")}
   </tbody></table>`;
 }
 

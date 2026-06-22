@@ -45,11 +45,15 @@ Notes:
 - `recommend` is not the same thing as `self`, even if the user ultimately confirms the play.
 - `random` should be treated as a first-class source, not folded into unknown or other.
 
-These values describe `playback_records.source_type`. They are separate from
-`playback_records.source_priority`, which ranks evidence strength when multiple
-playback records overlap or conflict. Reimports may refresh VRCX staging
-provenance, but they must not downgrade a stronger accepted `source_type`, such
-as `queued_self`, back to VRCX-inferred `random`.
+These values describe Request Source Type, stored today in
+`playback_records.source_type`. They are separate from Evidence Source Priority,
+stored today in `playback_records.source_priority`, which ranks evidence
+strength when multiple playback records overlap or conflict. Reimports may
+refresh VRCX staging provenance, but they must not downgrade a stronger accepted
+Request Source Type, such as `queued_self`, back to VRCX-inferred `random`.
+Request Source Type does not decide effective playback acceptance; accepted,
+excluded, and needs-attention projection belongs to playback evidence, Evidence
+Source Priority conflict rules, and active manual playback decisions.
 
 ## Storage Recommendation
 

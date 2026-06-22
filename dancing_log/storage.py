@@ -19,6 +19,7 @@ from dancing_log.playback_evidence import (
     init_playback_records_schema,
     read_accepted_playback_history,
 )
+from dancing_log.playback_projection import init_manual_playback_decision_schema
 from dancing_log.playback_record_writer import PlaybackRecordWrite, upsert_playback_record
 
 WANNA_SYSTEM_KEY = "wannadance"
@@ -243,6 +244,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
         """
     )
     init_playback_records_schema(conn)
+    init_manual_playback_decision_schema(conn)
     _ensure_live_playback_columns(conn)
     ensure_dance_system(conn, WANNA_SYSTEM_KEY, WANNA_SYSTEM_NAME)
     conn.commit()

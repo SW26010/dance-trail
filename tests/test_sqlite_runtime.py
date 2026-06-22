@@ -15,6 +15,11 @@ from dancing_log.models import (
 )
 from dancing_log.favorite_importer import FavoriteImportError, import_favorites_file
 from dancing_log.queued_self_importer import sync_queued_self_manifests
+from dancing_log.playback_projection import (
+    EFFECTIVE_PLAYBACK_ACCEPTED,
+    EFFECTIVE_PLAYBACK_EXCLUDED,
+    set_manual_playback_decision,
+)
 from dancing_log.playback_record_writer import (
     PROJECT_SOURCE_ROOT_KEY,
     PlaybackRecordWrite,
@@ -92,6 +97,7 @@ class SQLiteRuntimeTest(unittest.TestCase):
             self.assertIn("music_tracks", tables)
             self.assertIn("dance_track_music_links", tables)
             self.assertIn("playback_records", tables)
+            self.assertIn("manual_playback_decisions", tables)
             self.assertIn("live_playback_events", tables)
             self.assertNotIn("songs", tables)
             self.assertIn("dance_track_id", dance_event_columns)
@@ -454,11 +460,47 @@ class SQLiteRuntimeTest(unittest.TestCase):
                     "200",
                     {"title": "Evidence Song", "artist": "Evidence Artist"},
                 )
+                excluded_track_id = ensure_dance_track(
+                    conn,
+                    WANNA_SYSTEM_KEY,
+                    "300",
+                    {"title": "Excluded Song", "artist": "Excluded Artist"},
+                )
+                manual_accepted_track_id = ensure_dance_track(
+                    conn,
+                    WANNA_SYSTEM_KEY,
+                    "400",
+                    {"title": "Manual Song", "artist": "Manual Artist"},
+                )
                 insert_playback_record(
                     conn,
                     track_id=evidence_track_id,
                     played_at="2026-06-18T20:00:00+08:00",
                     source_type="self",
+                )
+                excluded_record_id = insert_playback_record(
+                    conn,
+                    track_id=excluded_track_id,
+                    played_at="2026-06-18T20:10:00+08:00",
+                    source_type="self",
+                )
+                manual_accepted_record_id = insert_playback_record(
+                    conn,
+                    track_id=manual_accepted_track_id,
+                    played_at="2026-06-18T20:20:00+08:00",
+                    source_type="player",
+                    playback_status="needs_attention",
+                    counts_in_history=0,
+                )
+                set_manual_playback_decision(
+                    conn,
+                    excluded_record_id,
+                    EFFECTIVE_PLAYBACK_EXCLUDED,
+                )
+                set_manual_playback_decision(
+                    conn,
+                    manual_accepted_record_id,
+                    EFFECTIVE_PLAYBACK_ACCEPTED,
                 )
                 conn.commit()
 
@@ -481,10 +523,15 @@ class SQLiteRuntimeTest(unittest.TestCase):
 
             records = load_dance_log(db_path)
 
-            self.assertEqual(len(records), 1)
+            self.assertEqual(len(records), 2)
             self.assertEqual(records[0]["dance_track_id"], evidence_track_id)
+            self.assertEqual(records[1]["dance_track_id"], manual_accepted_track_id)
             self.assertNotEqual(records[0]["dance_track_id"], legacy_track_id)
             self.assertEqual(records[0]["external_id"], "200")
+            self.assertNotIn(
+                excluded_track_id,
+                {record["dance_track_id"] for record in records},
+            )
 
     def test_recommendation_uses_dance_track_ids_without_popularity(self):
         with tempfile.TemporaryDirectory() as tmp:

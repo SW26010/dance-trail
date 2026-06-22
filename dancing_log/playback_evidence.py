@@ -10,9 +10,18 @@ from __future__ import annotations
 
 import sqlite3
 
+from dancing_log.playback_projection import (
+    EFFECTIVE_PLAYBACK_ACCEPTED,
+    EFFECTIVE_PLAYBACK_EXCLUDED,
+    EFFECTIVE_PLAYBACK_NEEDS_ATTENTION,
+    accepted_playback_where_sql,
+    effective_playback_status_sql,
+    playback_projection_join_sql,
+    playback_projection_select_sql,
+)
 
-PLAYBACK_STATUS_ACCEPTED = "accepted"
-PLAYBACK_STATUS_NEEDS_ATTENTION = "needs_attention"
+PLAYBACK_STATUS_ACCEPTED = EFFECTIVE_PLAYBACK_ACCEPTED
+PLAYBACK_STATUS_NEEDS_ATTENTION = EFFECTIVE_PLAYBACK_NEEDS_ATTENTION
 LIVE_PLAYBACK_SOURCE_TABLE = "live_playback_events"
 
 
@@ -80,31 +89,35 @@ def count_playback_records(conn: sqlite3.Connection) -> dict[str, int]:
             "needs_attention_playback_records": 0,
             "catalog_attention_playback_records": 0,
         }
+    projection_join = playback_projection_join_sql(conn)
+    effective_status = effective_playback_status_sql(conn)
     row = conn.execute(
-        """
+        f"""
         SELECT
             COUNT(*) AS total,
             COALESCE(SUM(
                 CASE
-                    WHEN playback_status = ? AND counts_in_history = 1 THEN 1
+                    WHEN {effective_status} = '{EFFECTIVE_PLAYBACK_ACCEPTED}' THEN 1
                     ELSE 0
                 END
             ), 0) AS accepted,
             COALESCE(SUM(
                 CASE
-                    WHEN playback_status = ? THEN 1
+                    WHEN {effective_status} = '{EFFECTIVE_PLAYBACK_NEEDS_ATTENTION}' THEN 1
                     ELSE 0
                 END
             ), 0) AS needs_attention,
             COALESCE(SUM(
                 CASE
-                    WHEN catalog_attention = 1 THEN 1
+                    WHEN pr.catalog_attention = 1
+                        AND {effective_status} != '{EFFECTIVE_PLAYBACK_EXCLUDED}'
+                        THEN 1
                     ELSE 0
                 END
             ), 0) AS catalog_attention
-        FROM playback_records
-        """,
-        (PLAYBACK_STATUS_ACCEPTED, PLAYBACK_STATUS_NEEDS_ATTENTION),
+        FROM playback_records pr
+        {projection_join}
+        """
     ).fetchone()
     return {
         "playback_records": int(row["total"]),
@@ -131,6 +144,7 @@ def read_recent_playback_records(
     """Return recent accepted playback records for the Home snapshot."""
     if not _table_exists(conn, "playback_records"):
         return []
+    projection_join = playback_projection_join_sql(conn)
     rows = conn.execute(
         f"""
         SELECT
@@ -143,12 +157,13 @@ def read_recent_playback_records(
             dt.artist,
             dt.dancer
         FROM playback_records pr
+        {projection_join}
         LEFT JOIN dance_tracks dt ON dt.id = pr.dance_track_id
-        WHERE {_accepted_history_sql()}
+        WHERE {accepted_playback_where_sql(conn)}
         ORDER BY pr.played_at DESC, pr.id DESC
         LIMIT ?
         """,
-        (PLAYBACK_STATUS_ACCEPTED, limit),
+        (limit,),
     ).fetchall()
     return [dict(row) for row in rows]
 
@@ -158,14 +173,47 @@ def read_daily_playback_rows(
     *,
     source: str = "accepted",
 ) -> list[dict]:
-    """Return playback rows for day filtering and Timeline rendering."""
+    """Return effective accepted playback rows for day report rendering."""
+    return _read_projected_playback_rows(
+        conn,
+        source=source,
+        effective_status=EFFECTIVE_PLAYBACK_ACCEPTED,
+    )
+
+
+def read_timeline_playback_rows(
+    conn: sqlite3.Connection,
+    *,
+    source: str = "all",
+) -> list[dict]:
+    """Return playback rows with effective status for Timeline review."""
+    return _read_projected_playback_rows(
+        conn,
+        source=source,
+        effective_status=None,
+    )
+
+
+def _read_projected_playback_rows(
+    conn: sqlite3.Connection,
+    *,
+    source: str,
+    effective_status: str | None,
+) -> list[dict]:
     if not _table_exists(conn, "playback_records"):
         return []
-    where = [_accepted_history_sql()]
-    params: list[object] = [PLAYBACK_STATUS_ACCEPTED]
+    projection_join = playback_projection_join_sql(conn)
+    where: list[str] = []
+    params: list[object] = []
+    if effective_status == EFFECTIVE_PLAYBACK_ACCEPTED:
+        where.append(accepted_playback_where_sql(conn))
+    elif effective_status is not None:
+        where.append(f"{effective_playback_status_sql(conn)} = ?")
+        params.append(effective_status)
     if source == "live":
         where.append("pr.source_table = ?")
         params.append(LIVE_PLAYBACK_SOURCE_TABLE)
+    where_sql = " AND ".join(where) if where else "1 = 1"
     rows = conn.execute(
         f"""
         SELECT
@@ -180,10 +228,12 @@ def read_daily_playback_rows(
             dt.major,
             pr.playback_status,
             pr.status_reason,
-            pr.catalog_attention
+            pr.catalog_attention,
+            {playback_projection_select_sql(conn)}
         FROM playback_records pr
+        {projection_join}
         LEFT JOIN dance_tracks dt ON dt.id = pr.dance_track_id
-        WHERE {" AND ".join(where)}
+        WHERE {where_sql}
         ORDER BY pr.played_at, pr.id
         """,
         params,
@@ -195,6 +245,7 @@ def read_accepted_playback_history(conn: sqlite3.Connection) -> list[dict]:
     """Return accepted history in the shape recommendation code expects."""
     if not _table_exists(conn, "playback_records"):
         return []
+    projection_join = playback_projection_join_sql(conn)
     rows = conn.execute(
         f"""
         SELECT
@@ -205,13 +256,13 @@ def read_accepted_playback_history(conn: sqlite3.Connection) -> list[dict]:
             {_source_label_sql()} AS source,
             '' AS note
         FROM playback_records pr
+        {projection_join}
         LEFT JOIN dance_tracks dt ON dt.id = pr.dance_track_id
         LEFT JOIN dance_systems ds ON ds.id = dt.system_id
-        WHERE {_accepted_history_sql()}
+        WHERE {accepted_playback_where_sql(conn)}
             AND pr.dance_track_id IS NOT NULL
         ORDER BY pr.played_at, pr.id
-        """,
-        (PLAYBACK_STATUS_ACCEPTED,),
+        """
     ).fetchall()
     return [dict(row) for row in rows]
 
@@ -220,15 +271,16 @@ def read_source_distribution(conn: sqlite3.Connection) -> list[dict]:
     """Return accepted-history source distribution."""
     if not _table_exists(conn, "playback_records"):
         return []
+    projection_join = playback_projection_join_sql(conn)
     rows = conn.execute(
         f"""
         SELECT {_source_label_sql()} AS source, COUNT(*) AS count
         FROM playback_records pr
-        WHERE {_accepted_history_sql()}
+        {projection_join}
+        WHERE {accepted_playback_where_sql(conn)}
         GROUP BY source
         ORDER BY count DESC, source
-        """,
-        (PLAYBACK_STATUS_ACCEPTED,),
+        """
     ).fetchall()
     return [dict(row) for row in rows]
 
@@ -237,6 +289,7 @@ def read_top_tracks(conn: sqlite3.Connection, *, limit: int = 10) -> list[dict]:
     """Return top accepted playback tracks."""
     if not _table_exists(conn, "playback_records"):
         return []
+    projection_join = playback_projection_join_sql(conn)
     rows = conn.execute(
         f"""
         SELECT
@@ -245,19 +298,16 @@ def read_top_tracks(conn: sqlite3.Connection, *, limit: int = 10) -> list[dict]:
             dt.artist,
             COUNT(*) AS count
         FROM playback_records pr
+        {projection_join}
         LEFT JOIN dance_tracks dt ON dt.id = pr.dance_track_id
-        WHERE {_accepted_history_sql()}
+        WHERE {accepted_playback_where_sql(conn)}
         GROUP BY COALESCE(pr.dance_track_id, pr.dance_system_key || ':' || pr.dance_external_id)
         ORDER BY count DESC, MAX(pr.played_at) DESC
         LIMIT ?
         """,
-        (PLAYBACK_STATUS_ACCEPTED, limit),
+        (limit,),
     ).fetchall()
     return [dict(row) for row in rows]
-
-
-def _accepted_history_sql() -> str:
-    return "pr.playback_status = ? AND pr.counts_in_history = 1"
 
 
 def _source_label_sql() -> str:

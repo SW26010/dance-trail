@@ -19,10 +19,9 @@ from dancing_log.playback_evidence import (
     read_recent_playback_records,
     read_source_distribution,
     read_top_tracks,
+    read_timeline_playback_rows,
 )
-
-
-REVIEW_STATUS_ACCEPTED = "accepted"
+from dancing_log.playback_projection import EFFECTIVE_PLAYBACK_ACCEPTED
 
 
 @dataclass(frozen=True)
@@ -32,6 +31,7 @@ class DailyDance:
     event_id: int
     played_at_local: datetime
     display_name: str
+    review_status: str = EFFECTIVE_PLAYBACK_ACCEPTED
 
 
 @dataclass(frozen=True)
@@ -75,7 +75,7 @@ class LocalReadSnapshots:
 
     def timeline(self, query: dict[str, list[str]]) -> dict:
         selected_date = _query_value(query, "date", date.today().isoformat())
-        source = _timeline_source(_query_value(query, "source", "accepted"))
+        source = _timeline_source(_query_value(query, "source", "all"))
         db_path = self.config.app_db_path
         if not db_path.exists():
             return {
@@ -112,7 +112,7 @@ class LocalReadSnapshots:
                     "played_at": dance.played_at_local.isoformat(),
                     "display": dance.display_name,
                     "line": format_daily_dance_line(dance),
-                    "review_status": _timeline_review_status(source),
+                    "review_status": dance.review_status,
                 }
                 for dance in dances
             ],
@@ -308,11 +308,7 @@ def _query_value(query: dict[str, list[str]], key: str, default: str) -> str:
 
 
 def _timeline_source(value: str) -> str:
-    return "live" if value == "live" else "accepted"
-
-
-def _timeline_review_status(_source: str) -> str:
-    return REVIEW_STATUS_ACCEPTED
+    return "live" if value == "live" else "all"
 
 
 @contextmanager
@@ -412,7 +408,7 @@ def _readonly_dance_log(conn: sqlite3.Connection) -> list[dict]:
 
 
 def _readonly_daily_dances(conn: sqlite3.Connection, target_date: date, source: str) -> list[DailyDance]:
-    rows = read_daily_playback_rows(conn, source=source)
+    rows = read_timeline_playback_rows(conn, source=source)
     return _daily_dances_from_rows(rows, target_date)
 
 
@@ -440,6 +436,11 @@ def _daily_dances_from_rows(
                 event_id=int(row["event_id"]),
                 played_at_local=played_at_local,
                 display_name=_format_display_name(row),
+                review_status=str(
+                    row.get("effective_playback_status")
+                    or row.get("review_status")
+                    or EFFECTIVE_PLAYBACK_ACCEPTED
+                ),
             )
         )
     dances.sort(key=lambda dance: (dance.played_at_local, dance.event_id))
