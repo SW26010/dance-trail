@@ -313,11 +313,12 @@ and exposed through:
 uv run python main.py watch-vrc-log
 ```
 
-The base command remains a forensic capture path. It tails VRChat
-`output_log_*.txt` files, mirrors raw lines when enabled, writes video-related
-candidates to `candidates.jsonl`, writes parsed playback-like signals to
-`parsed_events.jsonl`, writes folded per-song rows to `playback_events.jsonl`,
-and stores the session under `logs/captures/`.
+The base command is the default live watcher workflow. It tails VRChat
+`output_log_*.txt` files, stores the session under `logs/captures/`, updates the
+app DB live sink, and promotes eligible completed rows into accepted
+`playback_records`. For forensic capture without SQLite writes, run
+`watch-vrc-log --no-promote-live`; to keep `live_playback_events` without
+accepted-history writes, run `watch-vrc-log --live-db --no-promote-live`.
 
 The watcher defaults to `config/dancing-log.local.json` key `vrc_log_dir`, falling back
 to the standard Windows LocalLow VRChat log directory. It starts from the current
@@ -388,7 +389,7 @@ runtime state:
 - A local-only overlay server can be started with:
 
 ```bash
-uv run python main.py watch-vrc-log --live-db --overlay-port 8765
+uv run python main.py watch-vrc-log --overlay-port 8765
 ```
 
 The server should bind to `127.0.0.1` and expose an OBS Browser Source page at:
@@ -417,7 +418,7 @@ WannaDance duration for live watcher and overlay state must come from VRChat log
 signals only. The overlay must not query or depend on the main app database,
 `dance_tracks`, `wannadance_songs`, catalog sync output, favorites, or other
 stored catalog metadata to fill missing runtime fields. The main database can be
-a sink for `live_playback_events` and explicit playback-record promotion, but it
+a sink for `live_playback_events` and default playback-record promotion, but it
 must not become the source of truth for what the overlay shows.
 
 Historical log inspection on 2026-05-18 found two useful log-derived duration
@@ -467,18 +468,19 @@ Preferred runtime order:
    a total duration or progress percentage; it should not backfill from catalog
    tables.
 
-Strict compatibility promotion into accepted `playback_records` is explicit
-behind `--promote-live`. Promotion requires a completed live row with
-`completion_status = completed`,
-`actual_play_at`, known `duration_seconds`, no `observed_mid_play`, and a parsed
-dance system/external id. The watcher marks completion after observing at least
-80% of the known duration. If a next song appears too early, or a room leave /
-VRChat quit / video shutdown appears before completion, the pending live row is marked
-`interrupted` and is not promoted.
+Live watcher workflows promote eligible completed rows into accepted
+`playback_records` by default. Promotion requires a completed live row with
+`completion_status = completed`, `actual_play_at`, known `duration_seconds`, no
+`observed_mid_play`, and a parsed dance system/external id. The watcher marks
+completion after observing at least 80% of the known duration. If a next song
+appears too early, or a room leave / VRChat quit / video shutdown appears before
+completion, the pending live row is marked `interrupted` and is not promoted.
 
-`--live-db` remains the runtime/forensic sink for `live_playback_events`.
-`--promote-live` is a compatibility flag that commits completed live rows into
-ordinary history as Local Playback Evidence.
+`--live-db` remains the runtime/forensic sink for `live_playback_events` and is
+implied by default promotion. Use `--no-promote-live` for capture-only runs that
+should not write SQLite state, or `--live-db --no-promote-live` to keep
+`live_playback_events` without writing accepted history. `--promote-live`
+remains accepted as a compatibility spelling.
 
 Current watcher/overlay behavior is based on the 2026-05-17 and 2026-05-18 live
 captures:

@@ -51,6 +51,7 @@ class LiveAppSessionRuntimeTest(unittest.TestCase):
                 self.assertEqual(calls[-1]["app_db_path"], root / "data" / "dancing_log.sqlite3")
                 self.assertEqual(calls[-1]["source_log_dir"], root / "logs" / "source-vrc-logs")
                 self.assertTrue(calls[-1]["live_db"])
+                self.assertTrue(calls[-1]["promote_live"])
                 self.assertIsNone(calls[-1]["overlay_port"])
 
                 runtime.start_overlay()
@@ -58,12 +59,14 @@ class LiveAppSessionRuntimeTest(unittest.TestCase):
                 self.assertTrue(runtime.status().watcher_running)
                 self.assertTrue(runtime.status().overlay_running)
                 self.assertEqual(calls[-1]["overlay_port"], 9911)
+                self.assertTrue(calls[-1]["promote_live"])
 
                 runtime.stop_overlay()
                 wait_for_call_count(calls, 3)
                 self.assertTrue(runtime.status().watcher_running)
                 self.assertFalse(runtime.status().overlay_running)
                 self.assertIsNone(calls[-1]["overlay_port"])
+                self.assertTrue(calls[-1]["promote_live"])
             finally:
                 runtime.close()
 

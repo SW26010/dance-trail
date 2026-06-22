@@ -41,7 +41,7 @@ Transition and forensic tables:
 Playback Roots, staging provenance, or runtime observation tables during the
 transition. They may be read for compatibility, migration, and diagnosis, but
 normal Timeline and Insights reads use accepted `playback_records`. Manual
-logging, VRCX import, queued-self sync, and explicit live promotion now write
+logging, VRCX import, queued-self sync, and default live promotion now write
 target-owned Local Playback Evidence into `playback_records`.
 
 Deferred tables:
@@ -210,15 +210,16 @@ history rows in legacy `dance_events`.
 
 ## Live VRChat Log Capture
 
-Capture live VRChat Unity output logs for parser forensics:
+Watch live VRChat Unity output logs, write capture artifacts, and promote
+eligible completed playbacks into accepted history by default:
 
 ```bash
 uv run python main.py watch-vrc-log
 ```
 
 The watcher uses `vrc_log_dir` from `config/dancing-log.local.json` when present, then
-falls back to the standard Windows LocalLow path. It writes only local ignored
-artifacts under `logs/captures/<session>/`:
+falls back to the standard Windows LocalLow path. It always writes local ignored
+capture artifacts under `logs/captures/<session>/`:
 
 - `raw_output_log.txt`: low-overhead mirror of captured raw lines
 - `candidates.jsonl`: video-related lines worth inspecting
@@ -242,6 +243,20 @@ parsed JSONL output.
 event view is `playback_events.jsonl`, which tracks request, resolve, load,
 actual-play, source, mid-play progress, and delay fields when those signals appear
 in the VRChat log.
+
+Default promotion also writes live runtime state to `live_playback_events` and
+accepted Local Playback Evidence to `playback_records` when the completion rules
+pass. For capture-only runs, use:
+
+```bash
+uv run python main.py watch-vrc-log --no-promote-live
+```
+
+To keep the live forensic table without writing accepted history, use:
+
+```bash
+uv run python main.py watch-vrc-log --live-db --no-promote-live
+```
 
 ## Local Web UI
 
@@ -272,21 +287,23 @@ write ignored artifacts under `analysis/`. `diff_report.md` compares folded
 playback events, live SQLite promotion results, the optional manual GT file, and
 an optional read-only VRCX row count for the manual window.
 
-For live local state and OBS overlay output:
+For live local state, default automatic acceptance, and OBS overlay output:
 
 ```bash
-uv run python main.py watch-vrc-log --live-db --overlay-port 8765
+uv run python main.py watch-vrc-log --overlay-port 8765
 ```
 
 The local overlay page is available at `http://127.0.0.1:8765/overlay`. It is
 self-contained, binds only to localhost, and updates through server-sent events.
-`live_playback_events` is updated immediately as log signals arrive; accepted
-`playback_records` are written only when `--promote-live` is passed and the live
-row has played at least 80% of the known `duration_seconds`. Normal Timeline,
-Insights, daily history, and recommendation history read accepted
+`live_playback_events` is updated immediately as log signals arrive. Eligible
+completed live rows are promoted into accepted `playback_records` by default
+when the row has played at least 80% of the known `duration_seconds`. Normal
+Timeline, Insights, daily history, and recommendation history read accepted
 `playback_records` instead of the legacy source tables. `--live-db` remains the
-runtime/forensic live-status sink; `--promote-live` is the compatibility flag
-that commits completed live rows into ordinary history.
+runtime/forensic live-status sink and is implied by default promotion. Use
+`--no-promote-live` for capture-only runs that should not write SQLite state, or
+`--live-db --no-promote-live` to keep `live_playback_events` without writing
+accepted history. `--promote-live` remains accepted as a compatibility spelling.
 
 Room leave and VRChat quit/shutdown log events clear the overlay's current
 playback and mark pending live rows as interrupted. Entering-room status is

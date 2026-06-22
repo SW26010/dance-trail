@@ -72,11 +72,12 @@ UI，启动或停止 live watcher 和 OBS overlay，或退出后台应用会话�
 `start-watch-vrc-log.bat` 默认启动常用的 OBS overlay 流程：
 
 ```bat
-DancingLogCli.exe watch-vrc-log --live-db --overlay-port 8765 %*
+DancingLogCli.exe watch-vrc-log --overlay-port 8765 %*
 ```
 
-额外参数会继续追加在后面，所以仍然可以传 `--promote-live`、`--log-dir`，
-或者用另一个 `--overlay-port` 覆盖端口。
+这个命令默认会把符合条件的 completed live row promotion 到 accepted history。额外参数
+会继续追加在后面，所以仍然可以传 `--no-promote-live`、`--log-dir`，或者用另一个
+`--overlay-port` 覆盖端口。
 
 开发/研究命令不是 portable release 的一部分。特别是 `sample-frames` 以及
 它依赖的 ffmpeg 不会包含在 zip 里。

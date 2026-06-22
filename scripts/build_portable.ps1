@@ -194,7 +194,7 @@ $batEncoding = [System.Text.UTF8Encoding]::new($false)
 )
 [System.IO.File]::WriteAllText(
     (Join-Path $StageDir "start-watch-vrc-log.bat"),
-    "@echo off`r`nsetlocal`r`ncd /d ""%~dp0""`r`nDancingLogCli.exe watch-vrc-log --live-db --overlay-port 8765 %*`r`n",
+    "@echo off`r`nsetlocal`r`ncd /d ""%~dp0""`r`nDancingLogCli.exe watch-vrc-log --overlay-port 8765 %*`r`n",
     $batEncoding
 )
 

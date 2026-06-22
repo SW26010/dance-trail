@@ -53,7 +53,7 @@ Manual work is focused on false positives, conflicts, and corrections instead of
 
 Automatic watcher settlement is encouraged when the rules are conservative enough, because it reduces user labor while preserving the ability to correct mistakes later.
 
-Once watcher writes target Local Playback Evidence directly, automatic acceptance should become the default watcher behavior rather than an opt-in expert mode. The legacy `--promote-live` path remains a transition/compatibility mechanism until then.
+Watcher-driven workflows now enable automatic acceptance by default for conservative completed live evidence. `--promote-live` remains accepted as a compatibility spelling, and `--no-promote-live` keeps a capture-only workflow available for forensic runs.
 
 The product must provide a clear Manual Exclusion path so the user can quickly remove false positives from statistics.
 

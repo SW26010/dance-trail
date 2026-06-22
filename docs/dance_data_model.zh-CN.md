@@ -26,7 +26,7 @@ Timeline 和 Insights 查询使用的 Local Playback Evidence v0 读模型 contr
   读取使用的 Local Playback Evidence 根。
 - `dance_events`、`vrcx_import_events` 和 `live_playback_events` 在过渡期保留为
   Legacy Playback Root、staging 溯源或运行时观察表。
-- 手动 log、VRCX import、queued-self sync 和显式 live promotion 会把普通历史写入
+- 手动 log、VRCX import、queued-self sync 和默认 live promotion 会把普通历史写入
   当前 app root 拥有的 Local Playback Evidence，也就是 `playback_records`。
 - 音乐平台匹配和热度快照暂缓。
 
@@ -304,8 +304,9 @@ cleanup 使用。它不是普通 Timeline 或 Insights 根。当前 `import-vrcx
 
 ### `live_playback_events`
 
-给 `watch-vrc-log --live-db` 使用的运行时表。它保存每个 live playback event
-的最新折叠状态，并在原始日志信号到来时持续 upsert。
+live watcher workflow 使用的运行时表。它保存每个 live playback event 的最新折叠状态，
+并在原始日志信号到来时持续 upsert。默认 promotion 会先写这张表，再把符合条件的 row
+推进 accepted history；`--live-db --no-promote-live` 会保留这张表但不写 accepted history。
 
 字段形状贴近取证用的 `playback_events.jsonl`，包括：
 
@@ -322,8 +323,9 @@ cleanup 使用。它不是普通 Timeline 或 Insights 根。当前 `import-vrcx
 - `last_updated_at`、`promoted_dance_event_id`、`promoted_playback_record_id`
   和 `promoted_at`
 
-当前只有显式 live promotion 路径可以把 row 推进到 accepted `playback_records`。promotion 要求
-`completion_status = completed`、存在 `actual_play_at`、有已知 `duration_seconds`、
+live promotion 路径可以把 row 推进到 accepted `playback_records`，watcher-driven workflow
+默认启用这条路径。promotion 要求 `completion_status = completed`、存在 `actual_play_at`、
+有已知 `duration_seconds`、`played_seconds >= 80% * duration_seconds`、
 `observed_mid_play = false`，并且有解析出的舞蹈身份字段。半路观察和 interrupted row
 都不应自动成为普通延迟或统计事件。半路观察可以先保持为 `pending`，用于 OBS overlay
 显示直接进房时的当前曲目；interrupted row 则保留用于取证复查。

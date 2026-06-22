@@ -75,11 +75,12 @@ overlay, or quit the background app session.
 `start-watch-vrc-log.bat` starts the common OBS overlay workflow:
 
 ```bat
-DancingLogCli.exe watch-vrc-log --live-db --overlay-port 8765 %*
+DancingLogCli.exe watch-vrc-log --overlay-port 8765 %*
 ```
 
-Extra arguments are appended, so a user can still pass options such as
-`--promote-live`, `--log-dir`, or another `--overlay-port`.
+The command promotes eligible completed live rows into accepted history by
+default. Extra arguments are appended, so a user can still pass options such as
+`--no-promote-live`, `--log-dir`, or another `--overlay-port`.
 
 Development/research commands are not part of the portable release. In
 particular, `sample-frames` and its ffmpeg dependency are excluded from the zip.

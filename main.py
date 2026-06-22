@@ -321,7 +321,7 @@ def cmd_sample_recording_frames():
 
 
 def cmd_watch_vrc_log():
-    """Capture live VRChat output logs for video playback forensics."""
+    """Watch VRChat logs and promote completed playbacks."""
     import argparse
 
     parser = argparse.ArgumentParser(description="Watch VRChat output logs for video playback lines")
@@ -360,12 +360,20 @@ def cmd_watch_vrc_log():
     parser.add_argument(
         "--live-db",
         action="store_true",
-        help="Upsert folded playback state into live_playback_events",
+        help="Upsert folded playback state into live_playback_events even when promotion is disabled",
     )
-    parser.add_argument(
+    promote_group = parser.add_mutually_exclusive_group()
+    promote_group.add_argument(
         "--promote-live",
         action="store_true",
-        help="Promote eligible live events into playback_records; implies --live-db",
+        default=True,
+        help="Promote eligible live events into playback_records; this is the default and implies --live-db",
+    )
+    promote_group.add_argument(
+        "--no-promote-live",
+        action="store_false",
+        dest="promote_live",
+        help="Do not promote eligible live events into playback_records",
     )
     parser.add_argument(
         "--overlay-port",
@@ -481,7 +489,7 @@ def main():
         "import-favorites": ("Import favorite track flags from text", cmd_import_favorites),
         "import-vrcx": (operation_descriptions["import-vrcx"], cmd_import_vrcx),
         "sync-queued-self": (operation_descriptions["sync-queued-self"], cmd_sync_queued_self),
-        "watch-vrc-log": ("Capture live VRChat output logs", cmd_watch_vrc_log),
+        "watch-vrc-log": ("Watch VRChat logs and promote completed playbacks", cmd_watch_vrc_log),
         "webui": ("Start the local Web UI", cmd_webui),
         "rebuild-data": (operation_descriptions["rebuild-data"], cmd_rebuild_data),
     }

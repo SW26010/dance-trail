@@ -198,7 +198,7 @@ class CliEntrypointTests(unittest.TestCase):
             "--app-db",
             "data/live.sqlite3",
             "--live-db",
-            "--promote-live",
+            "--no-promote-live",
             "--overlay-port",
             "9876",
             "--poll-seconds",
@@ -228,13 +228,57 @@ class CliEntrypointTests(unittest.TestCase):
         self.assertTrue(options.from_start)
         self.assertFalse(options.include_raw)
         self.assertTrue(options.live_db)
-        self.assertTrue(options.promote_live)
+        self.assertFalse(options.promote_live)
         self.assertEqual(options.overlay_port, 9876)
         self.assertEqual(options.poll_seconds, 0.1)
         self.assertEqual(options.stop_after_idle_seconds, 0.2)
         self.assertFalse(options.archive_source_logs)
         self.assertIn("Watching VRChat logs: C:\\VRChat\\Logs", output.getvalue())
         self.assertIn("overlay URL: http://127.0.0.1:9876/overlay", output.getvalue())
+
+    def test_watch_vrc_log_promotes_by_default(self):
+        calls = {}
+
+        class FakeRuntime:
+            def __init__(self, *, migrate_legacy_config=False):
+                calls["migrate_legacy_config"] = migrate_legacy_config
+
+            def resolved_log_dir(self, options):
+                calls["resolved_options"] = options
+                return Path(r"C:\VRChat\Logs")
+
+            def run_watcher(self, options):
+                calls["run_options"] = options
+                return SimpleNamespace(
+                    session_dir=Path("captures") / "default",
+                    raw_lines=0,
+                    candidate_lines=0,
+                    parsed_events=0,
+                    playback_events=0,
+                    live_db_updates=0,
+                    live_promotions=0,
+                    overlay_url=None,
+                    source_log_dir=None,
+                    source_log_bytes=0,
+                    delay_metrics={},
+                )
+
+        original_argv = sys.argv
+        sys.argv = ["main.py", "watch-vrc-log"]
+        try:
+            output = io.StringIO()
+            with (
+                patch("dancing_log.live_app_session.LiveAppSessionRuntime", FakeRuntime),
+                contextlib.redirect_stdout(output),
+            ):
+                cli.main()
+        finally:
+            sys.argv = original_argv
+
+        options = calls["run_options"]
+        self.assertTrue(options.promote_live)
+        self.assertFalse(options.live_db)
+        self.assertIn("live promotions: 0", output.getvalue())
 
     def test_frozen_entrypoint_excludes_research_commands(self):
         original_argv = sys.argv

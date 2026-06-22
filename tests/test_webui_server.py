@@ -323,6 +323,7 @@ class WebUiServerTest(unittest.TestCase):
                 self.assertTrue(result["session"]["watcher_running"])
                 self.assertFalse(result["session"]["overlay_running"])
                 self.assertTrue(calls[-1]["live_db"])
+                self.assertTrue(calls[-1]["promote_live"])
                 self.assertIsNone(calls[-1]["overlay_port"])
 
                 overlay_start = self._json_request(
@@ -338,6 +339,7 @@ class WebUiServerTest(unittest.TestCase):
                 self.assertTrue(result["session"]["watcher_running"])
                 self.assertTrue(result["session"]["overlay_running"])
                 self.assertEqual(calls[-1]["overlay_port"], 9911)
+                self.assertTrue(calls[-1]["promote_live"])
 
                 overlay_stop = self._json_request(
                     server,

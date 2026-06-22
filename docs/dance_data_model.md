@@ -29,7 +29,7 @@ The first refactor implements the core model directly:
 - `dance_events`, `vrcx_import_events`, and `live_playback_events` are retained
   as Legacy Playback Roots, staging provenance, or runtime observation tables
   during the transition.
-- Manual logging, VRCX import, queued-self sync, and explicit live promotion
+- Manual logging, VRCX import, queued-self sync, and default live promotion
   write target-owned Local Playback Evidence into `playback_records`.
 - Provider matching and popularity snapshots are deferred.
 
@@ -322,8 +322,10 @@ this table as staging provenance and writes accepted Local Playback Evidence to
 
 ### `live_playback_events`
 
-Runtime table for `watch-vrc-log --live-db`. This table holds the latest folded
+Runtime table for live watcher workflows. This table holds the latest folded
 state for each live playback event and is upserted as raw log signals arrive.
+Default promotion writes it before promoting eligible rows; `--live-db
+--no-promote-live` keeps this table without writing accepted history.
 
 Columns mirror the forensic `playback_events.jsonl` shape, including:
 
@@ -344,13 +346,13 @@ Columns mirror the forensic `playback_events.jsonl` shape, including:
   `promoted_playback_record_id`, and `promoted_at`
 
 Rows from this table can be promoted into accepted `playback_records` through
-the explicit live promotion path. Promotion requires `completion_status =
-completed`, `actual_play_at`, known `duration_seconds`,
-`played_seconds >= 80% * duration_seconds`, `observed_mid_play = false`, and
-parsed dance identity fields. Mid-play observations may remain `pending` so the
-OBS overlay can show the current track after a mid-room join, and interrupted
-rows remain useful for forensic review. Neither case should automatically
-become a normal delay/statistics event.
+the live promotion path, which watcher-driven workflows enable by default.
+Promotion requires `completion_status = completed`, `actual_play_at`, known
+`duration_seconds`, `played_seconds >= 80% * duration_seconds`,
+`observed_mid_play = false`, and parsed dance identity fields. Mid-play
+observations may remain `pending` so the OBS overlay can show the current track
+after a mid-room join, and interrupted rows remain useful for forensic review.
+Neither case should automatically become a normal delay/statistics event.
 `duration_source` records where the runtime duration came from, such as a VRCX
 payload or WannaDance queue JSON; it is runtime provenance only and is not added
 to normal playback history.

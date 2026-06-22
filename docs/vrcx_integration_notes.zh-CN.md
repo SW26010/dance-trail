@@ -202,10 +202,11 @@ Dudu、VRDancing 和其他系统目前只识别为 unsupported 或 unknown，等
 uv run python main.py watch-vrc-log
 ```
 
-基础命令仍然是取证捕获路径。它会 tail VRChat `output_log_*.txt`，在启用时镜像
-原始行，把视频相关候选行写入 `candidates.jsonl`，把解析后的信号写入
-`parsed_events.jsonl`，把按歌曲折叠后的记录写入 `playback_events.jsonl`，并把
-session 存到 `logs/captures/`。
+基础命令是默认 live watcher workflow。它会 tail VRChat `output_log_*.txt`，把 session
+存到 `logs/captures/`，更新 app DB live sink，并把符合条件的 completed row promotion 到
+accepted `playback_records`。需要只做取证 capture、不写 SQLite 时，运行
+`watch-vrc-log --no-promote-live`；需要保留 `live_playback_events` 但不写 accepted history
+时，运行 `watch-vrc-log --live-db --no-promote-live`。
 
 watcher 默认读取 `config/dancing-log.local.json` 的 `vrc_log_dir`，否则回退到 Windows
 LocalLow 下的 VRChat 标准日志目录。默认从当前日志文件末尾开始，避免游玩时重扫旧
@@ -265,7 +266,7 @@ SQLite 写入完成持久化。
 - 本地 overlay server 可以这样启动：
 
 ```bash
-uv run python main.py watch-vrc-log --live-db --overlay-port 8765
+uv run python main.py watch-vrc-log --overlay-port 8765
 ```
 
 服务只绑定 `127.0.0.1`，提供给 OBS Browser Source 的页面：
@@ -292,7 +293,7 @@ overlay 页面通过 server-sent events 读取同一份 live state。它显示�
 实时 watcher 和 overlay 里的 WannaDance duration 必须来自 VRChat 日志中的运行时信号。
 overlay 不应依靠主数据库的信息补运行时字段：不要从 `dance_tracks`、`wannadance_songs`、
 目录同步结果、收藏数据或已落库的 catalog metadata 反查 duration。主数据库可以作为
-`live_playback_events` 和显式 playback-record promotion 的写入目标，但不能作为 overlay
+`live_playback_events` 和默认 playback-record promotion 的写入目标，但不能作为 overlay
 当前状态的事实来源。
 
 历史日志里有两个可用的日志侧 duration 来源：
@@ -326,14 +327,17 @@ JSON 没有携带 duration；WannaDance 的 VRCX `VideoPlay` payload 里 duratio
 3. 如果两个来源都存在且冲突，记录 anomaly，不能静默覆盖。
 4. 如果没有任何运行时 duration，overlay 只显示 elapsed，不从 catalog 或主数据库回填。
 
-严格兼容 promotion 到 accepted `playback_records` 需要显式传入 `--promote-live`。promotion 要求
-live row 已经 `completion_status = completed`，存在 `actual_play_at`，有已知 `duration_seconds`，
-没有 `observed_mid_play`，并且有解析出的 dance system/external id。watcher 只有在观察到
-完整时长后才标记完成。下一首过早出现、离开房间、退出 VRChat 或视频系统关闭时，尚未
-完成的 live row 会标记为 `interrupted`，不会推进 accepted history。
+Live watcher 工作流默认会把符合条件的 completed row promotion 到 accepted
+`playback_records`。promotion 要求 live row 已经 `completion_status = completed`，
+存在 `actual_play_at`，有已知 `duration_seconds`，没有 `observed_mid_play`，并且有解析出的
+dance system/external id。watcher 只有在观察到已知时长的至少 80% 后才标记完成。下一首
+过早出现、离开房间、退出 VRChat 或视频系统关闭时，尚未完成的 live row 会标记为
+`interrupted`，不会推进 accepted history。
 
-`--live-db` 仍是 `live_playback_events` 的运行时/取证写入目标。`--promote-live` 是兼容
-flag，会把 completed live row 提交成普通历史 Local Playback Evidence。
+`--live-db` 仍是 `live_playback_events` 的运行时/取证写入目标，并由默认 promotion 隐含
+启用。需要只写 capture artifacts、不写 SQLite 状态时使用 `--no-promote-live`；需要保留
+`live_playback_events` 但不写 accepted history 时使用 `--live-db --no-promote-live`。
+`--promote-live` 仍作为兼容写法保留。
 
 当前 watcher/overlay 行为基于 2026-05-17 和 2026-05-18 的真实 live capture 收口：
 
