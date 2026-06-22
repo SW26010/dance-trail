@@ -13,7 +13,15 @@ from dancing_log.webui_endpoints import (
     load_catalog_snapshot,
     load_insights_snapshot,
     load_operations_snapshot,
+    load_summary_snapshot,
     load_timeline_snapshot,
+)
+from dancing_log.storage import (
+    WANNA_SYSTEM_KEY,
+    add_dance_event,
+    connect_db,
+    ensure_dance_track,
+    upsert_live_playback_event,
 )
 from dancing_log.webui_server import WebUiRuntime, WebUiServer
 from dancing_log.webui_settings import load_config_snapshot
@@ -25,6 +33,7 @@ from dancing_log.windows_picker import (
     _file_dialog_options,
     _run_windows_picker,
 )
+from tests.playback_record_helpers import insert_playback_record
 
 
 def wait_for_call_count(calls: list[dict], count: int) -> None:
@@ -434,6 +443,131 @@ class WebUiServerTest(unittest.TestCase):
             self.assertTrue(insights["database_exists"])
             self.assertTrue(timeline["database_exists"])
             self.assertEqual(db_path.stat().st_size, 0)
+
+    def test_webui_read_snapshots_use_playback_records_not_legacy_tables(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "data" / "dancing_log.sqlite3"
+            with connect_db(db_path) as conn:
+                ensure_dance_track(
+                    conn,
+                    WANNA_SYSTEM_KEY,
+                    "100",
+                    {"title": "Legacy Song", "artist": "Legacy Artist"},
+                )
+                evidence_track = ensure_dance_track(
+                    conn,
+                    WANNA_SYSTEM_KEY,
+                    "200",
+                    {"title": "Evidence Song", "artist": "Evidence Artist"},
+                )
+                attention_track = ensure_dance_track(
+                    conn,
+                    WANNA_SYSTEM_KEY,
+                    "300",
+                    {"title": "Attention Song", "artist": "Attention Artist"},
+                )
+                live_track = ensure_dance_track(
+                    conn,
+                    WANNA_SYSTEM_KEY,
+                    "400",
+                    {"title": "Live Evidence", "artist": "Live Artist"},
+                )
+                insert_playback_record(
+                    conn,
+                    track_id=evidence_track,
+                    played_at="2026-06-18T20:00:00+08:00",
+                    source_type="self",
+                )
+                insert_playback_record(
+                    conn,
+                    track_id=attention_track,
+                    played_at="2026-06-18T20:10:00+08:00",
+                    source_type="player",
+                    playback_status="needs_attention",
+                    counts_in_history=0,
+                    status_reason="interrupted",
+                    catalog_attention=1,
+                )
+                insert_playback_record(
+                    conn,
+                    track_id=live_track,
+                    played_at="2026-06-18T20:20:00+08:00",
+                    source_kind="live_watcher",
+                    source_table="live_playback_events",
+                    source_type="player",
+                )
+                upsert_live_playback_event(
+                    conn,
+                    {
+                        "event_key": "wannadance:999#1",
+                        "actual_play_at": "2026-06-18T20:30:00+08:00",
+                        "observed_mid_play": False,
+                        "dance_system_key": WANNA_SYSTEM_KEY,
+                        "dance_external_id": "999",
+                        "video_name": "Legacy Live Row",
+                        "signal_count": 1,
+                    },
+                    session_id="session-one",
+                )
+                conn.commit()
+
+            add_dance_event(
+                system_key=WANNA_SYSTEM_KEY,
+                external_id="100",
+                source="random",
+                played_at="2026-06-18T19:00:00+08:00",
+                event_source="legacy-test",
+                path=db_path,
+            )
+            runtime = WebUiRuntime.from_root(root)
+
+            summary = load_summary_snapshot(runtime)
+            timeline = load_timeline_snapshot(runtime, {"date": ["2026-06-18"]})
+            live_timeline = load_timeline_snapshot(
+                runtime,
+                {"date": ["2026-06-18"], "source": ["live"]},
+            )
+            insights = load_insights_snapshot(runtime)
+
+            self.assertEqual(timeline["source"], "accepted")
+            self.assertEqual(live_timeline["source"], "live")
+            self.assertEqual(summary["counts"]["playback_records"], 3)
+            self.assertEqual(summary["counts"]["accepted_playback_records"], 2)
+            self.assertEqual(summary["counts"]["needs_attention_playback_records"], 1)
+            self.assertEqual(summary["counts"]["legacy_dance_events"], 1)
+            self.assertEqual(summary["counts"]["legacy_live_playback_events"], 1)
+            self.assertEqual(
+                [record["display"] for record in timeline["records"]],
+                [
+                    "200. Evidence Song - Evidence Artist",
+                    "400. Live Evidence - Live Artist",
+                ],
+            )
+            self.assertEqual(
+                [record["display"] for record in live_timeline["records"]],
+                ["400. Live Evidence - Live Artist"],
+            )
+            self.assertEqual(
+                {row["source"]: row["count"] for row in insights["source_distribution"]},
+                {"player": 1, "self": 1},
+            )
+            self.assertEqual(
+                {row["external_id"] for row in insights["top_tracks"]},
+                {"200", "400"},
+            )
+            self.assertEqual(
+                insights["attention_counts"],
+                {"needs_attention": 1, "catalog_attention": 1},
+            )
+            recommendation_counts = {
+                row["external_id"]: row["_dance_count"]
+                for row in insights["recommendations"]
+            }
+            self.assertEqual(recommendation_counts["100"], 0)
+            self.assertEqual(recommendation_counts["200"], 1)
+            self.assertEqual(recommendation_counts["300"], 0)
+            self.assertEqual(recommendation_counts["400"], 1)
 
     def test_webui_config_snapshot_does_not_migrate_legacy_config(self):
         with tempfile.TemporaryDirectory() as tmp:

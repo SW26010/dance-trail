@@ -10,11 +10,11 @@ from unittest.mock import patch
 import main as cli
 from dancing_log.storage import (
     WANNA_SYSTEM_KEY,
-    add_dance_event,
     connect_db,
     ensure_dance_track,
     upsert_live_playback_event,
 )
+from tests.playback_record_helpers import insert_playback_record
 
 
 class CliEntrypointTests(unittest.TestCase):
@@ -60,21 +60,19 @@ class CliEntrypointTests(unittest.TestCase):
             root = Path(tmp)
             db_path = root / "app.sqlite3"
             with connect_db(db_path) as conn:
-                ensure_dance_track(
+                track_id = ensure_dance_track(
                     conn,
                     WANNA_SYSTEM_KEY,
                     "11253",
                     {"title": "Mmchk", "artist": "NEXZ", "dancer": "Golfy"},
                 )
+                insert_playback_record(
+                    conn,
+                    track_id=track_id,
+                    played_at="2026.06.07 18:12:08",
+                    source_type="random",
+                )
                 conn.commit()
-            add_dance_event(
-                system_key=WANNA_SYSTEM_KEY,
-                external_id="11253",
-                source="random",
-                played_at="2026.06.07 18:12:08",
-                event_source="manual",
-                path=db_path,
-            )
 
             original_argv = sys.argv
             sys.argv = [
@@ -101,6 +99,16 @@ class CliEntrypointTests(unittest.TestCase):
             root = Path(tmp)
             db_path = root / "app.sqlite3"
             with connect_db(db_path) as conn:
+                track_id = ensure_dance_track(
+                    conn,
+                    WANNA_SYSTEM_KEY,
+                    "4062",
+                    {
+                        "title": "Mood (Extreme)",
+                        "artist": "24kGoldn & Iann Dior",
+                        "dancer": "Just Dance 2022",
+                    },
+                )
                 upsert_live_playback_event(
                     conn,
                     {
@@ -113,6 +121,15 @@ class CliEntrypointTests(unittest.TestCase):
                         "signal_count": 1,
                     },
                     session_id="session-one",
+                )
+                insert_playback_record(
+                    conn,
+                    track_id=track_id,
+                    played_at="2026.06.07 18:09:09",
+                    source_kind="live_watcher",
+                    source_table="live_playback_events",
+                    source_type="player",
+                    video_name="Mood (Extreme) - 24kGoldn & Iann Dior | Just Dance 2022",
                 )
                 conn.commit()
 

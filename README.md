@@ -40,7 +40,10 @@ Transition and forensic tables:
 `dance_events`, `vrcx_import_events`, and `live_playback_events` are Legacy
 Playback Roots or runtime observation tables during the transition. They may be
 read for compatibility, migration, and diagnosis, but normal Timeline and
-Insights reads should use accepted `playback_records`.
+Insights reads should use accepted `playback_records`. This is a read-path
+boundary, not a completed write-path migration: manual logging, VRCX import,
+queued-self sync, and explicit live promotion still write through legacy
+transition tables until those product write paths are moved separately.
 
 Deferred tables:
 
@@ -126,6 +129,11 @@ uv run python main.py log --system wannadance 5038 --time "2000-01-01T12:00:00+0
 `5038` is the external id inside the selected system, not the internal
 `dance_tracks.id`.
 
+Manual `log` currently remains a legacy transition write path: it appends a
+row to `dance_events`. That row will not appear in normal Timeline, day,
+Insights, or recommendation history until a migration or future write-path
+change creates the corresponding accepted `playback_records` evidence.
+
 Generate recommendations:
 
 ```bash
@@ -146,12 +154,13 @@ Each line is formatted as `HH:MM:SS song-id. song name`, for example:
 12:00:00 8378. Party In The U.S.A. - Miley Cyrus | Just Dance 2025
 ```
 
-The product target for normal daily history is accepted `playback_records`.
-Until the Local Playback Evidence read module replaces the legacy reads, the
-current command still uses the older split: without `--live`, it reads
-`dance_events`; `--live` reads `live_playback_events`, which is useful for
-checking what `watch-vrc-log --live-db` observed, but it can include rows such
-as `interrupted` or `pending` live rows.
+Daily history is read from accepted `playback_records`. Without `--live`, the
+command prints all accepted playback records for the day, including accepted
+live-derived records. With `--live`, it filters that same Local Playback
+Evidence root to accepted records whose source table was `live_playback_events`.
+Interrupted, pending, and other review-attention live evidence is retained in
+`playback_records`, but it does not print in normal day history until accepted
+and counting in history.
 
 Import favorite song IDs from a UTF-8 text file. It can contain one external id
 per line, or a WannaDance export line such as `WannaFavorite:6495,10508`:
@@ -196,6 +205,11 @@ uv run python main.py import-vrcx
 The importer currently supports WannaDance and observed PyPyDance URLs. Dudu
 and other systems are counted as unsupported instead of being misclassified as
 WannaDance.
+
+`import-vrcx` is also still a legacy transition writer. It writes provenance to
+`vrcx_import_events` and normalized rows to `dance_events`; it does not yet
+write new accepted `playback_records` directly. Use the one-time cleanup or a
+future write-path migration to convert those rows into Local Playback Evidence.
 
 ## Live VRChat Log Capture
 
@@ -271,9 +285,11 @@ The local overlay page is available at `http://127.0.0.1:8765/overlay`. It is
 self-contained, binds only to localhost, and updates through server-sent events.
 `live_playback_events` is updated immediately as log signals arrive; legacy
 `dance_events` are written only when `--promote-live` is passed and the live row
-has played at least 80% of the known `duration_seconds`. Normal
-Timeline and Insights history should be read from `playback_records` after the
-Local Playback Evidence read module is in place.
+has played at least 80% of the known `duration_seconds`. Normal Timeline,
+Insights, daily history, and recommendation history read accepted
+`playback_records` instead of the legacy source tables. The live watcher does
+not yet write accepted Local Playback Evidence directly; `--live-db` and
+`--promote-live` remain runtime/legacy transition write paths.
 
 Room leave and VRChat quit/shutdown log events clear the overlay's current
 playback and mark pending live rows as interrupted. Entering-room status is

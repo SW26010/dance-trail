@@ -11,11 +11,18 @@ import sqlite3
 
 from dancing_log.app_paths import AppRuntimeConfig
 from dancing_log.models import generate_daily_playlist
+from dancing_log.playback_evidence import (
+    count_playback_records,
+    read_accepted_playback_history,
+    read_attention_counts,
+    read_daily_playback_rows,
+    read_recent_playback_records,
+    read_source_distribution,
+    read_top_tracks,
+)
 
 
-REVIEW_STATUS_UNCHECKED = "unchecked"
-REVIEW_STATUS_USER_CONFIRMED = "user confirmed"
-REVIEW_STATUS_USER_DISCARDED = "user discarded"
+REVIEW_STATUS_ACCEPTED = "accepted"
 
 
 @dataclass(frozen=True)
@@ -55,11 +62,12 @@ class LocalReadSnapshots:
             with _open_readonly_db(db_path) as conn:
                 summary["counts"] = {
                     "dance_tracks": _table_count(conn, "dance_tracks"),
-                    "dance_events": _table_count(conn, "dance_events"),
-                    "live_playback_events": _table_count(conn, "live_playback_events"),
-                    "vrcx_import_events": _table_count(conn, "vrcx_import_events"),
+                    **count_playback_records(conn),
+                    "legacy_dance_events": _table_count(conn, "dance_events"),
+                    "legacy_live_playback_events": _table_count(conn, "live_playback_events"),
+                    "legacy_vrcx_import_events": _table_count(conn, "vrcx_import_events"),
                 }
-                summary["recent"] = _recent_official_events(conn)
+                summary["recent"] = read_recent_playback_records(conn)
                 summary["current_live"] = _current_live_event(conn)
         except sqlite3.Error as exc:
             summary["database_error"] = str(exc)
@@ -67,7 +75,7 @@ class LocalReadSnapshots:
 
     def timeline(self, query: dict[str, list[str]]) -> dict:
         selected_date = _query_value(query, "date", date.today().isoformat())
-        source = _timeline_source(_query_value(query, "source", "official"))
+        source = _timeline_source(_query_value(query, "source", "accepted"))
         db_path = self.config.app_db_path
         if not db_path.exists():
             return {
@@ -168,6 +176,7 @@ class LocalReadSnapshots:
                 "database_exists": False,
                 "source_distribution": [],
                 "top_tracks": [],
+                "attention_counts": {"needs_attention": 0, "catalog_attention": 0},
                 "recommendations": [],
             }
         try:
@@ -176,6 +185,7 @@ class LocalReadSnapshots:
                 top_tracks = _top_tracks(conn)
                 tracks = _readonly_dance_tracks(conn)
                 dance_log = _readonly_dance_log(conn)
+                attention_counts = read_attention_counts(conn)
             recommendations = generate_daily_playlist(
                 tracks,
                 dance_log,
@@ -186,6 +196,7 @@ class LocalReadSnapshots:
                 "database_exists": True,
                 "source_distribution": [],
                 "top_tracks": [],
+                "attention_counts": {"needs_attention": 0, "catalog_attention": 0},
                 "recommendations": [],
                 "error": str(exc),
             }
@@ -193,6 +204,7 @@ class LocalReadSnapshots:
             "database_exists": True,
             "source_distribution": source_distribution,
             "top_tracks": top_tracks,
+            "attention_counts": attention_counts,
             "recommendations": recommendations,
         }
 
@@ -233,12 +245,12 @@ def load_daily_dances(
     *,
     local_tz: tzinfo | None = None,
 ) -> list[DailyDance]:
-    """Return official dance events that fall on the requested local date."""
+    """Return accepted playback records that fall on the requested local date."""
     db_path = _daily_db_path(path)
     if not db_path.exists():
         return []
     with _open_readonly_db(db_path) as conn:
-        rows = _readonly_daily_official_rows(conn)
+        rows = _readonly_daily_accepted_rows(conn)
     return _daily_dances_from_rows(rows, target_date, local_tz=local_tz)
 
 
@@ -296,11 +308,11 @@ def _query_value(query: dict[str, list[str]], key: str, default: str) -> str:
 
 
 def _timeline_source(value: str) -> str:
-    return "live" if value == "live" else "official"
+    return "live" if value == "live" else "accepted"
 
 
-def _timeline_review_status(source: str) -> str:
-    return REVIEW_STATUS_UNCHECKED if source == "live" else REVIEW_STATUS_USER_CONFIRMED
+def _timeline_review_status(_source: str) -> str:
+    return REVIEW_STATUS_ACCEPTED
 
 
 @contextmanager
@@ -396,78 +408,20 @@ def _readonly_dance_tracks(conn: sqlite3.Connection) -> list[dict]:
 
 
 def _readonly_dance_log(conn: sqlite3.Connection) -> list[dict]:
-    if not _tables_exist(conn, "dance_events", "dance_tracks", "dance_systems"):
-        return []
-    rows = conn.execute(
-        """
-        SELECT
-            de.played_at AS timestamp,
-            de.dance_track_id,
-            ds.key AS system_key,
-            dt.external_id,
-            de.source,
-            COALESCE(de.note, '') AS note
-        FROM dance_events de
-        JOIN dance_tracks dt ON dt.id = de.dance_track_id
-        JOIN dance_systems ds ON ds.id = dt.system_id
-        WHERE de.dance_track_id IS NOT NULL
-        ORDER BY de.played_at, de.id
-        """
-    ).fetchall()
-    return [dict(row) for row in rows]
+    return read_accepted_playback_history(conn)
 
 
 def _readonly_daily_dances(conn: sqlite3.Connection, target_date: date, source: str) -> list[DailyDance]:
-    rows = _readonly_daily_live_rows(conn) if source == "live" else _readonly_daily_official_rows(conn)
+    rows = read_daily_playback_rows(conn, source=source)
     return _daily_dances_from_rows(rows, target_date)
 
 
-def _readonly_daily_official_rows(conn: sqlite3.Connection) -> list[dict]:
-    if not _tables_exist(conn, "dance_events", "dance_tracks"):
-        return []
-    rows = conn.execute(
-        """
-        SELECT
-            de.id AS event_id,
-            de.played_at,
-            de.video_name,
-            dt.external_id,
-            dt.title,
-            dt.artist,
-            dt.dancer,
-            dt.group_name,
-            dt.major
-        FROM dance_events de
-        JOIN dance_tracks dt ON dt.id = de.dance_track_id
-        ORDER BY de.played_at, de.id
-        """
-    ).fetchall()
-    return [dict(row) for row in rows]
+def _readonly_daily_accepted_rows(conn: sqlite3.Connection) -> list[dict]:
+    return read_daily_playback_rows(conn, source="accepted")
 
 
 def _readonly_daily_live_rows(conn: sqlite3.Connection) -> list[dict]:
-    if not _table_exists(conn, "live_playback_events"):
-        return []
-    rows = conn.execute(
-        """
-        SELECT
-            id AS event_id,
-            actual_play_at AS played_at,
-            video_name,
-            dance_external_id AS external_id,
-            NULL AS title,
-            NULL AS artist,
-            NULL AS dancer,
-            NULL AS group_name,
-            NULL AS major
-        FROM live_playback_events
-        WHERE actual_play_at IS NOT NULL
-            AND dance_external_id IS NOT NULL
-            AND COALESCE(observed_mid_play, 0) = 0
-        ORDER BY actual_play_at, id
-        """
-    ).fetchall()
-    return [dict(row) for row in rows]
+    return read_daily_playback_rows(conn, source="live")
 
 
 def _daily_dances_from_rows(
@@ -532,29 +486,6 @@ def _parse_vrc_local_timestamp(value: str) -> datetime | None:
     return None
 
 
-def _recent_official_events(conn: sqlite3.Connection) -> list[dict]:
-    if not _tables_exist(conn, "dance_events", "dance_tracks"):
-        return []
-    rows = conn.execute(
-        """
-        SELECT
-            de.id,
-            de.played_at,
-            de.source,
-            de.video_name,
-            dt.external_id,
-            dt.title,
-            dt.artist,
-            dt.dancer
-        FROM dance_events de
-        LEFT JOIN dance_tracks dt ON dt.id = de.dance_track_id
-        ORDER BY de.played_at DESC, de.id DESC
-        LIMIT 8
-        """
-    ).fetchall()
-    return [dict(row) for row in rows]
-
-
 def _current_live_event(conn: sqlite3.Connection) -> dict | None:
     if not _table_exists(conn, "live_playback_events"):
         return None
@@ -570,34 +501,8 @@ def _current_live_event(conn: sqlite3.Connection) -> dict | None:
 
 
 def _source_distribution(conn: sqlite3.Connection) -> list[dict]:
-    if not _table_exists(conn, "dance_events"):
-        return []
-    rows = conn.execute(
-        """
-        SELECT source, COUNT(*) AS count
-        FROM dance_events
-        GROUP BY source
-        ORDER BY count DESC, source
-        """
-    ).fetchall()
-    return [dict(row) for row in rows]
+    return read_source_distribution(conn)
 
 
 def _top_tracks(conn: sqlite3.Connection) -> list[dict]:
-    if not _tables_exist(conn, "dance_events", "dance_tracks"):
-        return []
-    rows = conn.execute(
-        """
-        SELECT
-            dt.external_id,
-            dt.title,
-            dt.artist,
-            COUNT(*) AS count
-        FROM dance_events de
-        JOIN dance_tracks dt ON dt.id = de.dance_track_id
-        GROUP BY dt.id
-        ORDER BY count DESC, MAX(de.played_at) DESC
-        LIMIT 10
-        """
-    ).fetchall()
-    return [dict(row) for row in rows]
+    return read_top_tracks(conn)

@@ -26,6 +26,9 @@ Timeline 和 Insights 查询使用的 Local Playback Evidence v0 读模型 contr
   读取使用的 Local Playback Evidence 根。
 - `dance_events`、`vrcx_import_events` 和 `live_playback_events` 在过渡期保留为
   Legacy Playback Root 或运行时观察表。
+- 读路径已经迁到 `playback_records`，但这不等于写路径已经全部迁完：手动 log、
+  VRCX import、queued-self sync 和显式 live promotion 目前仍会通过 legacy 过渡表写入，
+  直到后续单独迁移这些产品写路径。
 - 音乐平台匹配和热度快照暂缓。
 
 ## 为什么改模型
@@ -240,7 +243,9 @@ legacy cleanup 之后的 v0 读模型 contract。
 ### `dance_events`
 
 Legacy Playback Root，保存旧的标准化播放历史。它保留用于兼容、迁移、显式 live
-promotion 和排查。普通 Timeline 和 Insights 应该改为读取 `playback_records`。
+promotion 和排查。普通 Timeline 和 Insights 应该改为读取 `playback_records`。当前
+手动 log、queued-self sync、VRCX import 标准化和显式 live promotion 仍可能作为过渡
+写路径创建或更新这里的 row。
 
 | 字段 | 类型 | 含义 |
 |---|---|---|
@@ -264,7 +269,8 @@ promotion 和排查。普通 Timeline 和 Insights 应该改为读取 `playback_
 ### `vrcx_import_events`
 
 记录 legacy VRCX 导入溯源和解析结果。过渡期里，它用于解释旧导入 row，也可以供迁移
-或 cleanup 使用。它不是普通 Timeline 或 Insights 根。
+或 cleanup 使用。它不是普通 Timeline 或 Insights 根。当前 `import-vrcx` 命令仍会写这张
+表和 legacy `dance_events`；让 importer 直接写入 Local Playback Evidence 是后续单独工作。
 
 | 字段 | 类型 | 含义 |
 |---|---|---|

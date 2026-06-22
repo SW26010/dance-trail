@@ -11,11 +11,11 @@ from dancing_log.daily_report import (
 )
 from dancing_log.storage import (
     WANNA_SYSTEM_KEY,
-    add_dance_event,
     connect_db,
     ensure_dance_track,
     upsert_live_playback_event,
 )
+from tests.playback_record_helpers import insert_playback_record
 
 
 class DailyReportTest(unittest.TestCase):
@@ -23,7 +23,7 @@ class DailyReportTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "app.sqlite3"
             with connect_db(db_path) as conn:
-                ensure_dance_track(
+                track_party = ensure_dance_track(
                     conn,
                     WANNA_SYSTEM_KEY,
                     "8378",
@@ -33,39 +33,32 @@ class DailyReportTest(unittest.TestCase):
                         "dancer": "Just Dance 2025",
                     },
                 )
-                ensure_dance_track(
+                track_mmchk = ensure_dance_track(
                     conn,
                     WANNA_SYSTEM_KEY,
                     "11253",
                     {"title": "Mmchk", "artist": "NEXZ", "dancer": "Golfy"},
                 )
+                insert_playback_record(
+                    conn,
+                    track_id=track_mmchk,
+                    played_at="2026.06.07 18:12:08",
+                    source_type="random",
+                )
+                insert_playback_record(
+                    conn,
+                    track_id=track_party,
+                    played_at="2026.06.07 18:04:57",
+                    source_type="random",
+                    video_name="8378. Party In The U.S.A. - Miley Cyrus | Just Dance 2025",
+                )
+                insert_playback_record(
+                    conn,
+                    track_id=track_party,
+                    played_at="2026.06.08 00:01:00",
+                    source_type="random",
+                )
                 conn.commit()
-
-            add_dance_event(
-                system_key=WANNA_SYSTEM_KEY,
-                external_id="11253",
-                source="random",
-                played_at="2026.06.07 18:12:08",
-                event_source="manual",
-                path=db_path,
-            )
-            add_dance_event(
-                system_key=WANNA_SYSTEM_KEY,
-                external_id="8378",
-                source="random",
-                played_at="2026.06.07 18:04:57",
-                event_source="manual",
-                video_name="8378. Party In The U.S.A. - Miley Cyrus | Just Dance 2025",
-                path=db_path,
-            )
-            add_dance_event(
-                system_key=WANNA_SYSTEM_KEY,
-                external_id="8378",
-                source="random",
-                played_at="2026.06.08 00:01:00",
-                event_source="manual",
-                path=db_path,
-            )
 
             dances = load_daily_dances(date(2026, 6, 7), db_path)
 
@@ -92,6 +85,16 @@ class DailyReportTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "app.sqlite3"
             with connect_db(db_path) as conn:
+                track_id = ensure_dance_track(
+                    conn,
+                    WANNA_SYSTEM_KEY,
+                    "4062",
+                    {
+                        "title": "Mood (Extreme)",
+                        "artist": "24kGoldn & Iann Dior",
+                        "dancer": "Just Dance 2022",
+                    },
+                )
                 upsert_live_playback_event(
                     conn,
                     {
@@ -118,6 +121,15 @@ class DailyReportTest(unittest.TestCase):
                     },
                     session_id="session-one",
                 )
+                insert_playback_record(
+                    conn,
+                    track_id=track_id,
+                    played_at="2026.06.07 18:09:09",
+                    source_kind="live_watcher",
+                    source_table="live_playback_events",
+                    source_type="player",
+                    video_name="Mood (Extreme) - 24kGoldn & Iann Dior | Just Dance 2022",
+                )
                 conn.commit()
 
             dances = load_daily_live_dances(date(2026, 6, 7), db_path)
@@ -133,10 +145,10 @@ class DailyReportTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "missing" / "app.sqlite3"
 
-            official = load_daily_dances(date(2026, 6, 7), db_path)
+            accepted = load_daily_dances(date(2026, 6, 7), db_path)
             live = load_daily_live_dances(date(2026, 6, 7), db_path)
 
-            self.assertEqual(official, [])
+            self.assertEqual(accepted, [])
             self.assertEqual(live, [])
             self.assertFalse(db_path.exists())
             self.assertFalse(db_path.parent.exists())

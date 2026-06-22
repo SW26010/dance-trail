@@ -123,18 +123,18 @@ def cmd_recommend():
 
 
 def cmd_day():
-    """Print official dance history for one local day."""
+    """Print accepted playback history for one local day."""
     import argparse
     from datetime import date
 
     config = _get_runtime_config()
-    parser = argparse.ArgumentParser(description="Print official dance history for one local day")
+    parser = argparse.ArgumentParser(description="Print accepted playback history for one local day")
     parser.add_argument("date", help="Local date in YYYY-MM-DD format")
     parser.add_argument("--app-db", default=None, help="SQLite path")
     parser.add_argument(
         "--live",
         action="store_true",
-        help="Read live playback rows written by watch-vrc-log --live-db",
+        help="Read live-derived accepted playback records only",
     )
     args = parser.parse_args(sys.argv[2:])
 
@@ -476,7 +476,7 @@ def main():
     user_builtin_commands = {
         "sync-wanna": (operation_descriptions["sync-wanna"], cmd_sync_wanna),
         "recommend": ("Generate daily recommendation playlist", cmd_recommend),
-        "day": ("Print official dance history for one local day", cmd_day),
+        "day": ("Print accepted playback history for one local day", cmd_day),
         "log": ("Append one dance log record", cmd_log),
         "import-favorites": ("Import favorite track flags from text", cmd_import_favorites),
         "import-vrcx": (operation_descriptions["import-vrcx"], cmd_import_vrcx),

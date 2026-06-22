@@ -28,6 +28,10 @@ The first refactor implements the core model directly:
   history, review attention, Timeline, and Insights reads.
 - `dance_events`, `vrcx_import_events`, and `live_playback_events` are retained
   as Legacy Playback Roots or runtime observation tables during the transition.
+- The read path has moved to `playback_records`, but several product write
+  paths have not: manual logging, VRCX import, queued-self sync, and explicit
+  live promotion still write through legacy transition tables until their
+  separate write-path migration is implemented.
 - Provider matching and popularity snapshots are deferred.
 
 ## Why The Model Changed
@@ -252,7 +256,9 @@ This table is the v0 read contract after the one-time legacy cleanup.
 
 Legacy Playback Root for older normalized playback history. It is retained for
 compatibility, migration, explicit live promotion, and diagnosis. Normal
-Timeline and Insights reads should use `playback_records` instead.
+Timeline and Insights reads should use `playback_records` instead. Current
+manual logging, queued-self sync, VRCX import normalization, and explicit live
+promotion may still create or update rows here as transition write paths.
 
 | Column | Type | Meaning |
 |---|---|---|
@@ -277,7 +283,9 @@ Timeline and Insights reads should use `playback_records` instead.
 
 Stores legacy VRCX import provenance and parse results. During the transition,
 it explains old imported rows and can feed migration or cleanup. It is not the
-ordinary Timeline or Insights root.
+ordinary Timeline or Insights root. The current `import-vrcx` command still
+writes this table plus legacy `dance_events`; moving importer writes directly
+to Local Playback Evidence is separate future work.
 
 | Column | Type | Meaning |
 |---|---|---|

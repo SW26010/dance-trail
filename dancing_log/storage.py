@@ -15,6 +15,10 @@ import unicodedata
 
 from dancing_log.app_paths import AppPaths
 from dancing_log.live_playback_settlement import is_live_playback_promotable
+from dancing_log.playback_evidence import (
+    init_playback_records_schema,
+    read_accepted_playback_history,
+)
 
 WANNA_SYSTEM_KEY = "wannadance"
 WANNA_SYSTEM_NAME = "WannaDance"
@@ -235,6 +239,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             ON live_playback_events(completion_status);
         """
     )
+    init_playback_records_schema(conn)
     _ensure_live_playback_columns(conn)
     ensure_dance_system(conn, WANNA_SYSTEM_KEY, WANNA_SYSTEM_NAME)
     conn.commit()
@@ -405,25 +410,9 @@ def load_dance_tracks(path: Path | str | None = None) -> list[dict]:
 
 
 def load_dance_log(path: Path | str | None = None) -> list[dict]:
-    """Load dance events in the recommendation/runtime record shape."""
+    """Load accepted Local Playback Evidence for recommendation/runtime reads."""
     with connect_db(path) as conn:
-        rows = conn.execute(
-            """
-            SELECT
-                de.played_at AS timestamp,
-                de.dance_track_id,
-                ds.key AS system_key,
-                dt.external_id,
-                de.source,
-                COALESCE(de.note, '') AS note
-            FROM dance_events de
-            JOIN dance_tracks dt ON dt.id = de.dance_track_id
-            JOIN dance_systems ds ON ds.id = dt.system_id
-            WHERE de.dance_track_id IS NOT NULL
-            ORDER BY de.played_at, de.id
-            """
-        ).fetchall()
-    return [dict(row) for row in rows]
+        return read_accepted_playback_history(conn)
 
 
 def add_dance_event(
@@ -671,7 +660,7 @@ def promote_live_playback_event(
     conn: sqlite3.Connection,
     event_key: str,
 ) -> int | None:
-    """Promote one eligible live event into the official dance timeline."""
+    """Promote one eligible live event into legacy dance_events."""
     row = conn.execute(
         "SELECT * FROM live_playback_events WHERE event_key = ?",
         (event_key,),
@@ -784,7 +773,7 @@ def mark_live_playback_event_interrupted(
     required_played_seconds: float | None,
     reason: str,
 ) -> bool:
-    """Mark a live playback row as ineligible for official history."""
+    """Mark a live playback row as ineligible for legacy promotion."""
     cursor = conn.execute(
         """
         UPDATE live_playback_events

@@ -30,6 +30,7 @@ from dancing_log.storage import (
 )
 from dancing_log.vrcx_importer import import_vrcx_database
 from dancing_log.wanna_catalog import sync_wanna_catalog, upsert_catalog
+from tests.playback_record_helpers import insert_playback_record
 
 
 def favorite_map(db_path: Path | str) -> dict[tuple[str, str], int]:
@@ -62,16 +63,23 @@ class SQLiteRuntimeTest(unittest.TestCase):
                     row["name"]
                     for row in conn.execute("PRAGMA table_info(dance_events)")
                 }
+                playback_columns = {
+                    row["name"]
+                    for row in conn.execute("PRAGMA table_info(playback_records)")
+                }
 
             self.assertIn("dance_systems", tables)
             self.assertIn("dance_tracks", tables)
             self.assertIn("wannadance_songs", tables)
             self.assertIn("music_tracks", tables)
             self.assertIn("dance_track_music_links", tables)
+            self.assertIn("playback_records", tables)
             self.assertIn("live_playback_events", tables)
             self.assertNotIn("songs", tables)
             self.assertIn("dance_track_id", dance_event_columns)
             self.assertNotIn("song_id", dance_event_columns)
+            self.assertIn("source_fingerprint", playback_columns)
+            self.assertIn("counts_in_history", playback_columns)
 
     def test_live_playback_upsert_is_idempotent_and_session_scoped(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -282,13 +290,59 @@ class SQLiteRuntimeTest(unittest.TestCase):
             )
 
             self.assertEqual(actual_source, SOURCE_RECOMMEND)
+            with connect_db(db_path) as conn:
+                row = conn.execute(
+                    """
+                    SELECT de.source, de.note, ds.key AS system_key, dt.external_id
+                    FROM dance_events de
+                    JOIN dance_tracks dt ON dt.id = de.dance_track_id
+                    JOIN dance_systems ds ON ds.id = dt.system_id
+                    """
+                ).fetchone()
+            self.assertEqual(row["system_key"], WANNA_SYSTEM_KEY)
+            self.assertEqual(row["external_id"], "5038")
+            self.assertEqual(row["source"], SOURCE_RECOMMEND)
+            self.assertEqual(row["note"], "nice run")
+
+    def test_recommendation_history_reads_playback_records_not_legacy_events(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "app.sqlite3")
+            with connect_db(db_path) as conn:
+                legacy_track_id = ensure_dance_track(
+                    conn,
+                    WANNA_SYSTEM_KEY,
+                    "100",
+                    {"title": "Legacy Song", "artist": "Legacy Artist"},
+                )
+                evidence_track_id = ensure_dance_track(
+                    conn,
+                    WANNA_SYSTEM_KEY,
+                    "200",
+                    {"title": "Evidence Song", "artist": "Evidence Artist"},
+                )
+                insert_playback_record(
+                    conn,
+                    track_id=evidence_track_id,
+                    played_at="2026-06-18T20:00:00+08:00",
+                    source_type="self",
+                )
+                conn.commit()
+
+            add_dance_event(
+                system_key=WANNA_SYSTEM_KEY,
+                external_id="100",
+                source="random",
+                played_at="2026-06-18T19:00:00+08:00",
+                event_source="legacy-test",
+                path=db_path,
+            )
+
             records = load_dance_log(db_path)
+
             self.assertEqual(len(records), 1)
-            self.assertEqual(records[0]["system_key"], WANNA_SYSTEM_KEY)
-            self.assertEqual(records[0]["external_id"], "5038")
-            self.assertIsInstance(records[0]["dance_track_id"], int)
-            self.assertEqual(records[0]["source"], SOURCE_RECOMMEND)
-            self.assertEqual(records[0]["note"], "nice run")
+            self.assertEqual(records[0]["dance_track_id"], evidence_track_id)
+            self.assertNotEqual(records[0]["dance_track_id"], legacy_track_id)
+            self.assertEqual(records[0]["external_id"], "200")
 
     def test_recommendation_uses_dance_track_ids_without_popularity(self):
         with tempfile.TemporaryDirectory() as tmp:

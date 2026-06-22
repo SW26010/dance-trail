@@ -401,28 +401,26 @@ const TEXT = {
     preserved: "Preserved",
     loading: "Loading...",
     danceTracks: "Dance tracks",
-    officialRecords: "Official records",
-    liveRows: "Live rows",
-    vrcxRows: "VRCX rows",
+    playbackRecords: "Playback records",
+    acceptedRecords: "Accepted",
+    attentionRecords: "Needs attention",
     runtimeState: "Runtime state",
     dbFound: "DB found",
     noDb: "No DB",
     noLiveRow: "No live playback row",
-    recentOfficial: "Recent official records",
+    recentAccepted: "Recent accepted records",
     local: "local",
     noRecords: "No records",
     time: "Time",
     track: "Track",
     source: "Source",
-    official: "Official",
-    live: "Live",
+    accepted: "Accepted",
+    live: "Live-derived",
     load: "Load",
     noTimelineRecords: "No timeline records",
     record: "Record",
-    reviewStatus: "Review status",
-    status_unchecked: "unchecked",
-    status_user_confirmed: "user confirmed",
-    status_user_discarded: "user discarded",
+    reviewStatus: "Status",
+    status_accepted: "accepted",
     searchCatalog: "Search catalog",
     search: "Search",
     noTracks: "No tracks",
@@ -480,7 +478,7 @@ const TEXT = {
     title_lists: "清单",
     subtitle_lists: "计划中的舞蹈清单",
     title_insights: "洞察",
-    subtitle_insights: "基于已确认历史的汇总",
+    subtitle_insights: "基于已接受历史的汇总",
     title_operations: "数据操作",
     subtitle_operations: "受控的批量工作流",
     title_settings: "设置",
@@ -511,28 +509,26 @@ const TEXT = {
     preserved: "已保留",
     loading: "正在加载...",
     danceTracks: "舞蹈条目",
-    officialRecords: "正式记录",
-    liveRows: "实时记录",
-    vrcxRows: "VRCX 记录",
+    playbackRecords: "播放记录",
+    acceptedRecords: "已接受",
+    attentionRecords: "需注意",
     runtimeState: "运行状态",
     dbFound: "数据库已找到",
     noDb: "无数据库",
     noLiveRow: "没有实时播放记录",
-    recentOfficial: "最近正式记录",
+    recentAccepted: "最近已接受记录",
     local: "本地",
     noRecords: "没有记录",
     time: "时间",
     track: "条目",
     source: "来源",
-    official: "正式",
-    live: "实时",
+    accepted: "已接受",
+    live: "实时来源",
     load: "加载",
     noTimelineRecords: "没有时间线记录",
     record: "记录",
-    reviewStatus: "审核状态",
-    status_unchecked: "未检查",
-    status_user_confirmed: "用户已确认",
-    status_user_discarded: "用户已丢弃",
+    reviewStatus: "状态",
+    status_accepted: "已接受",
     searchCatalog: "搜索目录",
     search: "搜索",
     noTracks: "没有条目",
@@ -1147,9 +1143,9 @@ async function renderHome() {
     <div class="message" id="home-message"></div>
     <div class="grid summary-grid">
       ${metric(ui("danceTracks"), data.counts?.dance_tracks ?? 0, "blue")}
-      ${metric(ui("officialRecords"), data.counts?.dance_events ?? 0, "green")}
-      ${metric(ui("liveRows"), data.counts?.live_playback_events ?? 0, "violet")}
-      ${metric(ui("vrcxRows"), data.counts?.vrcx_import_events ?? 0, "orange")}
+      ${metric(ui("playbackRecords"), data.counts?.playback_records ?? 0, "green")}
+      ${metric(ui("acceptedRecords"), data.counts?.accepted_playback_records ?? 0, "blue")}
+      ${metric(ui("attentionRecords"), data.counts?.needs_attention_playback_records ?? 0, "orange")}
     </div>
     <div class="grid two-col">
       ${renderLiveStatus(data.session || {})}
@@ -1168,7 +1164,7 @@ async function renderHome() {
         </div>
       </section>
       <section class="panel">
-        <div class="panel-head"><h2>${esc(ui("recentOfficial"))}</h2></div>
+        <div class="panel-head"><h2>${esc(ui("recentAccepted"))}</h2></div>
         <div class="panel-body">${renderRecent(data.recent || [])}</div>
       </section>
     </div>
@@ -1255,7 +1251,7 @@ function renderRecent(rows) {
 async function renderTimeline() {
   toolbarNode.innerHTML = `
     <input type="date" id="timeline-date" value="${new Date().toISOString().slice(0, 10)}">
-    <select id="timeline-source"><option value="official">${esc(ui("official"))}</option><option value="live">${esc(ui("live"))}</option></select>
+    <select id="timeline-source"><option value="accepted">${esc(ui("accepted"))}</option><option value="live">${esc(ui("live"))}</option></select>
     <button class="button" type="button" id="timeline-load">${esc(ui("load"))}</button>
   `;
   const node = document.getElementById("view-timeline");
@@ -1272,7 +1268,7 @@ async function renderTimeline() {
 function renderTimelineRows(rows) {
   if (!rows.length) return `<div class="empty">${esc(ui("noTimelineRecords"))}</div>`;
   return `<table><thead><tr><th style="width:110px">${esc(ui("time"))}</th><th>${esc(ui("record"))}</th><th style="width:150px">${esc(ui("reviewStatus"))}</th></tr></thead><tbody>
-    ${rows.map(row => `<tr><td>${esc(row.time)}</td><td>${esc(row.display)}</td><td><span class="pill ${row.review_status === "unchecked" ? "orange" : "green"}">${esc(reviewStatusLabel(row.review_status))}</span></td></tr>`).join("")}
+    ${rows.map(row => `<tr><td>${esc(row.time)}</td><td>${esc(row.display)}</td><td><span class="pill ${row.review_status === "accepted" ? "green" : "orange"}">${esc(reviewStatusLabel(row.review_status))}</span></td></tr>`).join("")}
   </tbody></table>`;
 }
 

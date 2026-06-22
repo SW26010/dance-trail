@@ -27,6 +27,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from dancing_log.playback_evidence import init_playback_records_schema  # noqa: E402
 from dancing_log.storage import ensure_dance_system, ensure_dance_track  # noqa: E402
 from dancing_log.wanna_catalog import load_cache_songs  # noqa: E402
 
@@ -684,60 +685,6 @@ def execute_cleanup(
             "catalog_actions_applied": dict(catalog_actions),
         }
     }
-
-
-def init_playback_records_schema(conn: sqlite3.Connection) -> None:
-    conn.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS playback_records (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cleanup_batch_id TEXT NOT NULL,
-            played_at TEXT NOT NULL,
-            original_played_at TEXT NOT NULL,
-            dance_track_id INTEGER,
-            dance_system_key TEXT NOT NULL,
-            dance_external_id TEXT NOT NULL,
-            source_kind TEXT NOT NULL,
-            source_root_key TEXT NOT NULL,
-            source_root_path TEXT NOT NULL,
-            source_table TEXT NOT NULL,
-            source_row_id INTEGER NOT NULL,
-            source_event_key TEXT,
-            source_fingerprint TEXT NOT NULL UNIQUE,
-            playback_status TEXT NOT NULL,
-            counts_in_history INTEGER NOT NULL DEFAULT 0,
-            status_reason TEXT NOT NULL,
-            source_priority INTEGER NOT NULL DEFAULT 0,
-            confidence REAL,
-            event_source TEXT,
-            source_type TEXT,
-            source_display_name TEXT,
-            video_url TEXT,
-            video_name TEXT,
-            requester_display_name TEXT,
-            requester_user_id TEXT,
-            location TEXT,
-            completion_status TEXT,
-            completion_reason TEXT,
-            catalog_status TEXT NOT NULL DEFAULT 'existing',
-            catalog_attention INTEGER NOT NULL DEFAULT 0,
-            provenance_json TEXT NOT NULL,
-            imported_at TEXT NOT NULL DEFAULT (datetime('now')),
-            FOREIGN KEY(dance_track_id) REFERENCES dance_tracks(id)
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_playback_records_played_at
-            ON playback_records(played_at);
-        CREATE INDEX IF NOT EXISTS idx_playback_records_track
-            ON playback_records(dance_track_id);
-        CREATE INDEX IF NOT EXISTS idx_playback_records_identity
-            ON playback_records(dance_system_key, dance_external_id);
-        CREATE INDEX IF NOT EXISTS idx_playback_records_status
-            ON playback_records(playback_status, counts_in_history);
-        CREATE INDEX IF NOT EXISTS idx_playback_records_source
-            ON playback_records(source_kind, source_root_key);
-        """
-    )
 
 
 def ensure_candidate_catalog(
