@@ -1,9 +1,12 @@
 # 跳舞数据模型
 
 日期：2026-05-17
+更新：2026-06-22
 
 本文描述 `dancing-log` 当前的 SQLite 运行时模型。项目已经不再使用旧的
 `songs` 表，也不再使用 `dance_events.song_id`。
+ADR 0004 记录的一次性 legacy cleanup 之后，`playback_records` 是普通
+Timeline 和 Insights 查询使用的 Local Playback Evidence v0 读模型 contract。
 
 英文对应文档：`docs/dance_data_model.md`
 
@@ -19,6 +22,10 @@
 - PyPyDance URL 身份已能从实测日志中识别；Dudu、VRDancing 和其他系统暂不支持，
   等看到真实元数据形状后再设计。
 - `music_tracks` 和 `dance_track_music_links` 已实现，当前用保守的标题/歌手匹配。
+- `playback_records` 是当前 accepted 历史、Review Attention、Timeline 和 Insights
+  读取使用的 Local Playback Evidence 根。
+- `dance_events`、`vrcx_import_events` 和 `live_playback_events` 在过渡期保留为
+  Legacy Playback Root 或运行时观察表。
 - 音乐平台匹配和热度快照暂缓。
 
 ## 为什么改模型
@@ -72,12 +79,19 @@
 
 它不包含舞者、人数、编舞版本或舞蹈系统 id。
 
-### 跳舞事件
+### 播放记录
 
-跳舞事件记录某个时间点播放了某个舞蹈条目。
+播放记录是 Local Playback Evidence，表示某个时间点观察、导入、清洗或合并到的
+舞蹈播放证据。
 
-它指向 `dance_events.dance_track_id`，不直接指向 WannaDance id。来源判断
-比如 `self`、`other`、`random`、`queued_self` 存在事件上。
+它指向 `playback_records.dance_track_id`，不直接指向 WannaDance id。`accepted`
+或 `needs_attention` 等接受状态存在播放记录上。`counts_in_history = 1` 的 accepted
+row 是普通 Timeline 和 Insights 的读取来源。
+
+### Legacy 跳舞事件
+
+Legacy 跳舞事件是 `dance_events` 里的旧标准化播放历史 row。它保留用于兼容、迁移和
+排查，但不是长期的普通播放历史 canonical root。
 
 ## 运行时表
 
@@ -120,8 +134,7 @@ UNIQUE(system_id, external_id)
 
 ### `wannadance_songs`
 
-记录 WannaDance 专有扩展字段。这些字段不放在 `dance_tracks` 或
-`dance_events` 里。
+记录 WannaDance 专有扩展字段。这些字段不放在 `dance_tracks` 或播放历史 row 里。
 
 | 字段 | 类型 | 含义 |
 |---|---|---|
@@ -183,9 +196,51 @@ UNIQUE(normalized_title, normalized_artist)
 PRIMARY KEY(dance_track_id, music_track_id)
 ```
 
+### `playback_records`
+
+记录普通 Timeline、复查和 Insights 使用的 Local Playback Evidence。这张表是一次性
+legacy cleanup 之后的 v0 读模型 contract。
+
+| 字段 | 类型 | 含义 |
+|---|---|---|
+| `id` | INTEGER PRIMARY KEY AUTOINCREMENT | 播放记录 id |
+| `cleanup_batch_id` | TEXT NOT NULL | 创建该 row 的 cleanup batch |
+| `played_at` | TEXT NOT NULL | 标准化后的播放时间 |
+| `original_played_at` | TEXT NOT NULL | 标准化前的来源时间 |
+| `dance_track_id` | INTEGER | 解析成功时指向 `dance_tracks.id` |
+| `dance_system_key` | TEXT NOT NULL | 舞蹈系统 key，比如 `wannadance` |
+| `dance_external_id` | TEXT NOT NULL | 系统内舞蹈 id |
+| `source_kind` | TEXT NOT NULL | 证据大类，比如 VRCX 或 live watcher |
+| `source_root_key` | TEXT NOT NULL | 来源 app root 或来源集合 key |
+| `source_root_path` | TEXT NOT NULL | 来源 app root 或数据库路径 |
+| `source_table` | TEXT NOT NULL | 原始来源表 |
+| `source_row_id` | INTEGER NOT NULL | 原始来源 row id |
+| `source_event_key` | TEXT | 原始来源 event key |
+| `source_fingerprint` | TEXT NOT NULL UNIQUE | 用于去重的稳定来源 row 指纹 |
+| `playback_status` | TEXT NOT NULL | `accepted`、`needs_attention` 或未来状态 |
+| `counts_in_history` | INTEGER NOT NULL DEFAULT 0 | 普通 Insights/history 是否统计该 row |
+| `status_reason` | TEXT NOT NULL | 当前默认状态的原因 |
+| `source_priority` | INTEGER NOT NULL DEFAULT 0 | overlap 复查时使用的来源优先级 |
+| `confidence` | REAL | 来源推断置信度 |
+| `event_source` | TEXT | legacy 或 parser event source |
+| `source_type` | TEXT | 推断出的 requester/source 类型 |
+| `source_display_name` | TEXT | 来源推断关联的展示名 |
+| `video_url` | TEXT | 原始播放 URL |
+| `video_name` | TEXT | 原始视频名 |
+| `requester_display_name` | TEXT | 点歌者展示名 |
+| `requester_user_id` | TEXT | 点歌者 VRChat user id |
+| `location` | TEXT | 世界或实例上下文 |
+| `completion_status` | TEXT | 适用时的 live 完成状态 |
+| `completion_reason` | TEXT | 适用时的 live 完成原因 |
+| `catalog_status` | TEXT NOT NULL DEFAULT `existing` | 目录解析状态 |
+| `catalog_attention` | INTEGER NOT NULL DEFAULT 0 | 目录数据是否需要注意 |
+| `provenance_json` | TEXT NOT NULL | 来源证据和 cleanup 溯源 |
+| `imported_at` | TEXT NOT NULL | 导入时间 |
+
 ### `dance_events`
 
-记录标准化后的播放时间线。
+Legacy Playback Root，保存旧的标准化播放历史。它保留用于兼容、迁移、显式 live
+promotion 和排查。普通 Timeline 和 Insights 应该改为读取 `playback_records`。
 
 | 字段 | 类型 | 含义 |
 |---|---|---|
@@ -208,7 +263,8 @@ PRIMARY KEY(dance_track_id, music_track_id)
 
 ### `vrcx_import_events`
 
-记录 VRCX 导入溯源和解析结果。
+记录 legacy VRCX 导入溯源和解析结果。过渡期里，它用于解释旧导入 row，也可以供迁移
+或 cleanup 使用。它不是普通 Timeline 或 Insights 根。
 
 | 字段 | 类型 | 含义 |
 |---|---|---|
@@ -248,7 +304,7 @@ PRIMARY KEY(dance_track_id, music_track_id)
   `played_seconds`、`required_played_seconds` 等完成度字段
 - `last_updated_at`、`promoted_dance_event_id` 和 `promoted_at`
 
-只有显式 live promotion 路径可以把 row 推进到 `dance_events`。promotion 要求
+当前只有显式 live promotion 路径可以把 row 推进到 legacy `dance_events`。promotion 要求
 `completion_status = completed`、存在 `actual_play_at`、有已知 `duration_seconds`、
 `observed_mid_play = false`，并且有解析出的舞蹈身份字段。半路观察和 interrupted row
 都不应自动成为普通延迟或统计事件。半路观察可以先保持为 `pending`，用于 OBS overlay
@@ -259,7 +315,8 @@ PRIMARY KEY(dance_track_id, music_track_id)
 ```mermaid
 erDiagram
     dance_systems ||--o{ dance_tracks : contains
-    dance_tracks ||--o{ dance_events : played_as
+    dance_tracks ||--o{ playback_records : evidenced_as
+    dance_tracks ||--o{ dance_events : legacy_played_as
     dance_tracks ||--o| wannadance_songs : has_wanna_fields
 
     dance_tracks ||--o{ dance_track_music_links : maps_to
@@ -271,18 +328,25 @@ erDiagram
 
 ## 查询路径
 
-从事件查舞蹈系统条目：
+从播放记录查舞蹈系统条目：
 
 ```text
-dance_events
+playback_records
   -> dance_tracks
   -> dance_systems
 ```
 
-从 WannaDance 事件查专有缓存字段：
+从 accepted 播放记录查普通 Insights/history：
 
 ```text
-dance_events
+playback_records
+  WHERE counts_in_history = 1
+```
+
+从 WannaDance 播放记录查专有缓存字段：
+
+```text
+playback_records
   -> dance_tracks
   -> wannadance_songs
 ```

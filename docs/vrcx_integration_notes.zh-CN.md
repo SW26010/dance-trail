@@ -173,12 +173,16 @@ VRCX 数据库路径也可以配置在 `config/dancing-log.local.json` 的 `vrcx
 
 - 读取 `gamelog_video_play`
 - 解析支持的 WannaDance 和实测 PyPyDance 播放 URL
-- 写入溯源表 `vrcx_import_events`
-- 写入标准时间线表 `dance_events`
+- 写入 legacy 溯源表 `vrcx_import_events`
+- 写入 legacy 标准化 row 到 `dance_events`
 - 如果解析到的 id 不在目录里，就创建 placeholder `dance_tracks`
 - 根据 requester 字段推断 `self`、`other`、`random` 或 `unknown`
 - 跳过不支持的舞蹈系统，避免误判成 WannaDance
 - 重复导入时保留更强的来源推断
+
+ADR 0003 和 ADR 0004 之后，`dance_events` 和 `vrcx_import_events` 是用于兼容、
+迁移和排查的 Legacy Playback Root。普通 Timeline 和 Insights 应该读取 accepted
+`playback_records`；把 importer 写入路径迁到 Local Playback Evidence 是单独的产品改动。
 
 当前支持的 WannaDance URL 包括公开 API host、实测 API-compatible host、Kiva
 上游 host，以及支持的 CDN 文件 URL 模式。实测 PyPyDance API URL 也会解析为
@@ -283,7 +287,8 @@ overlay 页面通过 server-sent events 读取同一份 live state。它显示�
 实时 watcher 和 overlay 里的 WannaDance duration 必须来自 VRChat 日志中的运行时信号。
 overlay 不应依靠主数据库的信息补运行时字段：不要从 `dance_tracks`、`wannadance_songs`、
 目录同步结果、收藏数据或已落库的 catalog metadata 反查 duration。主数据库可以作为
-`live_playback_events` 和显式 promotion 的写入目标，但不能作为 overlay 当前状态的事实来源。
+`live_playback_events` 和显式 legacy promotion 的写入目标，但不能作为 overlay
+当前状态的事实来源。
 
 历史日志里有两个可用的日志侧 duration 来源：
 
@@ -316,11 +321,14 @@ JSON 没有携带 duration；WannaDance 的 VRCX `VideoPlay` payload 里 duratio
 3. 如果两个来源都存在且冲突，记录 anomaly，不能静默覆盖。
 4. 如果没有任何运行时 duration，overlay 只显示 elapsed，不从 catalog 或主数据库回填。
 
-严格 promotion 到 `dance_events` 需要显式传入 `--promote-live`。promotion 要求 live row
-已经 `completion_status = completed`，存在 `actual_play_at`，有已知 `duration_seconds`，
+严格兼容 promotion 到 legacy `dance_events` 需要显式传入 `--promote-live`。promotion 要求
+live row 已经 `completion_status = completed`，存在 `actual_play_at`，有已知 `duration_seconds`，
 没有 `observed_mid_play`，并且有解析出的 dance system/external id。watcher 只有在观察到
 完整时长后才标记完成。下一首过早出现、离开房间、退出 VRChat 或视频系统关闭时，尚未
-完成的 live row 会标记为 `interrupted`，不会推进正式历史。
+完成的 live row 会标记为 `interrupted`，不会推进 legacy promotion 或 accepted history。
+
+等 watcher 直接写入 Local Playback Evidence 后，保守 watcher completion 应默认启用
+Automatic Acceptance。legacy `--promote-live` 是过渡机制，不是长期产品默认入口。
 
 当前 watcher/overlay 行为基于 2026-05-17 和 2026-05-18 的真实 live capture 收口：
 
@@ -333,7 +341,7 @@ JSON 没有携带 duration；WannaDance 的 VRCX `VideoPlay` payload 里 duratio
 - `Playing synced` 只记录为 `synced_play_at`，不会清空 overlay，也不会让 row 变成
   `observed_mid_play`。
 - 真正半路进房由明确的正 progress offset 判断。这类 row 可以保持为 overlay 的 pending
-  current playback，但不会 promotion 到正式历史。
+  current playback，但不会 promotion 到 legacy history 或 accepted history。
 
 ## 还不能完全确定的事
 

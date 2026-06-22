@@ -280,13 +280,18 @@ The importer currently:
 
 - reads `gamelog_video_play`
 - parses supported WannaDance and observed PyPyDance playback URLs
-- writes provenance rows to `vrcx_import_events`
-- writes normalized timeline rows to `dance_events`
+- writes legacy provenance rows to `vrcx_import_events`
+- writes legacy normalized rows to `dance_events`
 - creates placeholder `dance_tracks` rows when a parsed id is not already in the
   catalog
 - infers `self`, `other`, `random`, or `unknown` from requester fields
 - skips unsupported dance systems instead of misclassifying them as WannaDance
 - keeps stronger source inference when the same event is imported again
+
+After ADR 0003 and ADR 0004, `dance_events` and `vrcx_import_events` are Legacy
+Playback Roots for compatibility, migration, and diagnosis. Normal Timeline and
+Insights reads should use accepted `playback_records`; moving importer writes to
+Local Playback Evidence is a separate product change.
 
 Supported WannaDance URL families include documented API hosts, observed
 WannaDance-compatible API hosts, upstream Kiva hosts, and supported CDN file URL
@@ -406,8 +411,8 @@ WannaDance duration for live watcher and overlay state must come from VRChat log
 signals only. The overlay must not query or depend on the main app database,
 `dance_tracks`, `wannadance_songs`, catalog sync output, favorites, or other
 stored catalog metadata to fill missing runtime fields. The main database can be
-a sink for `live_playback_events` and explicit promotion, but it must not become
-the source of truth for what the overlay shows.
+a sink for `live_playback_events` and explicit legacy promotion, but it must not
+become the source of truth for what the overlay shows.
 
 Historical log inspection on 2026-05-18 found two useful log-derived duration
 sources:
@@ -456,13 +461,18 @@ Preferred runtime order:
    a total duration or progress percentage; it should not backfill from catalog
    tables.
 
-Strict promotion into `dance_events` is explicit behind `--promote-live`.
-Promotion requires a completed live row with `completion_status = completed`,
+Strict compatibility promotion into legacy `dance_events` is explicit behind
+`--promote-live`. Promotion requires a completed live row with
+`completion_status = completed`,
 `actual_play_at`, known `duration_seconds`, no `observed_mid_play`, and a parsed
 dance system/external id. The watcher marks completion after observing at least
 80% of the known duration. If a next song appears too early, or a room leave /
 VRChat quit / video shutdown appears before completion, the pending live row is marked
 `interrupted` and is not promoted.
+
+After the watcher writes Local Playback Evidence directly, conservative watcher
+completion should default to automatic acceptance. The legacy `--promote-live`
+switch is a transition mechanism, not the long-term product default.
 
 Current watcher/overlay behavior is based on the 2026-05-17 and 2026-05-18 live
 captures:
@@ -484,7 +494,7 @@ captures:
   overlay and does not make a row `observed_mid_play`.
 - True mid-room joins are detected from explicit positive progress offsets.
   These rows can remain visible as pending overlay current playback, but they
-  remain ineligible for promotion into official history.
+  remain ineligible for legacy promotion or accepted history.
 
 ## Self Identity Detection
 

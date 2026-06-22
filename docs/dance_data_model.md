@@ -1,10 +1,14 @@
 # Dance Data Model
 
 Date: 2026-05-17
+Updated: 2026-06-22
 
 This document describes the current SQLite runtime model for `dancing-log`.
 The project no longer uses the legacy `songs` table or
 `dance_events.song_id` path.
+After the legacy cleanup recorded in ADR 0004, `playback_records` is the
+Local Playback Evidence v0 read contract for normal Timeline and Insights
+queries.
 
 ## Current Scope
 
@@ -20,6 +24,10 @@ The first refactor implements the core model directly:
   inspected.
 - `music_tracks` and `dance_track_music_links` are implemented with conservative
   title/artist matching.
+- `playback_records` is the current Local Playback Evidence root for accepted
+  history, review attention, Timeline, and Insights reads.
+- `dance_events`, `vrcx_import_events`, and `live_playback_events` are retained
+  as Legacy Playback Roots or runtime observation tables during the transition.
 - Provider matching and popularity snapshots are deferred.
 
 ## Why The Model Changed
@@ -79,13 +87,21 @@ Examples:
 It intentionally does not contain dancer, player count, choreography version, or
 dance-system id.
 
-### Dance Event
+### Playback Record
 
-A dance event records that a dance track was played at a time.
+A playback record is Local Playback Evidence that a dance track was observed,
+imported, cleaned, or merged at a time.
 
-It points to `dance_events.dance_track_id`, not to a WannaDance id directly.
-Source inference such as `self`, `other`, `random`, or `queued_self` lives on the
-event.
+It points to `playback_records.dance_track_id`, not to a WannaDance id directly.
+Acceptance state such as `accepted` or `needs_attention` lives on the playback
+record. Accepted rows with `counts_in_history = 1` are the normal source for
+Timeline and Insights.
+
+### Legacy Dance Event
+
+A legacy dance event is an older normalized playback-history row in
+`dance_events`. It is kept for compatibility, migration, and diagnosis, but it
+is not the long-term canonical root for ordinary playback history.
 
 ## Runtime Tables
 
@@ -129,7 +145,7 @@ UNIQUE(system_id, external_id)
 ### `wannadance_songs`
 
 Stores WannaDance-specific extension fields. These fields are intentionally not
-stored in `dance_tracks` or `dance_events`.
+stored in `dance_tracks` or playback history rows.
 
 | Column | Type | Meaning |
 |---|---|---|
@@ -191,9 +207,52 @@ Constraint:
 PRIMARY KEY(dance_track_id, music_track_id)
 ```
 
+### `playback_records`
+
+Stores Local Playback Evidence for normal Timeline, review, and Insights reads.
+This table is the v0 read contract after the one-time legacy cleanup.
+
+| Column | Type | Meaning |
+|---|---|---|
+| `id` | INTEGER PRIMARY KEY AUTOINCREMENT | Playback record id |
+| `cleanup_batch_id` | TEXT NOT NULL | Cleanup batch that created the row |
+| `played_at` | TEXT NOT NULL | Normalized playback time |
+| `original_played_at` | TEXT NOT NULL | Source timestamp before normalization |
+| `dance_track_id` | INTEGER | References `dance_tracks.id` when resolved |
+| `dance_system_key` | TEXT NOT NULL | Dance-system key, for example `wannadance` |
+| `dance_external_id` | TEXT NOT NULL | System-local dance id |
+| `source_kind` | TEXT NOT NULL | Broad evidence kind, such as VRCX or live watcher |
+| `source_root_key` | TEXT NOT NULL | Source app root or source set key |
+| `source_root_path` | TEXT NOT NULL | Source app root or database path |
+| `source_table` | TEXT NOT NULL | Original source table |
+| `source_row_id` | INTEGER NOT NULL | Original source row id |
+| `source_event_key` | TEXT | Original source event key |
+| `source_fingerprint` | TEXT NOT NULL UNIQUE | Stable source-row fingerprint for dedupe |
+| `playback_status` | TEXT NOT NULL | `accepted`, `needs_attention`, or future status |
+| `counts_in_history` | INTEGER NOT NULL DEFAULT 0 | Whether normal Insights/history should count this row |
+| `status_reason` | TEXT NOT NULL | Reason for the current default status |
+| `source_priority` | INTEGER NOT NULL DEFAULT 0 | Source priority used for overlap review |
+| `confidence` | REAL | Source inference confidence |
+| `event_source` | TEXT | Legacy or parser event source |
+| `source_type` | TEXT | Inferred requester/source type |
+| `source_display_name` | TEXT | Display name attached to source inference |
+| `video_url` | TEXT | Raw playback URL |
+| `video_name` | TEXT | Raw video name |
+| `requester_display_name` | TEXT | Requester display name |
+| `requester_user_id` | TEXT | Requester VRChat user id |
+| `location` | TEXT | World or instance context |
+| `completion_status` | TEXT | Live completion state when applicable |
+| `completion_reason` | TEXT | Live completion reason when applicable |
+| `catalog_status` | TEXT NOT NULL DEFAULT `existing` | Catalog resolution status |
+| `catalog_attention` | INTEGER NOT NULL DEFAULT 0 | Whether catalog data needs attention |
+| `provenance_json` | TEXT NOT NULL | Source evidence and cleanup provenance |
+| `imported_at` | TEXT NOT NULL | Import timestamp |
+
 ### `dance_events`
 
-Stores the normalized playback timeline.
+Legacy Playback Root for older normalized playback history. It is retained for
+compatibility, migration, explicit live promotion, and diagnosis. Normal
+Timeline and Insights reads should use `playback_records` instead.
 
 | Column | Type | Meaning |
 |---|---|---|
@@ -216,7 +275,9 @@ Stores the normalized playback timeline.
 
 ### `vrcx_import_events`
 
-Stores VRCX import provenance and parse results.
+Stores legacy VRCX import provenance and parse results. During the transition,
+it explains old imported rows and can feed migration or cleanup. It is not the
+ordinary Timeline or Insights root.
 
 | Column | Type | Meaning |
 |---|---|---|
@@ -259,8 +320,8 @@ Columns mirror the forensic `playback_events.jsonl` shape, including:
   `required_played_seconds`
 - `last_updated_at`, `promoted_dance_event_id`, and `promoted_at`
 
-Rows from this table can be promoted into `dance_events` only through the
-explicit live promotion path. Promotion requires `completion_status =
+Rows from this table can currently be promoted into legacy `dance_events` only
+through the explicit live promotion path. Promotion requires `completion_status =
 completed`, `actual_play_at`, known `duration_seconds`,
 `played_seconds >= 80% * duration_seconds`, `observed_mid_play = false`, and
 parsed dance identity fields. Mid-play observations may remain `pending` so the
@@ -269,14 +330,15 @@ rows remain useful for forensic review. Neither case should automatically
 become a normal delay/statistics event.
 `duration_source` records where the runtime duration came from, such as a VRCX
 payload or WannaDance queue JSON; it is runtime provenance only and is not added
-to `dance_events`.
+to normal playback history.
 
 ## Relationship Diagram
 
 ```mermaid
 erDiagram
     dance_systems ||--o{ dance_tracks : contains
-    dance_tracks ||--o{ dance_events : played_as
+    dance_tracks ||--o{ playback_records : evidenced_as
+    dance_tracks ||--o{ dance_events : legacy_played_as
     dance_tracks ||--o| wannadance_songs : has_wanna_fields
 
     dance_tracks ||--o{ dance_track_music_links : maps_to
@@ -288,18 +350,25 @@ erDiagram
 
 ## Query Paths
 
-From an event to its dance-system entry:
+From a playback record to its dance-system entry:
 
 ```text
-dance_events
+playback_records
   -> dance_tracks
   -> dance_systems
 ```
 
-From a WannaDance event to WannaDance cache fields:
+From an accepted playback record to normal Insights/history:
 
 ```text
-dance_events
+playback_records
+  WHERE counts_in_history = 1
+```
+
+From a WannaDance playback record to WannaDance cache fields:
+
+```text
+playback_records
   -> dance_tracks
   -> wannadance_songs
 ```

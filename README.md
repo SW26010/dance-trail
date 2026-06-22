@@ -11,15 +11,16 @@ temporary import/export artifacts only.
 
 ## Current Data Model
 
-The database now separates three concepts:
+The database now separates four concepts:
 
 - `dance_systems`: dance systems such as `wannadance`.
 - `dance_tracks`: a playable dance entry inside one dance system.
 - `music_tracks`: a real music track, shared by one or more dance versions.
+- `playback_records`: Local Playback Evidence for Timeline, review, and Insights.
 
 WannaDance-specific cache fields live in `wannadance_songs`, not in
-`dance_events`. A playback event points to `dance_events.dance_track_id`, which
-points to `dance_tracks.id`.
+playback history rows. A playback record points to
+`playback_records.dance_track_id`, which points to `dance_tracks.id`.
 
 Core tables:
 
@@ -28,8 +29,18 @@ Core tables:
 - `wannadance_songs`
 - `music_tracks`
 - `dance_track_music_links`
+- `playback_records`
+
+Transition and forensic tables:
+
 - `dance_events`
 - `vrcx_import_events`
+- `live_playback_events`
+
+`dance_events`, `vrcx_import_events`, and `live_playback_events` are Legacy
+Playback Roots or runtime observation tables during the transition. They may be
+read for compatibility, migration, and diagnosis, but normal Timeline and
+Insights reads should use accepted `playback_records`.
 
 Deferred tables:
 
@@ -135,11 +146,12 @@ Each line is formatted as `HH:MM:SS song-id. song name`, for example:
 12:00:00 8378. Party In The U.S.A. - Miley Cyrus | Just Dance 2025
 ```
 
-Without `--live`, the command uses the stricter official-history view from
-`dance_events`. `--live` reads `live_playback_events`, which is useful for
-checking what `watch-vrc-log --live-db` observed, but it can include rows that
-were not promoted into official history, including `interrupted` or `pending`
-live rows.
+The product target for normal daily history is accepted `playback_records`.
+Until the Local Playback Evidence read module replaces the legacy reads, the
+current command still uses the older split: without `--live`, it reads
+`dance_events`; `--live` reads `live_playback_events`, which is useful for
+checking what `watch-vrc-log --live-db` observed, but it can include rows such
+as `interrupted` or `pending` live rows.
 
 Import favorite song IDs from a UTF-8 text file. It can contain one external id
 per line, or a WannaDance export line such as `WannaFavorite:6495,10508`:
@@ -257,9 +269,11 @@ uv run python main.py watch-vrc-log --live-db --overlay-port 8765
 
 The local overlay page is available at `http://127.0.0.1:8765/overlay`. It is
 self-contained, binds only to localhost, and updates through server-sent events.
-`live_playback_events` is updated immediately as log signals arrive; official
+`live_playback_events` is updated immediately as log signals arrive; legacy
 `dance_events` are written only when `--promote-live` is passed and the live row
-has played at least 80% of the known `duration_seconds`.
+has played at least 80% of the known `duration_seconds`. Normal
+Timeline and Insights history should be read from `playback_records` after the
+Local Playback Evidence read module is in place.
 
 Room leave and VRChat quit/shutdown log events clear the overlay's current
 playback and mark pending live rows as interrupted. Entering-room status is
@@ -281,7 +295,7 @@ WannaDance/PyPyDance `Playing synced` lines are recorded as `synced_play_at`
 only; they do not by themselves clear the overlay or mark a row as mid-play.
 Mid-play detection comes from explicit progress offsets. Mid-play rows remain
 visible in the overlay as pending current playback, but they remain ineligible
-for promotion into official history.
+for legacy promotion or accepted history.
 
 ## Queued-Self Manifests
 
