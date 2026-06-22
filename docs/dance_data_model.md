@@ -27,11 +27,10 @@ The first refactor implements the core model directly:
 - `playback_records` is the current Local Playback Evidence root for accepted
   history, review attention, Timeline, and Insights reads.
 - `dance_events`, `vrcx_import_events`, and `live_playback_events` are retained
-  as Legacy Playback Roots or runtime observation tables during the transition.
-- The read path has moved to `playback_records`, but several product write
-  paths have not: manual logging, VRCX import, queued-self sync, and explicit
-  live promotion still write through legacy transition tables until their
-  separate write-path migration is implemented.
+  as Legacy Playback Roots, staging provenance, or runtime observation tables
+  during the transition.
+- Manual logging, VRCX import, queued-self sync, and explicit live promotion
+  write target-owned Local Playback Evidence into `playback_records`.
 - Provider matching and popularity snapshots are deferred.
 
 ## Why The Model Changed
@@ -252,13 +251,28 @@ This table is the v0 read contract after the one-time legacy cleanup.
 | `provenance_json` | TEXT NOT NULL | Source evidence and cleanup provenance |
 | `imported_at` | TEXT NOT NULL | Import timestamp |
 
+`source_type` and `source_priority` are intentionally separate concepts.
+`source_type` is the requester/source classification, for example
+`queued_self`, `recommend`, `self`, `other`, `random`, or `unknown`. Its
+precedence is only used to preserve a stronger classification when the same
+playback record is replayed or reimported; for example, a queued-self overlay
+must not be downgraded back to VRCX-inferred `random`. `source_priority` is the
+evidence strength used when reviewing overlapping or conflicting playback
+records, such as live watcher evidence, VRCX history, a manual decision, or
+automatic acceptance. It is not the ordering of requester/source categories.
+
+`source_root_path` should identify the source app root or database path when a
+row is tied to an external source. Project-owned or ADR 0004 compatibility rows
+may preserve the project/app root used by their stable source identity; raw
+external database paths should also be recorded in `provenance_json` when the
+source table is local staging.
+
 ### `dance_events`
 
 Legacy Playback Root for older normalized playback history. It is retained for
-compatibility, migration, explicit live promotion, and diagnosis. Normal
-Timeline and Insights reads should use `playback_records` instead. Current
-manual logging, queued-self sync, VRCX import normalization, and explicit live
-promotion may still create or update rows here as transition write paths.
+compatibility, migration, and diagnosis. Normal Timeline and Insights reads use
+`playback_records` instead. Current product write paths no longer create or
+update ordinary history here.
 
 | Column | Type | Meaning |
 |---|---|---|
@@ -281,11 +295,11 @@ promotion may still create or update rows here as transition write paths.
 
 ### `vrcx_import_events`
 
-Stores legacy VRCX import provenance and parse results. During the transition,
-it explains old imported rows and can feed migration or cleanup. It is not the
-ordinary Timeline or Insights root. The current `import-vrcx` command still
-writes this table plus legacy `dance_events`; moving importer writes directly
-to Local Playback Evidence is separate future work.
+Stores VRCX import provenance and parse results. During the transition, it
+explains imported source rows and can feed migration or cleanup. It is not the
+ordinary Timeline or Insights root. The current `import-vrcx` command writes
+this table as staging provenance and writes accepted Local Playback Evidence to
+`playback_records`.
 
 | Column | Type | Meaning |
 |---|---|---|
@@ -326,10 +340,11 @@ Columns mirror the forensic `playback_events.jsonl` shape, including:
 - completion fields such as `completion_status`, `completion_reason`,
   `completed_at`, `interrupted_at`, `played_seconds`, and
   `required_played_seconds`
-- `last_updated_at`, `promoted_dance_event_id`, and `promoted_at`
+- `last_updated_at`, `promoted_dance_event_id`,
+  `promoted_playback_record_id`, and `promoted_at`
 
-Rows from this table can currently be promoted into legacy `dance_events` only
-through the explicit live promotion path. Promotion requires `completion_status =
+Rows from this table can be promoted into accepted `playback_records` through
+the explicit live promotion path. Promotion requires `completion_status =
 completed`, `actual_play_at`, known `duration_seconds`,
 `played_seconds >= 80% * duration_seconds`, `observed_mid_play = false`, and
 parsed dance identity fields. Mid-play observations may remain `pending` so the

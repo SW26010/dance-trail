@@ -16,6 +16,13 @@ from dancing_log.storage import (
     ensure_dance_system,
     ensure_dance_track,
 )
+from dancing_log.playback_record_writer import (
+    PROJECT_SOURCE_ROOT_KEY,
+    PROJECT_SOURCE_ROOT_PATH,
+    PlaybackRecordWrite,
+    source_fingerprint,
+    upsert_playback_record,
+)
 
 
 SOURCE_SELF = "self"
@@ -23,7 +30,16 @@ SOURCE_OTHER = "other"
 SOURCE_RANDOM = "random"
 SOURCE_UNKNOWN = "unknown"
 
-SOURCE_PRIORITY_SQL = """
+SOURCE_TYPE_PRECEDENCE = {
+    "queued_self": 6,
+    "recommend": 5,
+    "self": 4,
+    "other": 3,
+    "random": 2,
+    "unknown": 1,
+}
+
+SOURCE_TYPE_PRECEDENCE_SQL = """
     CASE {column}
         WHEN 'queued_self' THEN 6
         WHEN 'recommend' THEN 5
@@ -41,8 +57,13 @@ class ImportStats:
     scanned: int = 0
     candidate_events: int = 0
     staging_changed: int = 0
-    dance_events_changed: int = 0
+    playback_records_changed: int = 0
     skipped_unsupported: int = 0
+
+    @property
+    def dance_events_changed(self) -> int:
+        """Compatibility alias for pre-playback-record import callers."""
+        return self.playback_records_changed
 
 
 @dataclass(frozen=True)
@@ -237,7 +258,7 @@ def import_vrcx_database(
 
     with connect_db(app_db_path) as app_conn:
         staging_changed = 0
-        dance_events_changed = 0
+        playback_records_changed = 0
         skipped_unsupported = 0
 
         for row in rows:
@@ -291,11 +312,11 @@ def import_vrcx_database(
                     inferred_source = excluded.inferred_source,
                     confidence = excluded.confidence
                 WHERE
-                    """ + SOURCE_PRIORITY_SQL.format(column="excluded.inferred_source") + """
-                    > """ + SOURCE_PRIORITY_SQL.format(column="vrcx_import_events.inferred_source") + """
+                    """ + SOURCE_TYPE_PRECEDENCE_SQL.format(column="excluded.inferred_source") + """
+                    > """ + SOURCE_TYPE_PRECEDENCE_SQL.format(column="vrcx_import_events.inferred_source") + """
                     OR (
-                        """ + SOURCE_PRIORITY_SQL.format(column="excluded.inferred_source") + """
-                        = """ + SOURCE_PRIORITY_SQL.format(column="vrcx_import_events.inferred_source") + """
+                        """ + SOURCE_TYPE_PRECEDENCE_SQL.format(column="excluded.inferred_source") + """
+                        = """ + SOURCE_TYPE_PRECEDENCE_SQL.format(column="vrcx_import_events.inferred_source") + """
                         AND excluded.confidence > vrcx_import_events.confidence
                     )
                 """,
@@ -318,49 +339,60 @@ def import_vrcx_database(
             )
             staging_changed += staging_cursor.rowcount
 
-            event_cursor = app_conn.execute(
+            staging_row = app_conn.execute(
                 """
-                INSERT INTO dance_events (
-                    played_at,
-                    dance_track_id,
-                    source,
-                    confidence,
-                    event_source,
-                    event_key,
-                    video_url,
-                    video_name,
-                    requester_display_name,
-                    requester_user_id,
-                    location
-                )
-                VALUES (?, ?, ?, ?, 'vrcx', ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(event_key) DO UPDATE SET
-                    dance_track_id = excluded.dance_track_id,
-                    source = excluded.source,
-                    confidence = excluded.confidence
-                WHERE
-                    """ + SOURCE_PRIORITY_SQL.format(column="excluded.source") + """
-                    > """ + SOURCE_PRIORITY_SQL.format(column="dance_events.source") + """
-                    OR (
-                        """ + SOURCE_PRIORITY_SQL.format(column="excluded.source") + """
-                        = """ + SOURCE_PRIORITY_SQL.format(column="dance_events.source") + """
-                        AND excluded.confidence > dance_events.confidence
-                    )
+                SELECT *
+                FROM vrcx_import_events
+                WHERE event_key = ?
                 """,
-                (
-                    row["created_at"],
-                    dance_track_id,
-                    source,
-                    confidence,
-                    event_key,
-                    row["video_url"],
-                    row["video_name"],
-                    row["display_name"],
-                    row["user_id"],
-                    row["location"],
+                (event_key,),
+            ).fetchone()
+            source_identity = _vrcx_playback_source_identity(
+                app_conn,
+                event_key=event_key,
+                staging_row_id=int(staging_row["id"]),
+            )
+            source_type, source_confidence = _playback_source_type_for_vrcx_write(
+                app_conn,
+                source_identity=source_identity,
+                incoming_source_type=staging_row["inferred_source"],
+                incoming_confidence=staging_row["confidence"],
+            )
+            write_result = upsert_playback_record(
+                app_conn,
+                PlaybackRecordWrite(
+                    played_at=staging_row["created_at"],
+                    original_played_at=staging_row["created_at"],
+                    dance_track_id=staging_row["parsed_dance_track_id"],
+                    dance_system_key=parsed.system_key,
+                    dance_external_id=staging_row["parsed_external_id"],
+                    source_kind="vrcx_history",
+                    source_root_key=source_identity["source_root_key"],
+                    source_root_path=source_identity["source_root_path"],
+                    source_table=source_identity["source_table"],
+                    source_row_id=source_identity["source_row_id"],
+                    source_event_key=source_identity["source_event_key"],
+                    status_reason="vrcx_import",
+                    source_priority=10,
+                    confidence=source_confidence,
+                    event_source="vrcx",
+                    source_type=source_type,
+                    source_display_name=staging_row["display_name"],
+                    video_url=staging_row["video_url"],
+                    video_name=staging_row["video_name"],
+                    requester_display_name=staging_row["display_name"],
+                    requester_user_id=staging_row["user_id"],
+                    location=staging_row["location"],
+                    provenance={
+                        "vrcx_db_path": str(vrcx_path.resolve()),
+                        "vrcx_import_event": {
+                            key: staging_row[key]
+                            for key in staging_row.keys()
+                        }
+                    },
                 ),
             )
-            dance_events_changed += event_cursor.rowcount
+            playback_records_changed += write_result.changed
 
         app_conn.commit()
 
@@ -368,13 +400,103 @@ def import_vrcx_database(
         scanned=stats.scanned,
         candidate_events=stats.candidate_events,
         staging_changed=staging_changed,
-        dance_events_changed=dance_events_changed,
+        playback_records_changed=playback_records_changed,
         skipped_unsupported=skipped_unsupported,
     )
 
 
 def _is_supported(parsed: DanceUrlParseResult) -> bool:
     return bool(parsed.system_key and parsed.external_id)
+
+
+def _playback_source_type_for_vrcx_write(
+    conn: sqlite3.Connection,
+    *,
+    source_identity: dict[str, object],
+    incoming_source_type: str | None,
+    incoming_confidence: float | None,
+) -> tuple[str | None, float | None]:
+    """Keep VRCX reimports from downgrading stronger source_type decisions."""
+    fingerprint = source_fingerprint(
+        source_identity["source_root_key"],
+        source_identity["source_table"],
+        source_identity["source_row_id"],
+        source_identity["source_event_key"],
+    )
+    existing = conn.execute(
+        """
+        SELECT source_type, confidence
+        FROM playback_records
+        WHERE source_fingerprint = ?
+        """,
+        (fingerprint,),
+    ).fetchone()
+    if existing is None:
+        return incoming_source_type, incoming_confidence
+
+    existing_type = existing["source_type"]
+    existing_confidence = existing["confidence"]
+    existing_rank = _source_type_precedence(existing_type)
+    incoming_rank = _source_type_precedence(incoming_source_type)
+    if existing_rank > incoming_rank:
+        return existing_type, existing_confidence
+    if (
+        existing_rank == incoming_rank
+        and _confidence_value(existing_confidence) > _confidence_value(incoming_confidence)
+    ):
+        return existing_type, existing_confidence
+    return incoming_source_type, incoming_confidence
+
+
+def _source_type_precedence(source_type: str | None) -> int:
+    return SOURCE_TYPE_PRECEDENCE.get((source_type or "").strip(), 0)
+
+
+def _confidence_value(confidence: float | None) -> float:
+    return float(confidence) if confidence is not None else -1.0
+
+
+def _vrcx_playback_source_identity(
+    conn: sqlite3.Connection,
+    *,
+    event_key: str,
+    staging_row_id: int,
+) -> dict[str, object]:
+    existing = conn.execute(
+        """
+        SELECT source_root_key, source_root_path, source_table, source_row_id, source_event_key
+        FROM playback_records
+        WHERE source_kind = 'vrcx_history' AND source_event_key = ?
+        ORDER BY
+            CASE source_table WHEN 'dance_events' THEN 0 ELSE 1 END,
+            id
+        LIMIT 1
+        """,
+        (event_key,),
+    ).fetchone()
+    if existing is not None:
+        return dict(existing)
+
+    legacy_event = conn.execute(
+        "SELECT id FROM dance_events WHERE event_key = ?",
+        (event_key,),
+    ).fetchone()
+    if legacy_event is not None:
+        return {
+            "source_root_key": PROJECT_SOURCE_ROOT_KEY,
+            "source_root_path": PROJECT_SOURCE_ROOT_PATH,
+            "source_table": "dance_events",
+            "source_row_id": int(legacy_event["id"]),
+            "source_event_key": event_key,
+        }
+
+    return {
+        "source_root_key": PROJECT_SOURCE_ROOT_KEY,
+        "source_root_path": PROJECT_SOURCE_ROOT_PATH,
+        "source_table": "vrcx_import_events",
+        "source_row_id": staging_row_id,
+        "source_event_key": event_key,
+    }
 
 
 def _system_name(system_key: str | None) -> str:

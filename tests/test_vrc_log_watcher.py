@@ -913,10 +913,13 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertEqual(first["duration_source"], "wanna_queue_json")
             with connect_db(db_path) as conn:
                 event_count = conn.execute("SELECT count(*) FROM dance_events").fetchone()[0]
+                playback_count = conn.execute("SELECT count(*) FROM playback_records").fetchone()[0]
                 live_row = conn.execute(
                     "SELECT * FROM live_playback_events WHERE dance_external_id = '3114'"
                 ).fetchone()
-            self.assertEqual(event_count, 1)
+            self.assertEqual(event_count, 0)
+            self.assertEqual(playback_count, 1)
+            self.assertIsNotNone(live_row["promoted_playback_record_id"])
             self.assertEqual(live_row["completion_status"], "completed")
             self.assertEqual(live_row["duration_source"], "wanna_queue_json")
 
@@ -1012,7 +1015,10 @@ class VrcLogWatcherTest(unittest.TestCase):
                     "SELECT * FROM live_playback_events WHERE dance_external_id = '3919'"
                 ).fetchone()
                 event_count = conn.execute("SELECT count(*) FROM dance_events").fetchone()[0]
-            self.assertEqual(event_count, 1)
+                playback_count = conn.execute("SELECT count(*) FROM playback_records").fetchone()[0]
+            self.assertEqual(event_count, 0)
+            self.assertEqual(playback_count, 1)
+            self.assertIsNotNone(live_row["promoted_playback_record_id"])
             self.assertEqual(live_row["completion_status"], "completed")
             self.assertEqual(live_row["completion_reason"], "observed_completion_threshold")
             self.assertEqual(live_row["played_seconds"], 9.0)
@@ -1053,8 +1059,10 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertEqual(stats.live_promotions, 0)
             with connect_db(db_path) as conn:
                 event_count = conn.execute("SELECT count(*) FROM dance_events").fetchone()[0]
+                playback_count = conn.execute("SELECT count(*) FROM playback_records").fetchone()[0]
                 live_row = conn.execute("SELECT * FROM live_playback_events").fetchone()
             self.assertEqual(event_count, 0)
+            self.assertEqual(playback_count, 0)
             self.assertEqual(live_row["completion_status"], "interrupted")
             self.assertEqual(live_row["completion_reason"], "room_left")
 
@@ -1090,9 +1098,11 @@ class VrcLogWatcherTest(unittest.TestCase):
             with connect_db(db_path) as conn:
                 live_count = conn.execute("SELECT count(*) FROM live_playback_events").fetchone()[0]
                 event_count = conn.execute("SELECT count(*) FROM dance_events").fetchone()[0]
+                playback_count = conn.execute("SELECT count(*) FROM playback_records").fetchone()[0]
                 row = conn.execute("SELECT * FROM live_playback_events").fetchone()
             self.assertEqual(live_count, 1)
             self.assertEqual(event_count, 0)
+            self.assertEqual(playback_count, 0)
             self.assertEqual(row["dance_external_id"], "3114")
             self.assertEqual(row["actual_play_at"], "2026.05.17 15:30:10")
 
@@ -1127,8 +1137,10 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertEqual(stats.live_promotions, 0)
             with connect_db(db_path) as conn:
                 event_count = conn.execute("SELECT count(*) FROM dance_events").fetchone()[0]
+                playback_count = conn.execute("SELECT count(*) FROM playback_records").fetchone()[0]
                 live_row = conn.execute("SELECT * FROM live_playback_events").fetchone()
             self.assertEqual(event_count, 0)
+            self.assertEqual(playback_count, 0)
             self.assertEqual(live_row["completion_status"], "pending")
 
     def test_watcher_starts_new_occurrence_after_room_left_for_same_song(self):
@@ -1218,6 +1230,7 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertEqual(stats.live_promotions, 0)
             with connect_db(db_path) as conn:
                 event_count = conn.execute("SELECT count(*) FROM dance_events").fetchone()[0]
+                playback_count = conn.execute("SELECT count(*) FROM playback_records").fetchone()[0]
                 rows = conn.execute(
                     """
                     SELECT dance_external_id, completion_status, completion_reason
@@ -1226,6 +1239,7 @@ class VrcLogWatcherTest(unittest.TestCase):
                     """
                 ).fetchall()
             self.assertEqual(event_count, 0)
+            self.assertEqual(playback_count, 0)
             by_id = {row["dance_external_id"]: row for row in rows}
             self.assertEqual(by_id["3114"]["completion_status"], "interrupted")
             self.assertEqual(by_id["3114"]["completion_reason"], "superseded_before_completion")
@@ -1260,8 +1274,10 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertEqual(stats.live_promotions, 0)
             with connect_db(db_path) as conn:
                 event_count = conn.execute("SELECT count(*) FROM dance_events").fetchone()[0]
+                playback_count = conn.execute("SELECT count(*) FROM playback_records").fetchone()[0]
                 live_row = conn.execute("SELECT * FROM live_playback_events").fetchone()
             self.assertEqual(event_count, 0)
+            self.assertEqual(playback_count, 0)
             self.assertEqual(live_row["observed_mid_play"], 1)
             self.assertEqual(live_row["completion_status"], "pending")
             self.assertIsNone(live_row["completion_reason"])

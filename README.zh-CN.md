@@ -42,8 +42,10 @@ WannaDance 专有缓存字段放在 `wannadance_songs`，不放在
 - `live_playback_events`
 
 `dance_events`、`vrcx_import_events` 和 `live_playback_events` 在过渡期是
-Legacy Playback Root 或运行时观察表。它们可以继续用于兼容、迁移和排查，但普通
-Timeline 和 Insights 应该读取 accepted `playback_records`。
+Legacy Playback Root、staging 溯源或运行时观察表。它们可以继续用于兼容、迁移和
+排查，但普通 Timeline 和 Insights 读取 accepted `playback_records`。手动 log、
+VRCX import、queued-self sync 和显式 live promotion 现在都会把普通历史写入
+`playback_records`。
 
 暂缓设计的表：
 
@@ -127,11 +129,10 @@ uv run python main.py day 2026-06-07 --live
 12:00:00 8378. Party In The U.S.A. - Miley Cyrus | Just Dance 2025
 ```
 
-普通每日历史的产品目标是 accepted `playback_records`。在 Local Playback Evidence
-读模块替换 legacy read 之前，当前命令仍使用旧的拆分口径：不带 `--live` 时读取
-`dance_events`；`--live` 会读取实时表 `live_playback_events`，适合检查
-`watch-vrc-log --live-db` 当时观察到了什么，但它可能包含 `interrupted` 或
-`pending` live row。
+普通每日历史读取 accepted `playback_records`。不带 `--live` 时读取所有 accepted
+历史；`--live` 会过滤到来源为 `live_playback_events` 的 accepted 记录。实时
+`live_playback_events` 表仍用于 overlay 当前状态和取证排查，可能包含 `interrupted`
+或 `pending` live row，但不再是普通每日历史根。
 
 当前推荐分数使用：
 
@@ -177,12 +178,11 @@ uv run python main.py watch-vrc-log --live-db --overlay-port 8765
 overlay 地址是 `http://127.0.0.1:8765/overlay`。它只绑定本机，通过
 server-sent events 更新，不依赖外部字体、图片、CDN 或网络请求。
 
-`live_playback_events` 会随着日志信号即时更新；legacy `dance_events` 只有在显式传入
-`--promote-live` 且 live row 严格完整播放已知 `duration_seconds` 后才会写入。
-Local Playback Evidence 读模块落地后，普通 Timeline 和 Insights 历史应该从
-`playback_records` 读取。
+`live_playback_events` 会随着日志信号即时更新；accepted `playback_records` 只有在
+显式传入 `--promote-live` 且 live row 严格完整播放已知 `duration_seconds` 后才会写入。
+普通 Timeline 和 Insights 历史读取 `playback_records`。
 半路进房、带正 progress offset、未播完离开、未播完切歌、两次播放间隔小于曲目时长的记录
-都不会进入 legacy promotion 或 accepted history。
+都不会进入 playback-record promotion 或 accepted history。
 
 watcher 会识别离开房间和 VRChat 退出/视频系统关闭日志，用它们清空 overlay 当前播放，
 并把尚未完成的 live row 标记为 `interrupted`。进入房间状态只会显示到更新的播放事件
@@ -200,7 +200,7 @@ event 补 `songId`、曲名、点歌人、duration 和 `duration_source`，但�
 WannaDance/PyPyDance 的 `Playing synced` 行现在只记录为 `synced_play_at`，不会单独
 清空 overlay，也不会直接把 live row 判定为半路播放。半路播放以 VRCX 的正 progress
 offset 等明确偏移信号为准；这类 row 会作为 pending current 显示在 overlay 上，但不会
-进入 legacy promotion 或 accepted history。
+进入 playback-record promotion 或 accepted history。
 
 ## Queued-Self 清单
 

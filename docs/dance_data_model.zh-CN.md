@@ -25,10 +25,9 @@ Timeline 和 Insights 查询使用的 Local Playback Evidence v0 读模型 contr
 - `playback_records` 是当前 accepted 历史、Review Attention、Timeline 和 Insights
   读取使用的 Local Playback Evidence 根。
 - `dance_events`、`vrcx_import_events` 和 `live_playback_events` 在过渡期保留为
-  Legacy Playback Root 或运行时观察表。
-- 读路径已经迁到 `playback_records`，但这不等于写路径已经全部迁完：手动 log、
-  VRCX import、queued-self sync 和显式 live promotion 目前仍会通过 legacy 过渡表写入，
-  直到后续单独迁移这些产品写路径。
+  Legacy Playback Root、staging 溯源或运行时观察表。
+- 手动 log、VRCX import、queued-self sync 和显式 live promotion 会把普通历史写入
+  当前 app root 拥有的 Local Playback Evidence，也就是 `playback_records`。
 - 音乐平台匹配和热度快照暂缓。
 
 ## 为什么改模型
@@ -240,12 +239,24 @@ legacy cleanup 之后的 v0 读模型 contract。
 | `provenance_json` | TEXT NOT NULL | 来源证据和 cleanup 溯源 |
 | `imported_at` | TEXT NOT NULL | 导入时间 |
 
+`source_type` 和 `source_priority` 是两个独立概念。`source_type` 是
+requester/source 分类，比如 `queued_self`、`recommend`、`self`、`other`、
+`random` 或 `unknown`。它的优先级只用于同一条 playback record 被重放或重导入时保留
+更强分类；例如 queued-self overlay 不应该被后续 VRCX 推断出的 `random` 降级。
+`source_priority` 是 overlap 或冲突复查时使用的证据强度，比如 live watcher evidence、
+VRCX history、manual decision 或 automatic acceptance 谁更可信。它不是 requester/source
+分类顺序。
+
+`source_root_path` 在 row 绑定外部来源时应该标识 source app root 或数据库路径。
+项目自身写入的 row、或为兼容 ADR 0004 cleanup 身份而保留的 row，可能保存稳定身份使用的
+project/app root；如果 source table 是本地 staging，原始外部数据库路径也应该写进
+`provenance_json`。
+
 ### `dance_events`
 
-Legacy Playback Root，保存旧的标准化播放历史。它保留用于兼容、迁移、显式 live
-promotion 和排查。普通 Timeline 和 Insights 应该改为读取 `playback_records`。当前
-手动 log、queued-self sync、VRCX import 标准化和显式 live promotion 仍可能作为过渡
-写路径创建或更新这里的 row。
+Legacy Playback Root，保存旧的标准化播放历史。它保留用于兼容、迁移和排查。普通
+Timeline 和 Insights 读取 `playback_records`。当前产品写路径不再把普通历史创建或更新
+到这里。
 
 | 字段 | 类型 | 含义 |
 |---|---|---|
@@ -268,9 +279,9 @@ promotion 和排查。普通 Timeline 和 Insights 应该改为读取 `playback_
 
 ### `vrcx_import_events`
 
-记录 legacy VRCX 导入溯源和解析结果。过渡期里，它用于解释旧导入 row，也可以供迁移
-或 cleanup 使用。它不是普通 Timeline 或 Insights 根。当前 `import-vrcx` 命令仍会写这张
-表和 legacy `dance_events`；让 importer 直接写入 Local Playback Evidence 是后续单独工作。
+记录 VRCX 导入溯源和解析结果。过渡期里，它用于解释导入 source row，也可以供迁移或
+cleanup 使用。它不是普通 Timeline 或 Insights 根。当前 `import-vrcx` 命令会写这张表作
+为 staging 溯源，并把 accepted Local Playback Evidence 写入 `playback_records`。
 
 | 字段 | 类型 | 含义 |
 |---|---|---|
@@ -308,9 +319,10 @@ promotion 和排查。普通 Timeline 和 Insights 应该改为读取 `playback_
 - `video_url`、`resolved_url`、`video_name`、`duration_seconds` 和 raw line 溯源
 - `completion_status`、`completion_reason`、`completed_at`、`interrupted_at`、
   `played_seconds`、`required_played_seconds` 等完成度字段
-- `last_updated_at`、`promoted_dance_event_id` 和 `promoted_at`
+- `last_updated_at`、`promoted_dance_event_id`、`promoted_playback_record_id`
+  和 `promoted_at`
 
-当前只有显式 live promotion 路径可以把 row 推进到 legacy `dance_events`。promotion 要求
+当前只有显式 live promotion 路径可以把 row 推进到 accepted `playback_records`。promotion 要求
 `completion_status = completed`、存在 `actual_play_at`、有已知 `duration_seconds`、
 `observed_mid_play = false`，并且有解析出的舞蹈身份字段。半路观察和 interrupted row
 都不应自动成为普通延迟或统计事件。半路观察可以先保持为 `pending`，用于 OBS overlay

@@ -19,6 +19,7 @@ from dancing_log.playback_evidence import (
     init_playback_records_schema,
     read_accepted_playback_history,
 )
+from dancing_log.playback_record_writer import PlaybackRecordWrite, upsert_playback_record
 
 WANNA_SYSTEM_KEY = "wannadance"
 WANNA_SYSTEM_NAME = "WannaDance"
@@ -219,8 +220,10 @@ def init_schema(conn: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             last_updated_at TEXT NOT NULL DEFAULT (datetime('now')),
             promoted_dance_event_id INTEGER,
+            promoted_playback_record_id INTEGER,
             promoted_at TEXT,
-            FOREIGN KEY(promoted_dance_event_id) REFERENCES dance_events(id)
+            FOREIGN KEY(promoted_dance_event_id) REFERENCES dance_events(id),
+            FOREIGN KEY(promoted_playback_record_id) REFERENCES playback_records(id)
         );
 
         CREATE INDEX IF NOT EXISTS idx_dance_tracks_system_external
@@ -431,43 +434,46 @@ def add_dance_event(
     location: str | None = None,
     path: Path | str | None = None,
 ) -> str:
-    """Insert a dance event into SQLite and return its event key."""
+    """Insert accepted Local Playback Evidence and return its source event key."""
     with connect_db(path) as conn:
-        dance_track_id = ensure_dance_track(conn, system_key, external_id)
-        system_external = f"{system_key.strip().lower()}:{_external_id_text(external_id)}"
+        normalized_system_key = system_key.strip().lower()
+        external_id_text = _external_id_text(external_id)
+        dance_track_id = ensure_dance_track(conn, normalized_system_key, external_id_text)
+        system_external = f"{normalized_system_key}:{external_id_text}"
         base_key = _event_key(event_source, played_at, system_external, source, note)
         event_key = _unique_event_key(conn, base_key)
-        conn.execute(
-            """
-            INSERT INTO dance_events (
-                played_at,
-                dance_track_id,
-                source,
-                confidence,
-                event_source,
-                event_key,
-                video_url,
-                video_name,
-                requester_display_name,
-                requester_user_id,
-                location,
-                note
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                played_at,
-                dance_track_id,
-                source,
-                confidence,
-                event_source,
-                event_key,
-                video_url,
-                video_name,
-                requester_display_name,
-                requester_user_id,
-                location,
-                note,
+        upsert_playback_record(
+            conn,
+            PlaybackRecordWrite(
+                played_at=played_at,
+                original_played_at=played_at,
+                dance_track_id=dance_track_id,
+                dance_system_key=normalized_system_key,
+                dance_external_id=external_id_text,
+                source_kind="manual_log",
+                source_table="manual_log",
+                source_row_id=0,
+                source_event_key=event_key,
+                status_reason=event_source,
+                source_priority=40,
+                confidence=confidence,
+                event_source=event_source,
+                source_type=source,
+                video_url=video_url,
+                video_name=video_name,
+                requester_display_name=requester_display_name,
+                requester_user_id=requester_user_id,
+                location=location,
+                provenance={
+                    "manual_log": {
+                        "event_key": event_key,
+                        "played_at": played_at,
+                        "system_key": normalized_system_key,
+                        "external_id": external_id_text,
+                        "source": source,
+                        "note": note,
+                    }
+                },
             ),
         )
         conn.commit()
@@ -660,15 +666,15 @@ def promote_live_playback_event(
     conn: sqlite3.Connection,
     event_key: str,
 ) -> int | None:
-    """Promote one eligible live event into legacy dance_events."""
+    """Promote one eligible live event into accepted Local Playback Evidence."""
     row = conn.execute(
         "SELECT * FROM live_playback_events WHERE event_key = ?",
         (event_key,),
     ).fetchone()
     if row is None:
         return None
-    if row["promoted_dance_event_id"] is not None:
-        return int(row["promoted_dance_event_id"])
+    if row["promoted_playback_record_id"] is not None:
+        return int(row["promoted_playback_record_id"])
     if not _live_event_is_promotable(row):
         return None
 
@@ -678,54 +684,42 @@ def promote_live_playback_event(
         row["dance_external_id"],
         {"title": row["video_name"]},
     )
-    source, confidence = _live_dance_source(row["source_type"])
-    conn.execute(
-        """
-        INSERT INTO dance_events (
-            played_at,
-            dance_track_id,
-            source,
-            confidence,
-            event_source,
-            event_key,
-            video_url,
-            video_name,
-            requester_display_name
-        )
-        VALUES (?, ?, ?, ?, 'vrc_log_live', ?, ?, ?, ?)
-        ON CONFLICT(event_key) DO UPDATE SET
-            dance_track_id = excluded.dance_track_id,
-            source = excluded.source,
-            confidence = excluded.confidence,
-            video_url = excluded.video_url,
-            video_name = excluded.video_name,
-            requester_display_name = excluded.requester_display_name
-        """,
-        (
-            row["actual_play_at"],
-            dance_track_id,
-            source,
-            confidence,
-            event_key,
-            row["video_url"] or row["resolved_url"] or row["routed_url"],
-            row["video_name"],
-            row["source_display_name"] or row["display_name"],
+    display_name = row["source_display_name"] or row["display_name"]
+    write_result = upsert_playback_record(
+        conn,
+        PlaybackRecordWrite(
+            played_at=row["actual_play_at"],
+            original_played_at=row["actual_play_at"],
+            dance_track_id=dance_track_id,
+            dance_system_key=row["dance_system_key"],
+            dance_external_id=row["dance_external_id"],
+            source_kind="live_watcher",
+            source_table="live_playback_events",
+            source_row_id=int(row["id"]),
+            source_event_key=event_key,
+            status_reason=row["completion_reason"] or "observed_completion_threshold",
+            source_priority=30,
+            confidence=1.0,
+            event_source="vrc_log_live",
+            source_type=row["source_type"],
+            source_display_name=display_name,
+            video_url=row["video_url"] or row["resolved_url"] or row["routed_url"],
+            video_name=row["video_name"],
+            requester_display_name=display_name,
+            completion_status=row["completion_status"],
+            completion_reason=row["completion_reason"],
+            provenance={"live_playback_event": dict(row)},
         ),
     )
-    event_row = conn.execute(
-        "SELECT id FROM dance_events WHERE event_key = ?",
-        (event_key,),
-    ).fetchone()
-    dance_event_id = int(event_row["id"])
     conn.execute(
         """
         UPDATE live_playback_events
-        SET promoted_dance_event_id = ?, promoted_at = COALESCE(promoted_at, datetime('now'))
+        SET promoted_playback_record_id = ?, promoted_at = COALESCE(promoted_at, datetime('now'))
         WHERE event_key = ?
         """,
-        (dance_event_id, event_key),
+        (write_result.playback_record_id, event_key),
     )
-    return dance_event_id
+    return write_result.playback_record_id
 
 
 def mark_live_playback_event_completed(
@@ -751,7 +745,7 @@ def mark_live_playback_event_completed(
             last_updated_at = datetime('now')
         WHERE event_key = ?
             AND completion_status = 'pending'
-            AND promoted_dance_event_id IS NULL
+            AND promoted_playback_record_id IS NULL
         """,
         (
             reason,
@@ -786,7 +780,7 @@ def mark_live_playback_event_interrupted(
             last_updated_at = datetime('now')
         WHERE event_key = ?
             AND completion_status = 'pending'
-            AND promoted_dance_event_id IS NULL
+            AND promoted_playback_record_id IS NULL
         """,
         (
             reason,
@@ -909,14 +903,6 @@ def _live_event_is_promotable(row: sqlite3.Row) -> bool:
     return is_live_playback_promotable(row)
 
 
-def _live_dance_source(source_type: str | None) -> tuple[str, float]:
-    if source_type == "random":
-        return "random", 0.8
-    if source_type == "player":
-        return "other", 0.8
-    return "unknown", 0.5
-
-
 def _live_row_to_dict(row: sqlite3.Row) -> dict:
     value = dict(row)
     value["observed_mid_play"] = bool(value.get("observed_mid_play"))
@@ -960,6 +946,7 @@ def _ensure_live_playback_columns(conn: sqlite3.Connection) -> None:
         "played_seconds": "REAL",
         "required_played_seconds": "REAL",
         "duration_source": "TEXT",
+        "promoted_playback_record_id": "INTEGER",
     }
     for column, definition in additions.items():
         if column not in columns:
@@ -975,10 +962,20 @@ def _event_key(*parts: object) -> str:
 def _unique_event_key(conn: sqlite3.Connection, base_key: str) -> str:
     event_key = base_key
     suffix = 2
-    while conn.execute(
-        "SELECT 1 FROM dance_events WHERE event_key = ?",
-        (event_key,),
-    ).fetchone():
+    while (
+        conn.execute(
+            "SELECT 1 FROM dance_events WHERE event_key = ?",
+            (event_key,),
+        ).fetchone()
+        or conn.execute(
+            """
+            SELECT 1
+            FROM playback_records
+            WHERE source_table = 'manual_log' AND source_event_key = ?
+            """,
+            (event_key,),
+        ).fetchone()
+    ):
         event_key = _event_key(base_key, suffix)
         suffix += 1
     return event_key

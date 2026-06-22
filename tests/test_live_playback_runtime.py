@@ -33,7 +33,7 @@ class FakeLivePlaybackStore:
                 "session_id": session_id,
                 "completion_status": "pending",
                 "completion_reason": None,
-                "promoted_dance_event_id": None,
+                "promoted_playback_record_id": None,
             },
         )
         row.update(event)
@@ -49,7 +49,7 @@ class FakeLivePlaybackStore:
         reason: str,
     ) -> bool:
         row = self.rows[event_key]
-        if row["completion_status"] != "pending" or row["promoted_dance_event_id"] is not None:
+        if row["completion_status"] != "pending" or row["promoted_playback_record_id"] is not None:
             return False
         row.update(
             {
@@ -73,7 +73,7 @@ class FakeLivePlaybackStore:
         reason: str,
     ) -> bool:
         row = self.rows[event_key]
-        if row["completion_status"] != "pending" or row["promoted_dance_event_id"] is not None:
+        if row["completion_status"] != "pending" or row["promoted_playback_record_id"] is not None:
             return False
         row.update(
             {
@@ -101,8 +101,8 @@ class FakeLivePlaybackStore:
             return None
         if row.get("duration_seconds") is None or bool(row.get("observed_mid_play")):
             return None
-        row["promoted_dance_event_id"] = len(self.promote_calls)
-        return row["promoted_dance_event_id"]
+        row["promoted_playback_record_id"] = len(self.promote_calls)
+        return row["promoted_playback_record_id"]
 
     def commit(self) -> None:
         self.commits += 1

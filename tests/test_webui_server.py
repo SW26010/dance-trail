@@ -18,7 +18,6 @@ from dancing_log.webui_endpoints import (
 )
 from dancing_log.storage import (
     WANNA_SYSTEM_KEY,
-    add_dance_event,
     connect_db,
     ensure_dance_track,
     upsert_live_playback_event,
@@ -449,7 +448,7 @@ class WebUiServerTest(unittest.TestCase):
             root = Path(tmp)
             db_path = root / "data" / "dancing_log.sqlite3"
             with connect_db(db_path) as conn:
-                ensure_dance_track(
+                legacy_track = ensure_dance_track(
                     conn,
                     WANNA_SYSTEM_KEY,
                     "100",
@@ -510,16 +509,22 @@ class WebUiServerTest(unittest.TestCase):
                     },
                     session_id="session-one",
                 )
+                conn.execute(
+                    """
+                    INSERT INTO dance_events (
+                        played_at,
+                        dance_track_id,
+                        source,
+                        confidence,
+                        event_source,
+                        event_key
+                    )
+                    VALUES (?, ?, 'random', 0.7, 'legacy-test', 'legacy-webui-event')
+                    """,
+                    ("2026-06-18T19:00:00+08:00", legacy_track),
+                )
                 conn.commit()
 
-            add_dance_event(
-                system_key=WANNA_SYSTEM_KEY,
-                external_id="100",
-                source="random",
-                played_at="2026-06-18T19:00:00+08:00",
-                event_source="legacy-test",
-                path=db_path,
-            )
             runtime = WebUiRuntime.from_root(root)
 
             summary = load_summary_snapshot(runtime)

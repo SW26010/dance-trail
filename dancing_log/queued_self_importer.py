@@ -1,4 +1,4 @@
-"""Overlay queued-self manifests onto existing dance events."""
+"""Overlay queued-self manifests onto existing Local Playback Evidence."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import sqlite3
 
 from dancing_log.app_paths import QUEUED_SELF_DIR
 from dancing_log.storage import connect_db
-from dancing_log.vrcx_importer import SOURCE_PRIORITY_SQL
+from dancing_log.vrcx_importer import SOURCE_TYPE_PRECEDENCE_SQL
 
 
 SOURCE_QUEUED_SELF = "queued_self"
@@ -51,8 +51,18 @@ class QueuedSelfImportStats:
     entries_without_track_ref: int = 0
     matched_entries: int = 0
     unmatched_entries: int = 0
-    existing_events_updated: int = 0
-    stale_manifest_events_deleted: int = 0
+    existing_records_updated: int = 0
+    stale_manifest_records_deleted: int = 0
+
+    @property
+    def existing_events_updated(self) -> int:
+        """Compatibility alias for pre-playback-record callers."""
+        return self.existing_records_updated
+
+    @property
+    def stale_manifest_events_deleted(self) -> int:
+        """Compatibility alias for pre-playback-record callers."""
+        return self.stale_manifest_records_deleted
 
 
 def parse_queued_self_file(
@@ -163,13 +173,13 @@ def sync_queued_self_manifests(
     manifest_dir: Path | str | None = None,
     system_key: str | None = None,
 ) -> QueuedSelfImportStats:
-    """Apply queued-self manifests as a source override on existing events."""
+    """Apply queued-self manifests as a source override on existing records."""
     root = Path(manifest_dir) if manifest_dir is not None else QUEUED_SELF_DIR
     entries = load_queued_self_entries(root, default_system_key=system_key)
 
     with connect_db(app_db_path) as conn:
         deleted = conn.execute(
-            "DELETE FROM dance_events WHERE event_source = ?",
+            "DELETE FROM playback_records WHERE event_source = ?",
             (EVENT_SOURCE,),
         ).rowcount
 
@@ -182,13 +192,13 @@ def sync_queued_self_manifests(
                 unmatched_entries += 1
                 continue
 
-            matched_existing = _matching_existing_event_count(conn, entry)
+            matched_existing = _matching_existing_record_count(conn, entry)
             if matched_existing == 0:
                 unmatched_entries += 1
                 continue
 
             matched_entries += 1
-            existing_updates += _promote_existing_event(conn, entry)
+            existing_updates += _promote_existing_record(conn, entry)
 
         conn.commit()
 
@@ -199,17 +209,17 @@ def sync_queued_self_manifests(
         entries_without_track_ref=sum(1 for entry in entries if not (entry.system_key and entry.external_id)),
         matched_entries=matched_entries,
         unmatched_entries=unmatched_entries,
-        existing_events_updated=existing_updates,
-        stale_manifest_events_deleted=deleted,
+        existing_records_updated=existing_updates,
+        stale_manifest_records_deleted=deleted,
     )
 
 
-def _promote_existing_event(conn: sqlite3.Connection, entry: QueuedSelfEntry) -> int:
+def _promote_existing_record(conn: sqlite3.Connection, entry: QueuedSelfEntry) -> int:
     cursor = conn.execute(
         """
-        UPDATE dance_events
+        UPDATE playback_records
         SET
-            source = ?,
+            source_type = ?,
             confidence = 1.0
         WHERE
             dance_track_id IN (
@@ -219,10 +229,12 @@ def _promote_existing_event(conn: sqlite3.Connection, entry: QueuedSelfEntry) ->
                 WHERE ds.key = ? AND dt.external_id = ?
             )
             AND substr(played_at, 1, 10) = ?
+            AND playback_status = 'accepted'
+            AND counts_in_history = 1
             AND (
-                """ + SOURCE_PRIORITY_SQL.format(column="source") + """
-                < """ + SOURCE_PRIORITY_SQL.format(column="?") + """
-                OR (source = ? AND confidence < 1.0)
+                """ + SOURCE_TYPE_PRECEDENCE_SQL.format(column="source_type") + """
+                < """ + SOURCE_TYPE_PRECEDENCE_SQL.format(column="?") + """
+                OR (source_type = ? AND confidence < 1.0)
             )
         """,
         (
@@ -237,21 +249,23 @@ def _promote_existing_event(conn: sqlite3.Connection, entry: QueuedSelfEntry) ->
     return cursor.rowcount
 
 
-def _matching_existing_event_count(
+def _matching_existing_record_count(
     conn: sqlite3.Connection,
     entry: QueuedSelfEntry,
 ) -> int:
     row = conn.execute(
         """
         SELECT COUNT(*)
-        FROM dance_events de
-        JOIN dance_tracks dt ON dt.id = de.dance_track_id
+        FROM playback_records pr
+        JOIN dance_tracks dt ON dt.id = pr.dance_track_id
         JOIN dance_systems ds ON ds.id = dt.system_id
         WHERE
-            de.event_source != ?
+            pr.event_source != ?
             AND ds.key = ?
             AND dt.external_id = ?
-            AND substr(de.played_at, 1, 10) = ?
+            AND substr(pr.played_at, 1, 10) = ?
+            AND pr.playback_status = 'accepted'
+            AND pr.counts_in_history = 1
         """,
         (
             EVENT_SOURCE,

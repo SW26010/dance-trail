@@ -445,7 +445,7 @@ def _run_import_vrcx(
         lines.extend(
             [
                 f"  staging inserts/updates: {stats.staging_changed}",
-                f"  dance_events inserts/updates: {stats.dance_events_changed}",
+                f"  playback_records inserts/updates: {stats.playback_records_changed}",
             ]
         )
 
@@ -513,8 +513,8 @@ def _run_sync_queued_self(
         f"  entries without track ref: {stats.entries_without_track_ref}",
         f"  matched entries: {stats.matched_entries}",
         f"  unmatched entries: {stats.unmatched_entries}",
-        f"  existing events updated: {stats.existing_events_updated}",
-        f"  stale manifest events deleted: {stats.stale_manifest_events_deleted}",
+        f"  existing records updated: {stats.existing_records_updated}",
+        f"  stale manifest records deleted: {stats.stale_manifest_records_deleted}",
     ]
     return _result(
         operation,
@@ -568,7 +568,7 @@ def _run_rebuild_data(
         lines.extend(
             [
                 "VRCX import complete",
-                f"  dance_events inserts/updates: {import_stats.dance_events_changed}",
+                f"  playback_records inserts/updates: {import_stats.playback_records_changed}",
                 f"  skipped unsupported URLs: {import_stats.skipped_unsupported}",
             ]
         )

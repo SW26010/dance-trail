@@ -38,12 +38,11 @@ Transition and forensic tables:
 - `live_playback_events`
 
 `dance_events`, `vrcx_import_events`, and `live_playback_events` are Legacy
-Playback Roots or runtime observation tables during the transition. They may be
-read for compatibility, migration, and diagnosis, but normal Timeline and
-Insights reads should use accepted `playback_records`. This is a read-path
-boundary, not a completed write-path migration: manual logging, VRCX import,
-queued-self sync, and explicit live promotion still write through legacy
-transition tables until those product write paths are moved separately.
+Playback Roots, staging provenance, or runtime observation tables during the
+transition. They may be read for compatibility, migration, and diagnosis, but
+normal Timeline and Insights reads use accepted `playback_records`. Manual
+logging, VRCX import, queued-self sync, and explicit live promotion now write
+target-owned Local Playback Evidence into `playback_records`.
 
 Deferred tables:
 
@@ -129,10 +128,9 @@ uv run python main.py log --system wannadance 5038 --time "2000-01-01T12:00:00+0
 `5038` is the external id inside the selected system, not the internal
 `dance_tracks.id`.
 
-Manual `log` currently remains a legacy transition write path: it appends a
-row to `dance_events`. That row will not appear in normal Timeline, day,
-Insights, or recommendation history until a migration or future write-path
-change creates the corresponding accepted `playback_records` evidence.
+Manual `log` writes an accepted `playback_records` row. The old CLI command name
+is kept for compatibility; internally the record is Local Playback Evidence, and
+manual notes are retained in the row provenance.
 
 Generate recommendations:
 
@@ -206,10 +204,9 @@ The importer currently supports WannaDance and observed PyPyDance URLs. Dudu
 and other systems are counted as unsupported instead of being misclassified as
 WannaDance.
 
-`import-vrcx` is also still a legacy transition writer. It writes provenance to
-`vrcx_import_events` and normalized rows to `dance_events`; it does not yet
-write new accepted `playback_records` directly. Use the one-time cleanup or a
-future write-path migration to convert those rows into Local Playback Evidence.
+`import-vrcx` writes staging provenance to `vrcx_import_events` and accepted
+Local Playback Evidence to `playback_records`. It no longer creates normalized
+history rows in legacy `dance_events`.
 
 ## Live VRChat Log Capture
 
@@ -283,13 +280,13 @@ uv run python main.py watch-vrc-log --live-db --overlay-port 8765
 
 The local overlay page is available at `http://127.0.0.1:8765/overlay`. It is
 self-contained, binds only to localhost, and updates through server-sent events.
-`live_playback_events` is updated immediately as log signals arrive; legacy
-`dance_events` are written only when `--promote-live` is passed and the live row
-has played at least 80% of the known `duration_seconds`. Normal Timeline,
+`live_playback_events` is updated immediately as log signals arrive; accepted
+`playback_records` are written only when `--promote-live` is passed and the live
+row has played at least 80% of the known `duration_seconds`. Normal Timeline,
 Insights, daily history, and recommendation history read accepted
-`playback_records` instead of the legacy source tables. The live watcher does
-not yet write accepted Local Playback Evidence directly; `--live-db` and
-`--promote-live` remain runtime/legacy transition write paths.
+`playback_records` instead of the legacy source tables. `--live-db` remains the
+runtime/forensic live-status sink; `--promote-live` is the compatibility flag
+that commits completed live rows into ordinary history.
 
 Room leave and VRChat quit/shutdown log events clear the overlay's current
 playback and mark pending live rows as interrupted. Entering-room status is
@@ -311,7 +308,7 @@ WannaDance/PyPyDance `Playing synced` lines are recorded as `synced_play_at`
 only; they do not by themselves clear the overlay or mark a row as mid-play.
 Mid-play detection comes from explicit progress offsets. Mid-play rows remain
 visible in the overlay as pending current playback, but they remain ineligible
-for legacy promotion or accepted history.
+for playback-record promotion or accepted history.
 
 ## Queued-Self Manifests
 

@@ -365,7 +365,7 @@ def cmd_watch_vrc_log():
     parser.add_argument(
         "--promote-live",
         action="store_true",
-        help="Promote eligible live events into dance_events; implies --live-db",
+        help="Promote eligible live events into playback_records; implies --live-db",
     )
     parser.add_argument(
         "--overlay-port",
