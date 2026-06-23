@@ -221,6 +221,21 @@ h1 { margin: 0; font-size: 24px; line-height: 1.2; }
 .pill.orange { color: var(--orange); border-color: var(--orange-line); background: var(--orange-bg); }
 .pill.red { color: var(--red); border-color: var(--red-line); background: var(--red-bg); }
 .pill.violet { color: var(--violet); border-color: var(--violet-line); background: var(--violet-bg); }
+.timeline-status { display: grid; gap: 5px; justify-items: start; }
+.status-detail { color: var(--muted); font-size: 12px; }
+.row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.mini-button {
+  min-height: 30px;
+  border-radius: 7px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  color: var(--text);
+  padding: 0 9px;
+  font-size: 12px;
+}
+.mini-button.primary { background: var(--blue); border-color: var(--blue); color: var(--primary-text); }
+.mini-button.danger { color: var(--red); border-color: var(--red-line); }
+.mini-button:disabled { opacity: 0.48; cursor: default; }
 .settings-grid { display: grid; gap: 14px; }
 .field-row {
   display: grid;
@@ -316,6 +331,14 @@ tr:last-child td { border-bottom: 0; }
   .field-row { grid-template-columns: 1fr; }
   .input-line { grid-template-columns: 1fr; }
   .nav { grid-template-columns: 1fr; }
+  .timeline-table, .timeline-table thead, .timeline-table tbody, .timeline-table tr, .timeline-table th, .timeline-table td {
+    display: block;
+    width: 100% !important;
+  }
+  .timeline-table thead { display: none; }
+  .timeline-table tr { border-bottom: 1px solid var(--line); }
+  .timeline-table tr:last-child { border-bottom: 0; }
+  .timeline-table td { border-bottom: 0; padding: 8px 10px; }
 }
 </style>
 </head>
@@ -420,6 +443,13 @@ const TEXT = {
     noTimelineRecords: "No timeline records",
     record: "Record",
     reviewStatus: "Status",
+    actions: "Actions",
+    accept: "Accept",
+    exclude: "Exclude",
+    restoreDefault: "Restore default",
+    manual: "Manual",
+    defaultResult: "Default",
+    reviewUpdateFailed: "Review update failed",
     status_accepted: "accepted",
     status_excluded: "excluded",
     status_needs_attention: "needs attention",
@@ -531,6 +561,13 @@ const TEXT = {
     noTimelineRecords: "没有时间线记录",
     record: "记录",
     reviewStatus: "状态",
+    actions: "操作",
+    accept: "接受",
+    exclude: "排除",
+    restoreDefault: "恢复默认",
+    manual: "手动",
+    defaultResult: "默认",
+    reviewUpdateFailed: "更新审阅失败",
     status_accepted: "已接受",
     status_excluded: "已排除",
     status_needs_attention: "需注意",
@@ -1270,7 +1307,11 @@ async function renderTimeline() {
   async function load() {
     const selectedDate = document.getElementById("timeline-date").value;
     const data = await api(`/api/timeline?date=${encodeURIComponent(selectedDate)}`);
-    node.innerHTML = `<section class="panel"><div class="panel-body">${renderTimelineRows(data.records || [])}</div></section>`;
+    node.innerHTML = `
+      <div class="message" id="timeline-message"></div>
+      <section class="panel"><div class="panel-body">${renderTimelineRows(data.records || [])}</div></section>
+    `;
+    bindTimelineActions(node, load);
   }
   document.getElementById("timeline-load").onclick = load;
   await load();
@@ -1278,9 +1319,54 @@ async function renderTimeline() {
 
 function renderTimelineRows(rows) {
   if (!rows.length) return `<div class="empty">${esc(ui("noTimelineRecords"))}</div>`;
-  return `<table><thead><tr><th style="width:110px">${esc(ui("time"))}</th><th>${esc(ui("record"))}</th><th style="width:150px">${esc(ui("reviewStatus"))}</th></tr></thead><tbody>
-    ${rows.map(row => `<tr><td>${esc(row.time)}</td><td>${esc(row.display)}</td><td><span class="pill ${reviewStatusClass(row.review_status)}">${esc(reviewStatusLabel(row.review_status))}</span></td></tr>`).join("")}
+  return `<table class="timeline-table"><thead><tr><th style="width:110px">${esc(ui("time"))}</th><th>${esc(ui("record"))}</th><th style="width:170px">${esc(ui("reviewStatus"))}</th><th style="width:240px">${esc(ui("actions"))}</th></tr></thead><tbody>
+    ${rows.map(row => `<tr><td>${esc(row.time)}</td><td>${esc(row.display)}</td><td>${renderTimelineStatus(row)}</td><td>${renderTimelineActions(row)}</td></tr>`).join("")}
   </tbody></table>`;
+}
+
+function renderTimelineStatus(row) {
+  const status = row.review_status || row.effective_playback_status || "";
+  const defaultStatus = row.default_playback_status || status;
+  const manualStatus = row.manual_decision_status || "";
+  const detail = `${ui("manual")} · ${ui("defaultResult")}: ${reviewStatusLabel(defaultStatus)}`;
+  return `
+    <div class="timeline-status">
+      <span class="pill ${reviewStatusClass(status)}">${esc(reviewStatusLabel(status))}</span>
+      ${manualStatus ? `<span class="status-detail">${esc(detail)}</span>` : ""}
+    </div>
+  `;
+}
+
+function renderTimelineActions(row) {
+  const status = row.review_status || row.effective_playback_status || "";
+  const hasManual = Boolean(row.manual_decision_status);
+  return `
+    <div class="row-actions">
+      <button class="mini-button primary" type="button" data-playback-action="accept" data-playback-id="${esc(row.id)}" ${status === "accepted" ? "disabled" : ""}>${esc(ui("accept"))}</button>
+      <button class="mini-button danger" type="button" data-playback-action="exclude" data-playback-id="${esc(row.id)}" ${status === "excluded" ? "disabled" : ""}>${esc(ui("exclude"))}</button>
+      <button class="mini-button" type="button" data-playback-action="restore_default" data-playback-id="${esc(row.id)}" ${hasManual ? "" : "disabled"}>${esc(ui("restoreDefault"))}</button>
+    </div>
+  `;
+}
+
+function bindTimelineActions(container, reload) {
+  for (const button of container.querySelectorAll("[data-playback-action]")) {
+    button.onclick = async () => {
+      const playbackRecordId = Number(button.dataset.playbackId);
+      const action = button.dataset.playbackAction;
+      button.disabled = true;
+      try {
+        await api("/api/playback-review", {
+          method: "POST",
+          body: { playback_record_id: playbackRecordId, action }
+        });
+        await reload();
+      } catch (error) {
+        showMessage("timeline-message", `${ui("reviewUpdateFailed")}: ${translatedError(error.message)}`, "error");
+        button.disabled = false;
+      }
+    };
+  }
 }
 
 async function renderCatalog() {

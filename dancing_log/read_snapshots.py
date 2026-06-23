@@ -32,6 +32,8 @@ class DailyDance:
     played_at_local: datetime
     display_name: str
     review_status: str = EFFECTIVE_PLAYBACK_ACCEPTED
+    default_playback_status: str = EFFECTIVE_PLAYBACK_ACCEPTED
+    manual_decision_status: str | None = None
 
 
 @dataclass(frozen=True)
@@ -112,6 +114,10 @@ class LocalReadSnapshots:
                     "display": dance.display_name,
                     "line": format_daily_dance_line(dance),
                     "review_status": dance.review_status,
+                    "default_playback_status": dance.default_playback_status,
+                    "manual_decision_status": dance.manual_decision_status,
+                    "effective_playback_status": dance.review_status,
+                    "has_manual_decision": dance.manual_decision_status is not None,
                 }
                 for dance in dances
             ],
@@ -430,16 +436,21 @@ def _daily_dances_from_rows(
         played_at_local = parse_played_at_local(row.get("played_at"), local_tz=local_tz)
         if played_at_local is None or played_at_local.date() != target_date:
             continue
+        review_status = str(
+            row.get("effective_playback_status")
+            or row.get("review_status")
+            or EFFECTIVE_PLAYBACK_ACCEPTED
+        )
+        default_status = str(row.get("default_playback_status") or review_status)
+        manual_status = row.get("manual_decision_status")
         dances.append(
             DailyDance(
                 event_id=int(row["event_id"]),
                 played_at_local=played_at_local,
                 display_name=_format_display_name(row),
-                review_status=str(
-                    row.get("effective_playback_status")
-                    or row.get("review_status")
-                    or EFFECTIVE_PLAYBACK_ACCEPTED
-                ),
+                review_status=review_status,
+                default_playback_status=default_status,
+                manual_decision_status=str(manual_status) if manual_status is not None else None,
             )
         )
     dances.sort(key=lambda dance: (dance.played_at_local, dance.event_id))

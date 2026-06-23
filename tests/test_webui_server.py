@@ -12,6 +12,7 @@ from dancing_log.data_operations import DataOperationResult, operation_catalog_s
 from dancing_log.playback_projection import (
     EFFECTIVE_PLAYBACK_ACCEPTED,
     EFFECTIVE_PLAYBACK_EXCLUDED,
+    EFFECTIVE_PLAYBACK_NEEDS_ATTENTION,
     set_manual_playback_decision,
 )
 from dancing_log.webui_endpoints import (
@@ -20,6 +21,7 @@ from dancing_log.webui_endpoints import (
     load_operations_snapshot,
     load_summary_snapshot,
     load_timeline_snapshot,
+    update_playback_review_from_payload,
 )
 from dancing_log.storage import (
     WANNA_SYSTEM_KEY,
@@ -108,6 +110,9 @@ class WebUiServerTest(unittest.TestCase):
                 self.assertIn("dancing-log.language", html)
                 self.assertIn("中文", html)
                 self.assertIn("本地 Web UI", html)
+                self.assertIn("/api/playback-review", html)
+                self.assertIn("data-playback-action", html)
+                self.assertIn("Restore default", html)
                 self.assertNotIn("timeline-source", html)
                 self.assertIn("prefers-color-scheme: dark", html)
                 self.assertIn("color-scheme: dark", html)
@@ -400,6 +405,95 @@ class WebUiServerTest(unittest.TestCase):
             finally:
                 server.stop()
 
+    def test_webui_playback_review_endpoint_updates_timeline_decision(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "data" / "dancing_log.sqlite3"
+            with connect_db(db_path) as conn:
+                track_id = ensure_dance_track(
+                    conn,
+                    WANNA_SYSTEM_KEY,
+                    "700",
+                    {"title": "Review Song", "artist": "Review Artist"},
+                )
+                playback_record_id = insert_playback_record(
+                    conn,
+                    track_id=track_id,
+                    played_at="2026-06-18T20:40:00+08:00",
+                    playback_status=EFFECTIVE_PLAYBACK_NEEDS_ATTENTION,
+                    counts_in_history=0,
+                )
+                conn.commit()
+
+            server = WebUiServer(port=0, app_root=root)
+            server.start()
+            try:
+                token = self._csrf_token(server)
+                accept_request = self._json_request(
+                    server,
+                    "api/playback-review",
+                    {"playback_record_id": playback_record_id, "action": "accept"},
+                    token=token,
+                    origin=server.url.rstrip("/"),
+                )
+                with urlopen(accept_request, timeout=2) as response:
+                    accept_result = json.loads(response.read().decode("utf-8"))
+                self.assertEqual(
+                    accept_result["review"],
+                    {
+                        "playback_record_id": playback_record_id,
+                        "default_playback_status": "needs_attention",
+                        "manual_decision_status": "accepted",
+                        "effective_playback_status": "accepted",
+                    },
+                )
+
+                with urlopen(f"{server.url}api/timeline?date=2026-06-18", timeout=2) as response:
+                    timeline = json.loads(response.read().decode("utf-8"))
+                row = timeline["records"][0]
+                self.assertEqual(row["id"], playback_record_id)
+                self.assertEqual(row["review_status"], "accepted")
+                self.assertEqual(row["default_playback_status"], "needs_attention")
+                self.assertEqual(row["manual_decision_status"], "accepted")
+                self.assertTrue(row["has_manual_decision"])
+
+                restore_request = self._json_request(
+                    server,
+                    "api/playback-review",
+                    {"playback_record_id": playback_record_id, "action": "restore_default"},
+                    token=token,
+                    origin=server.url.rstrip("/"),
+                )
+                with urlopen(restore_request, timeout=2) as response:
+                    restore_result = json.loads(response.read().decode("utf-8"))
+                self.assertEqual(restore_result["review"]["manual_decision_status"], None)
+                self.assertEqual(
+                    restore_result["review"]["effective_playback_status"],
+                    "needs_attention",
+                )
+
+                with urlopen(f"{server.url}api/timeline?date=2026-06-18", timeout=2) as response:
+                    restored_timeline = json.loads(response.read().decode("utf-8"))
+                restored_row = restored_timeline["records"][0]
+                self.assertEqual(restored_row["review_status"], "needs_attention")
+                self.assertIsNone(restored_row["manual_decision_status"])
+                self.assertFalse(restored_row["has_manual_decision"])
+            finally:
+                server.stop()
+
+    def test_webui_playback_review_endpoint_does_not_create_missing_database(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "data" / "dancing_log.sqlite3"
+            body, status = update_playback_review_from_payload(
+                WebUiRuntime.from_root(root),
+                {"playback_record_id": 1, "action": "accept"},
+            )
+
+            self.assertEqual(status, 400)
+            self.assertEqual(body["error"], "database not found")
+            self.assertFalse(db_path.exists())
+
     def test_webui_resolve_path_uses_draft_value(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -611,6 +705,37 @@ class WebUiServerTest(unittest.TestCase):
                     excluded_record: "excluded",
                     manual_accepted_record: "accepted",
                     live_record: "accepted",
+                },
+            )
+            self.assertEqual(
+                {
+                    record_id: next(
+                        (
+                            record["default_playback_status"],
+                            record["manual_decision_status"],
+                            record["effective_playback_status"],
+                            record["has_manual_decision"],
+                        )
+                        for record in timeline["records"]
+                        if record["id"] == record_id
+                    )
+                    for record_id in (
+                        evidence_record,
+                        attention_record,
+                        excluded_record,
+                        manual_accepted_record,
+                    )
+                },
+                {
+                    evidence_record: ("accepted", None, "accepted", False),
+                    attention_record: ("needs_attention", None, "needs_attention", False),
+                    excluded_record: ("accepted", "excluded", "excluded", True),
+                    manual_accepted_record: (
+                        "needs_attention",
+                        "accepted",
+                        "accepted",
+                        True,
+                    ),
                 },
             )
             self.assertEqual(

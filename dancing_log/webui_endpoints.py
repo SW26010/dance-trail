@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
+import sqlite3
 from typing import Protocol
 
 from dancing_log.app_paths import AppPaths, AppRuntimeConfig
@@ -14,7 +15,18 @@ from dancing_log.data_operations import (
     run_data_operation_request,
 )
 from dancing_log.live_app_session import LiveAppSessionRuntime, LiveAppSessionStatus
+from dancing_log.playback_projection import (
+    EFFECTIVE_PLAYBACK_ACCEPTED,
+    EFFECTIVE_PLAYBACK_EXCLUDED,
+    EFFECTIVE_PLAYBACK_NEEDS_ATTENTION,
+)
+from dancing_log.playback_review import (
+    PlaybackReviewError,
+    clear_playback_record_manual_decision,
+    set_playback_record_manual_decision,
+)
 from dancing_log.read_snapshots import LocalReadSnapshots
+from dancing_log.storage import connect_db
 from dancing_log.webui_settings import load_config_snapshot
 
 
@@ -134,3 +146,49 @@ def run_operation_from_payload(
     except DataOperationError as exc:
         return {"error": str(exc)}, 400
     return {"result": result.as_dict()}, 200
+
+
+def update_playback_review_from_payload(
+    runtime: WebUiEndpointRuntime,
+    payload: dict,
+) -> tuple[dict, int]:
+    action = str(payload.get("action") or "").strip().lower()
+    playback_record_id = payload.get("playback_record_id")
+    note = str(payload.get("note") or "")
+    status_by_action = {
+        "accept": EFFECTIVE_PLAYBACK_ACCEPTED,
+        "accepted": EFFECTIVE_PLAYBACK_ACCEPTED,
+        "exclude": EFFECTIVE_PLAYBACK_EXCLUDED,
+        "excluded": EFFECTIVE_PLAYBACK_EXCLUDED,
+        "needs_attention": EFFECTIVE_PLAYBACK_NEEDS_ATTENTION,
+    }
+    restore_actions = {"restore_default", "clear", "default"}
+
+    try:
+        config = AppRuntimeConfig.load(app_root=runtime.app_root, migrate_legacy=True)
+        db_path = config.app_db_path
+        if not db_path.exists():
+            return {"error": "database not found"}, 400
+
+        with connect_db(db_path) as conn:
+            if action in status_by_action:
+                state = set_playback_record_manual_decision(
+                    conn,
+                    playback_record_id,
+                    status_by_action[action],
+                    reason=f"webui:{action}",
+                    note=note,
+                )
+            elif action in restore_actions:
+                state = clear_playback_record_manual_decision(conn, playback_record_id)
+            else:
+                return {
+                    "error": (
+                        "action must be accept, exclude, needs_attention, "
+                        "or restore_default"
+                    )
+                }, 400
+            conn.commit()
+    except (PlaybackReviewError, ValueError, sqlite3.Error) as exc:
+        return {"error": str(exc)}, 400
+    return {"review": state.as_dict()}, 200

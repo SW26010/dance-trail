@@ -21,6 +21,7 @@ from dancing_log.webui_endpoints import (
     load_summary_snapshot,
     load_timeline_snapshot,
     run_operation_from_payload,
+    update_playback_review_from_payload,
 )
 from dancing_log.webui_settings import (
     load_config_snapshot,
@@ -95,6 +96,7 @@ POST_JSON_ROUTES: dict[str, PostRoute] = {
     "/api/live/watcher": control_live_watcher_from_payload,
     "/api/live/overlay": control_live_overlay_from_payload,
     "/api/operations/run": run_operation_from_payload,
+    "/api/playback-review": update_playback_review_from_payload,
 }
 
 
