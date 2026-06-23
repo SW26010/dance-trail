@@ -120,6 +120,10 @@ _Avoid_: saved configuration, display-name preference, source path
 A Self User Identity explicitly provided or corrected by the user when detection is unavailable, ambiguous, or stale.
 _Avoid_: detected source path, display name, generated default
 
+**Requester Identity**:
+The VRChat identity observed for the user who requested or triggered a playback record. It may include the event-time display name and a stable VRChat user id, and it is separate from Self User Identity.
+_Avoid_: self user identity, display-name preference, source classification
+
 **Draft Configuration**:
 The unsaved Settings form state being edited by the user before it is written to the local app configuration file. Draft configuration can be validated and reset without changing the currently saved configuration.
 _Avoid_: active configuration, autosaved settings
@@ -158,7 +162,7 @@ _Avoid_: raw event parsing, manual decision, playback record creation
 
 **Request Source Type**:
 The request/playback-source classification stored on a playback record, such as queued_self, recommend, self, other, random, or unknown. Request Source Type is stored today in `source_type`; it is not evidence strength and does not decide whether the record is effectively accepted, excluded, or needs attention.
-_Avoid_: evidence source priority, acceptance status, review status
+_Avoid_: requester identity, evidence source priority, acceptance status, review status
 
 **Accepted Playback Record**:
 A playback record included in normal history and Insights under the trust-by-default policy. A record may be accepted because it comes from a supported source, was automatically settled, or was manually confirmed; manual confirmation is not required for ordinary inclusion.
