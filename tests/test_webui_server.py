@@ -113,9 +113,27 @@ class WebUiServerTest(unittest.TestCase):
                 self.assertIn("/api/playback-review", html)
                 self.assertIn("data-playback-action", html)
                 self.assertIn("Restore default", html)
-                self.assertNotIn("timeline-source", html)
+                self.assertIn("timeline-copy", html)
+                self.assertIn("timeline-icon-button", html)
+                self.assertIn("timeline-sort-part", html)
+                self.assertIn("timeline-date-input", html)
+                self.assertIn("timeline-date-field", html)
+                self.assertIn("timeline-date-picker", html)
+                self.assertIn("normalizeTimelineDateInput", html)
+                self.assertIn('class="timeline-date-input" type="text" id="timeline-date"', html)
+                self.assertIn('class="timeline-date-picker" type="date" id="timeline-date-picker"', html)
+                self.assertIn('inputmode="numeric"', html)
+                self.assertNotIn('type="date" id="timeline-date"', html)
+                self.assertNotIn("timeline-date-picker-icon", html)
+                self.assertIn("timeline-source", html)
+                self.assertIn("renderTimelineSource", html)
+                self.assertIn("copyTextToClipboard", html)
+                self.assertIn("Copy valid", html)
+                self.assertIn("复制有效事件", html)
+                self.assertNotIn('id="timeline-source"', html)
                 self.assertIn("prefers-color-scheme: dark", html)
                 self.assertIn("color-scheme: dark", html)
+                self.assertIn("scrollbar-gutter: stable", html)
                 self.assertNotIn("https://", html)
                 self.assertIn('const CSRF_TOKEN = "', html)
                 self.assertIn("AUTOMATIC_SOURCE_PATH_KEYS", html)
@@ -545,6 +563,45 @@ class WebUiServerTest(unittest.TestCase):
             self.assertTrue(timeline["database_exists"])
             self.assertEqual(db_path.stat().st_size, 0)
 
+    def test_timeline_without_date_defaults_to_latest_playback_day(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "data" / "dancing_log.sqlite3"
+            with connect_db(db_path) as conn:
+                older_track = ensure_dance_track(
+                    conn,
+                    WANNA_SYSTEM_KEY,
+                    "201",
+                    {"title": "Older Song", "artist": "Older Artist"},
+                )
+                latest_track = ensure_dance_track(
+                    conn,
+                    WANNA_SYSTEM_KEY,
+                    "202",
+                    {"title": "Latest Song", "artist": "Latest Artist"},
+                )
+                insert_playback_record(
+                    conn,
+                    track_id=older_track,
+                    played_at="2026-06-18T20:00:00+08:00",
+                    source_type="self",
+                )
+                insert_playback_record(
+                    conn,
+                    track_id=latest_track,
+                    played_at="2026-06-22T20:00:00",
+                    source_type="self",
+                )
+                conn.commit()
+
+            timeline = load_timeline_snapshot(WebUiRuntime.from_root(root), {})
+
+            self.assertEqual(timeline["date"], "2026-06-22")
+            self.assertEqual(
+                [record["display"] for record in timeline["records"]],
+                ["202. Latest Song - Latest Artist"],
+            )
+
     def test_webui_read_snapshots_use_playback_records_not_legacy_tables(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -597,6 +654,8 @@ class WebUiServerTest(unittest.TestCase):
                     track_id=attention_track,
                     played_at="2026-06-18T20:10:00+08:00",
                     source_type="player",
+                    source_display_name="Alice",
+                    requester_display_name="Alice",
                     playback_status="needs_attention",
                     counts_in_history=0,
                     status_reason="interrupted",
@@ -748,6 +807,12 @@ class WebUiServerTest(unittest.TestCase):
                     "400. Live Evidence - Live Artist",
                 ],
             )
+            attention_timeline_record = next(
+                record for record in timeline["records"] if record["id"] == attention_record
+            )
+            self.assertEqual(attention_timeline_record["source_type"], "player")
+            self.assertEqual(attention_timeline_record["source_display_name"], "Alice")
+            self.assertEqual(attention_timeline_record["requester_display_name"], "Alice")
             self.assertEqual(
                 [record["display"] for record in live_timeline["records"]],
                 ["400. Live Evidence - Live Artist"],

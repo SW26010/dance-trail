@@ -271,6 +271,8 @@ Settings-first full configuration editor, with the settled navigation entries:
 Home, Timeline, Catalog, Lists, Insights, Data Operations, and Settings.
 Settings preserves unsupported local config keys as read-only values when it
 saves supported fields.
+Timeline opens on the latest local date that has playback records, then keeps
+calendar and arrow navigation scoped to the selected local date.
 The UI supports English and Chinese through a browser-local language switch.
 
 For deterministic offline replay of a fixed corpus, use the replay helper

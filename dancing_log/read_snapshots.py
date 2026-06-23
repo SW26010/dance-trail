@@ -34,6 +34,9 @@ class DailyDance:
     review_status: str = EFFECTIVE_PLAYBACK_ACCEPTED
     default_playback_status: str = EFFECTIVE_PLAYBACK_ACCEPTED
     manual_decision_status: str | None = None
+    source_type: str | None = None
+    source_display_name: str | None = None
+    requester_display_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -75,7 +78,8 @@ class LocalReadSnapshots:
         return summary
 
     def timeline(self, query: dict[str, list[str]]) -> dict:
-        selected_date = _query_value(query, "date", date.today().isoformat())
+        requested_date = _query_optional_value(query, "date")
+        selected_date = requested_date or date.today().isoformat()
         source = _timeline_source(_query_value(query, "source", "all"))
         db_path = self.config.app_db_path
         if not db_path.exists():
@@ -86,16 +90,30 @@ class LocalReadSnapshots:
                 "database_exists": False,
             }
 
-        try:
-            target = date.fromisoformat(selected_date)
-        except ValueError:
-            target = date.today()
-            selected_date = target.isoformat()
+        target: date | None
+        if requested_date is None:
+            target = None
+        else:
+            try:
+                target = date.fromisoformat(requested_date)
+                selected_date = target.isoformat()
+            except ValueError:
+                target = date.today()
+                selected_date = target.isoformat()
+
+        if target is None:
+            selected_date = date.today().isoformat()
 
         try:
             with _open_readonly_db(db_path) as conn:
-                dances = _readonly_daily_dances(conn, target, source)
+                rows = read_timeline_playback_rows(conn, source=source)
+                if target is None:
+                    target = _latest_playback_local_date(rows) or date.today()
+                    selected_date = target.isoformat()
+                dances = _daily_dances_from_rows(rows, target)
         except sqlite3.Error as exc:
+            target = date.today()
+            selected_date = target.isoformat()
             return {
                 "date": selected_date,
                 "source": source,
@@ -118,6 +136,9 @@ class LocalReadSnapshots:
                     "manual_decision_status": dance.manual_decision_status,
                     "effective_playback_status": dance.review_status,
                     "has_manual_decision": dance.manual_decision_status is not None,
+                    "source_type": dance.source_type,
+                    "source_display_name": dance.source_display_name,
+                    "requester_display_name": dance.requester_display_name,
                 }
                 for dance in dances
             ],
@@ -312,6 +333,14 @@ def _query_value(query: dict[str, list[str]], key: str, default: str) -> str:
     return str(values[0] if values else default)
 
 
+def _query_optional_value(query: dict[str, list[str]], key: str) -> str | None:
+    values = query.get(key) or []
+    if not values:
+        return None
+    value = str(values[0]).strip()
+    return value or None
+
+
 def _timeline_source(value: str) -> str:
     return "live" if value == "live" else "all"
 
@@ -417,6 +446,18 @@ def _readonly_daily_dances(conn: sqlite3.Connection, target_date: date, source: 
     return _daily_dances_from_rows(rows, target_date)
 
 
+def _latest_playback_local_date(rows: list[dict]) -> date | None:
+    latest: datetime | None = None
+    for row in rows:
+        played_at_local = parse_played_at_local(row.get("played_at"))
+        if played_at_local is None:
+            continue
+        played_at_order = played_at_local.replace(tzinfo=None)
+        if latest is None or played_at_order > latest:
+            latest = played_at_order
+    return latest.date() if latest is not None else None
+
+
 def _readonly_daily_accepted_rows(conn: sqlite3.Connection) -> list[dict]:
     return read_daily_playback_rows(conn, source="accepted")
 
@@ -451,6 +492,9 @@ def _daily_dances_from_rows(
                 review_status=review_status,
                 default_playback_status=default_status,
                 manual_decision_status=str(manual_status) if manual_status is not None else None,
+                source_type=_optional_text(row.get("source_type")),
+                source_display_name=_optional_text(row.get("source_display_name")),
+                requester_display_name=_optional_text(row.get("requester_display_name")),
             )
         )
     dances.sort(key=lambda dance: (dance.played_at_local, dance.event_id))
@@ -480,6 +524,11 @@ def _format_display_name(row: dict) -> str:
     if external_id:
         return f"{external_id}. {display}"
     return display
+
+
+def _optional_text(value: object) -> str | None:
+    text = str(value or "").strip()
+    return text or None
 
 
 def _has_external_id_prefix(value: str, external_id: str) -> bool:

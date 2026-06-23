@@ -217,31 +217,37 @@ def _read_projected_playback_rows(
         where.append("pr.source_kind = ?")
         params.append(LIVE_WATCHER_SOURCE_KIND)
     where_sql = " AND ".join(where) if where else "1 = 1"
-    rows = conn.execute(
-        f"""
-        SELECT
-            pr.id AS event_id,
-            pr.played_at,
-            pr.video_name,
-            pr.dance_external_id AS external_id,
-            COALESCE(dt.title, pr.video_name) AS title,
-            dt.artist,
-            dt.dancer,
-            dt.group_name,
-            dt.major,
-            pr.playback_status,
-            pr.status_reason,
-            pr.catalog_attention,
-            {playback_projection_select_sql(conn)}
-        FROM playback_records pr
-        {projection_join}
-        LEFT JOIN dance_tracks dt ON dt.id = pr.dance_track_id
-        WHERE {where_sql}
-        ORDER BY pr.played_at, pr.id
-        """,
-        params,
-    ).fetchall()
-    return [dict(row) for row in rows]
+    rows = [
+        dict(row)
+        for row in conn.execute(
+            f"""
+            SELECT
+                pr.id AS event_id,
+                pr.played_at,
+                pr.video_name,
+                pr.dance_external_id AS external_id,
+                COALESCE(dt.title, pr.video_name) AS title,
+                dt.artist,
+                dt.dancer,
+                dt.group_name,
+                dt.major,
+                pr.source_type,
+                pr.source_display_name,
+                pr.requester_display_name,
+                pr.playback_status,
+                pr.status_reason,
+                pr.catalog_attention,
+                {playback_projection_select_sql(conn)}
+            FROM playback_records pr
+            {projection_join}
+            LEFT JOIN dance_tracks dt ON dt.id = pr.dance_track_id
+            WHERE {where_sql}
+            ORDER BY pr.played_at, pr.id
+            """,
+            params,
+        ).fetchall()
+    ]
+    return rows
 
 
 def read_accepted_playback_history(conn: sqlite3.Connection) -> list[dict]:

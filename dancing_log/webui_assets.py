@@ -85,6 +85,7 @@ WEBUI_HTML = r"""<!doctype html>
   }
 }
 * { box-sizing: border-box; }
+html { overflow-y: auto; scrollbar-gutter: stable; }
 html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
 body { font-family: "Segoe UI", system-ui, sans-serif; font-size: 14px; letter-spacing: 0; }
 button, input, select { font: inherit; letter-spacing: 0; }
@@ -137,6 +138,38 @@ h1 { margin: 0; font-size: 24px; line-height: 1.2; }
   flex-wrap: wrap;
 }
 .toolbar { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.timeline-date-nav {
+  display: inline-grid;
+  grid-template-columns: repeat(2, 32px) 112px repeat(2, 32px);
+  gap: 3px;
+  align-items: center;
+}
+.timeline-step {
+  min-height: 32px;
+  border-radius: 6px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  color: var(--text);
+  padding: 0;
+}
+.timeline-step:hover { border-color: var(--blue); }
+.timeline-icon-button {
+  flex: 0 0 34px;
+  width: 34px;
+  min-height: 34px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  line-height: 1;
+}
+.timeline-sort-part { color: var(--muted); opacity: 0.42; font-weight: 700; }
+.timeline-sort-button[data-sort="asc"] .timeline-sort-asc,
+.timeline-sort-button[data-sort="desc"] .timeline-sort-desc {
+  color: var(--blue);
+  opacity: 1;
+}
 .language-switch {
   display: inline-grid;
   grid-template-columns: repeat(2, minmax(44px, auto));
@@ -169,6 +202,16 @@ h1 { margin: 0; font-size: 24px; line-height: 1.2; }
 .button.primary { background: var(--blue); border-color: var(--blue); color: var(--primary-text); }
 .button.danger { color: var(--red); border-color: var(--red-line); }
 .button:disabled { opacity: 0.55; cursor: default; }
+.button.timeline-icon-button:hover,
+.button.timeline-icon-button:focus-visible {
+  border-color: var(--blue);
+  background: var(--panel);
+  box-shadow: none;
+}
+.button.timeline-icon-button:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
 .view { display: none; gap: 16px; align-content: start; }
 .view.active { display: grid; }
 .grid { display: grid; gap: 14px; }
@@ -221,6 +264,14 @@ h1 { margin: 0; font-size: 24px; line-height: 1.2; }
 .pill.orange { color: var(--orange); border-color: var(--orange-line); background: var(--orange-bg); }
 .pill.red { color: var(--red); border-color: var(--red-line); background: var(--red-bg); }
 .pill.violet { color: var(--violet); border-color: var(--violet-line); background: var(--violet-bg); }
+.timeline-record { display: grid; gap: 5px; }
+.timeline-source {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.timeline-source strong { color: var(--text); font-weight: 600; }
 .timeline-status { display: grid; gap: 5px; justify-items: start; }
 .status-detail { color: var(--muted); font-size: 12px; }
 .row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -261,6 +312,55 @@ input[type="text"], input[type="number"], input[type="date"], select {
   background: var(--input-bg);
   color: var(--text);
   padding: 0 10px;
+}
+input.timeline-date-input {
+  min-height: 32px;
+  padding: 0 22px 0 5px;
+  text-align: center;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.timeline-date-field {
+  position: relative;
+  min-width: 0;
+}
+.timeline-date-field .timeline-date-input { width: 100%; }
+input.timeline-date-picker {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 22px;
+  max-width: 22px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  overflow: hidden;
+  cursor: pointer;
+}
+input.timeline-date-picker:focus-visible {
+  outline: 1px solid var(--blue);
+  outline-offset: -1px;
+}
+input.timeline-date-picker::-webkit-datetime-edit,
+input.timeline-date-picker::-webkit-datetime-edit-fields-wrapper,
+input.timeline-date-picker::-webkit-datetime-edit-text,
+input.timeline-date-picker::-webkit-datetime-edit-month-field,
+input.timeline-date-picker::-webkit-datetime-edit-day-field,
+input.timeline-date-picker::-webkit-datetime-edit-year-field {
+  display: none;
+}
+input.timeline-date-picker::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  margin: 0;
+  padding: 0;
+  opacity: 0.7;
+  display: block;
+}
+input.timeline-date-picker:hover::-webkit-calendar-picker-indicator {
+  opacity: 1;
 }
 input[type="checkbox"] { accent-color: var(--blue); }
 input[readonly], input:disabled { background: var(--input-readonly); color: var(--muted); }
@@ -328,6 +428,7 @@ tr:last-child td { border-bottom: 0; }
   .topbar { align-items: stretch; flex-direction: column; }
   .top-actions { justify-content: flex-start; }
   .toolbar { justify-content: flex-start; }
+  .timeline-date-nav { grid-template-columns: repeat(2, 32px) 112px repeat(2, 32px); }
   .field-row { grid-template-columns: 1fr; }
   .input-line { grid-template-columns: 1fr; }
   .nav { grid-template-columns: 1fr; }
@@ -440,6 +541,23 @@ const TEXT = {
     accepted: "Accepted",
     live: "Live-derived",
     load: "Load",
+    timelineDate: "Timeline date",
+    previousMonth: "Previous month",
+    previousDay: "Previous day",
+    nextDay: "Next day",
+    nextMonth: "Next month",
+    timelineSortChronological: "Chronological",
+    timelineSortReverse: "Reverse",
+    copyDailyDancesTitle: "Copy valid events",
+    copiedDailyDances: "Copied valid events",
+    noAcceptedTimelineRecords: "No valid dance events for this day",
+    copyDailyDancesFailed: "Copy failed",
+    sourceRandom: "Random",
+    sourceOther: "Other",
+    sourceSelf: "Self",
+    sourceRecommend: "Recommended",
+    sourceQueuedSelf: "Reserved",
+    sourceUnknown: "Unknown",
     noTimelineRecords: "No timeline records",
     record: "Record",
     reviewStatus: "Status",
@@ -558,6 +676,23 @@ const TEXT = {
     accepted: "已接受",
     live: "实时来源",
     load: "加载",
+    timelineDate: "时间线日期",
+    previousMonth: "上个月",
+    previousDay: "前一天",
+    nextDay: "后一天",
+    nextMonth: "下个月",
+    timelineSortChronological: "时间顺序",
+    timelineSortReverse: "倒序",
+    copyDailyDancesTitle: "复制有效事件",
+    copiedDailyDances: "已复制有效事件",
+    noAcceptedTimelineRecords: "这一天没有有效跳舞事件",
+    copyDailyDancesFailed: "复制失败",
+    sourceRandom: "随机",
+    sourceOther: "他人",
+    sourceSelf: "自己",
+    sourceRecommend: "推荐",
+    sourceQueuedSelf: "预定",
+    sourceUnknown: "未知",
     noTimelineRecords: "没有时间线记录",
     record: "记录",
     reviewStatus: "状态",
@@ -708,6 +843,64 @@ function reviewStatusClass(value) {
   if (value === "excluded") return "red";
   if (value === "pending") return "blue";
   return "orange";
+}
+
+function formatLocalDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function localDateParts(value) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const parsed = new Date(year, month - 1, day);
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    return null;
+  }
+  return { year, month, day, date: parsed };
+}
+
+function isValidLocalDate(value) {
+  return localDateParts(value) !== null;
+}
+
+function parseLocalDate(value) {
+  const parts = localDateParts(value);
+  return parts ? parts.date : new Date();
+}
+
+function normalizeTimelineDateInput(value) {
+  const text = String(value || "");
+  const digits = text.replace(/\D/g, "").slice(0, 8);
+  if (digits.length === 4 && /-$/.test(text)) return `${digits}-`;
+  if (digits.length === 6 && /-$/.test(text)) return `${digits.slice(0, 4)}-${digits.slice(4)}-`;
+  if (digits.length <= 4) return digits;
+  if (digits.length <= 6) return `${digits.slice(0, 4)}-${digits.slice(4)}`;
+  return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6)}`;
+}
+
+function addLocalDays(value, days) {
+  const date = parseLocalDate(value);
+  date.setDate(date.getDate() + days);
+  return formatLocalDate(date);
+}
+
+function addLocalMonths(value, months) {
+  const source = parseLocalDate(value);
+  const day = source.getDate();
+  const target = new Date(source.getFullYear(), source.getMonth() + months, 1);
+  const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  target.setDate(Math.min(day, lastDay));
+  return formatLocalDate(target);
 }
 
 function translatedError(message) {
@@ -1299,29 +1492,212 @@ function renderRecent(rows) {
 }
 
 async function renderTimeline() {
+  state.timelineSort = state.timelineSort || "asc";
+  const initialTimelineDate = state.timelineDate || "";
   toolbarNode.innerHTML = `
-    <input type="date" id="timeline-date" value="${new Date().toISOString().slice(0, 10)}">
-    <button class="button" type="button" id="timeline-load">${esc(ui("load"))}</button>
+    <div class="timeline-date-nav">
+      <button class="timeline-step" type="button" data-timeline-step="month" data-step="-1" title="${esc(ui("previousMonth"))}" aria-label="${esc(ui("previousMonth"))}">&lt;&lt;</button>
+      <button class="timeline-step" type="button" data-timeline-step="day" data-step="-1" title="${esc(ui("previousDay"))}" aria-label="${esc(ui("previousDay"))}">&lt;</button>
+      <div class="timeline-date-field">
+        <input class="timeline-date-input" type="text" id="timeline-date" value="${esc(initialTimelineDate)}" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="YYYY-MM-DD" aria-label="${esc(ui("timelineDate"))}">
+        <input class="timeline-date-picker" type="date" id="timeline-date-picker" value="${esc(initialTimelineDate)}" aria-label="${esc(ui("timelineDate"))}" tabindex="-1">
+      </div>
+      <button class="timeline-step" type="button" data-timeline-step="day" data-step="1" title="${esc(ui("nextDay"))}" aria-label="${esc(ui("nextDay"))}">&gt;</button>
+      <button class="timeline-step" type="button" data-timeline-step="month" data-step="1" title="${esc(ui("nextMonth"))}" aria-label="${esc(ui("nextMonth"))}">&gt;&gt;</button>
+    </div>
+    <button class="button timeline-icon-button timeline-sort-button" type="button" id="timeline-sort" title="${esc(timelineSortLabel())}" aria-label="${esc(timelineSortLabel())}" aria-pressed="${state.timelineSort === "desc"}" data-sort="${esc(state.timelineSort)}"><span class="timeline-sort-part timeline-sort-asc">↑</span><span class="timeline-sort-part timeline-sort-desc">↓</span></button>
+    <button class="button timeline-icon-button timeline-copy-button" type="button" id="timeline-copy" title="${esc(ui("copyDailyDancesTitle"))}" aria-label="${esc(ui("copyDailyDancesTitle"))}">⧉</button>
   `;
   const node = document.getElementById("view-timeline");
-  async function load() {
-    const selectedDate = document.getElementById("timeline-date").value;
-    const data = await api(`/api/timeline?date=${encodeURIComponent(selectedDate)}`);
+  const dateInput = document.getElementById("timeline-date");
+  const datePicker = document.getElementById("timeline-date-picker");
+  const sortButton = document.getElementById("timeline-sort");
+  const copyButton = document.getElementById("timeline-copy");
+  let loadRequest = 0;
+  let currentRecords = [];
+  function renderRecords() {
     node.innerHTML = `
       <div class="message" id="timeline-message"></div>
-      <section class="panel"><div class="panel-body">${renderTimelineRows(data.records || [])}</div></section>
+      <section class="panel"><div class="panel-body">${renderTimelineRows(sortedTimelineRows(currentRecords))}</div></section>
     `;
     bindTimelineActions(node, load);
   }
-  document.getElementById("timeline-load").onclick = load;
+  async function load() {
+    const normalizedDate = normalizeTimelineDateInput(dateInput.value);
+    const hasSelectedDate = isValidLocalDate(normalizedDate);
+    if (normalizedDate && dateInput.value !== normalizedDate) {
+      dateInput.value = normalizedDate;
+    }
+    if (hasSelectedDate) {
+      state.timelineDate = normalizedDate;
+      datePicker.value = normalizedDate;
+    }
+    const requestId = ++loadRequest;
+    const path = hasSelectedDate ? `/api/timeline?date=${encodeURIComponent(normalizedDate)}` : "/api/timeline";
+    const data = await api(path);
+    if (requestId !== loadRequest) return;
+    const resolvedDate = normalizeTimelineDateInput(data.date || normalizedDate);
+    if (isValidLocalDate(resolvedDate)) {
+      state.timelineDate = resolvedDate;
+      dateInput.value = resolvedDate;
+      datePicker.value = resolvedDate;
+    }
+    currentRecords = data.records || [];
+    renderRecords();
+  }
+  function moveTimelineDate(unit, amount) {
+    const current = isValidLocalDate(dateInput.value)
+      ? dateInput.value
+      : (isValidLocalDate(state.timelineDate) ? state.timelineDate : formatLocalDate(new Date()));
+    dateInput.value = unit === "month" ? addLocalMonths(current, amount) : addLocalDays(current, amount);
+    state.timelineDate = dateInput.value;
+    datePicker.value = dateInput.value;
+    load();
+  }
+  dateInput.oninput = () => {
+    const normalizedDate = normalizeTimelineDateInput(dateInput.value);
+    if (dateInput.value !== normalizedDate) {
+      dateInput.value = normalizedDate;
+    }
+    if (!isValidLocalDate(normalizedDate)) {
+      loadRequest += 1;
+      return;
+    }
+    state.timelineDate = normalizedDate;
+    datePicker.value = normalizedDate;
+    load();
+  };
+  dateInput.onblur = () => {
+    const normalizedDate = normalizeTimelineDateInput(dateInput.value);
+    if (isValidLocalDate(normalizedDate)) {
+      dateInput.value = normalizedDate;
+      datePicker.value = normalizedDate;
+      if (normalizedDate !== state.timelineDate) {
+        state.timelineDate = normalizedDate;
+        load();
+      }
+      return;
+    }
+    dateInput.value = state.timelineDate || "";
+  };
+  dateInput.onkeydown = event => {
+    if (event.key !== "Enter") return;
+    const normalizedDate = normalizeTimelineDateInput(dateInput.value);
+    if (!isValidLocalDate(normalizedDate)) return;
+    event.preventDefault();
+    dateInput.value = normalizedDate;
+    state.timelineDate = normalizedDate;
+    datePicker.value = normalizedDate;
+    load();
+  };
+  datePicker.onchange = () => {
+    const selectedDate = normalizeTimelineDateInput(datePicker.value);
+    if (!isValidLocalDate(selectedDate)) return;
+    dateInput.value = selectedDate;
+    state.timelineDate = selectedDate;
+    load();
+  };
+  datePicker.onclick = () => {
+    if (typeof datePicker.showPicker !== "function") return;
+    try {
+      datePicker.showPicker();
+    } catch {
+    }
+  };
+  sortButton.onclick = () => {
+    state.timelineSort = state.timelineSort === "desc" ? "asc" : "desc";
+    sortButton.title = timelineSortLabel();
+    sortButton.setAttribute("aria-label", timelineSortLabel());
+    sortButton.setAttribute("aria-pressed", state.timelineSort === "desc" ? "true" : "false");
+    sortButton.dataset.sort = state.timelineSort;
+    renderRecords();
+  };
+  copyButton.onclick = async () => {
+    const text = dailyDanceClipboardText(currentRecords);
+    if (!text) {
+      showMessage("timeline-message", ui("noAcceptedTimelineRecords"), "error");
+      return;
+    }
+    try {
+      await copyTextToClipboard(text);
+      showMessage("timeline-message", `${ui("copiedDailyDances")}: ${acceptedTimelineRows(currentRecords).length}`, "success");
+    } catch (error) {
+      showMessage("timeline-message", `${ui("copyDailyDancesFailed")}: ${error.message}`, "error");
+    }
+  };
+  for (const button of toolbarNode.querySelectorAll("[data-timeline-step]")) {
+    button.onclick = () => moveTimelineDate(button.dataset.timelineStep, Number(button.dataset.step));
+  }
   await load();
+}
+
+function timelineSortLabel() {
+  return state.timelineSort === "desc" ? ui("timelineSortReverse") : ui("timelineSortChronological");
+}
+
+function sortedTimelineRows(rows) {
+  return state.timelineSort === "desc" ? [...rows].reverse() : rows;
+}
+
+function acceptedTimelineRows(rows) {
+  return rows.filter(row => (row.review_status || row.effective_playback_status) === "accepted");
+}
+
+function dailyDanceClipboardText(rows) {
+  return acceptedTimelineRows(rows)
+    .map(row => row.line || `${row.time} ${row.display}`)
+    .join("\n");
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  try {
+    if (!document.execCommand("copy")) throw new Error("clipboard unavailable");
+  } finally {
+    document.body.removeChild(textarea);
+  }
 }
 
 function renderTimelineRows(rows) {
   if (!rows.length) return `<div class="empty">${esc(ui("noTimelineRecords"))}</div>`;
   return `<table class="timeline-table"><thead><tr><th style="width:110px">${esc(ui("time"))}</th><th>${esc(ui("record"))}</th><th style="width:170px">${esc(ui("reviewStatus"))}</th><th style="width:240px">${esc(ui("actions"))}</th></tr></thead><tbody>
-    ${rows.map(row => `<tr><td>${esc(row.time)}</td><td>${esc(row.display)}</td><td>${renderTimelineStatus(row)}</td><td>${renderTimelineActions(row)}</td></tr>`).join("")}
+    ${rows.map(row => `<tr><td>${esc(row.time)}</td><td>${renderTimelineRecord(row)}</td><td>${renderTimelineStatus(row)}</td><td>${renderTimelineActions(row)}</td></tr>`).join("")}
   </tbody></table>`;
+}
+
+function renderTimelineRecord(row) {
+  return `
+    <div class="timeline-record">
+      <div>${esc(row.display)}</div>
+      ${renderTimelineSource(row)}
+    </div>
+  `;
+}
+
+function renderTimelineSource(row) {
+  const source = timelineSource(row);
+  const requester = source.showRequester ? String(row.requester_display_name || row.source_display_name || "").trim() : "";
+  return `<div class="timeline-source"><span>${esc(source.label)}</span>${requester ? ` · <strong>${esc(requester)}</strong>` : ""}</div>`;
+}
+
+function timelineSource(row) {
+  const value = String(row.source_type || "").trim().toLowerCase().replaceAll("-", "_");
+  if (value === "random") return { label: ui("sourceRandom"), showRequester: false };
+  if (value === "self") return { label: ui("sourceSelf"), showRequester: true };
+  if (value === "recommend" || value === "recommended" || value === "recommendation") return { label: ui("sourceRecommend"), showRequester: true };
+  if (value === "queued_self" || value === "queued" || value === "reserved" || value === "reservation") return { label: ui("sourceQueuedSelf"), showRequester: true };
+  if (value === "other" || value === "player" || value === "requester" || value === "requester_marker") return { label: ui("sourceOther"), showRequester: true };
+  return { label: ui("sourceUnknown"), showRequester: true };
 }
 
 function renderTimelineStatus(row) {

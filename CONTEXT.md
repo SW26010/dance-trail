@@ -141,7 +141,7 @@ The Home surface for current watcher state, current playback, current session ac
 _Avoid_: timeline, history, archive, primary navigation
 
 **Timeline**:
-The chronological review and correction surface for playback records. Timeline defaults to the full current-day sequence, preserves time order across records, and uses color, icons, and labels to show each record's acceptance, review attention, and relevant observation details.
+The chronological review and correction surface for playback records. Timeline defaults to the latest local date that has playback records, preserves time order within the selected date, and uses color, icons, and labels to show each record's acceptance, review attention, and relevant observation details.
 _Avoid_: status buckets, live monitor, insights, data operations
 
 **Playback Record**:
