@@ -86,6 +86,34 @@ LIVE_PLAYBACK_COLUMNS = (
     "played_seconds",
     "required_played_seconds",
 )
+PLAYBACK_RECORD_COLUMNS = (
+    "source_fingerprint",
+    "played_at",
+    "original_played_at",
+    "dance_system_key",
+    "dance_external_id",
+    "source_kind",
+    "source_table",
+    "source_event_key",
+    "playback_status",
+    "counts_in_history",
+    "status_reason",
+    "source_priority",
+    "confidence",
+    "event_source",
+    "source_type",
+    "source_display_name",
+    "video_url",
+    "video_name",
+    "requester_display_name",
+    "requester_user_id",
+    "location",
+    "completion_status",
+    "completion_reason",
+    "catalog_status",
+    "catalog_attention",
+    "provenance_json",
+)
 MANUAL_GT_DATE = (2026, 5, 17)
 MANUAL_MATCH_TOLERANCE_SECONDS = 90
 MANUAL_DIAGNOSTIC_TOLERANCE_SECONDS = 600
@@ -133,8 +161,8 @@ def run_baseline(args) -> None:
         f"- parsed events: {stats.parsed_events}",
         f"- playback events: {stats.playback_events}",
         f"- live DB updates: {stats.live_db_updates}",
-        f"- live promotions: {stats.live_promotions}",
-        f"- promotion threshold: {_promotion_threshold_label()} of known duration",
+        f"- playback record updates: {stats.playback_record_updates}",
+        f"- acceptance threshold: {_acceptance_threshold_label()} of known duration",
     ]
     (output / "diff_report.md").write_text("\n".join(report) + "\n", encoding="utf-8")
     print(json.dumps({"output": str(output), "playback_events": stats.playback_events}))
@@ -160,8 +188,8 @@ def run_compare(args) -> None:
         f"- parsed events: {stats.parsed_events}",
         f"- playback events: {stats.playback_events}",
         f"- live DB updates: {stats.live_db_updates}",
-        f"- live promotions: {stats.live_promotions}",
-        f"- promotion threshold: {_promotion_threshold_label()} of known duration",
+        f"- playback record updates: {stats.playback_record_updates}",
+        f"- acceptance threshold: {_acceptance_threshold_label()} of known duration",
         "",
     ]
     failed_sections: list[str] = []
@@ -186,10 +214,10 @@ def run_compare(args) -> None:
     if live_failed:
         failed_sections.append("live.sqlite3:live_playback_events")
 
-    dance_section, dance_failed = _dance_events_diff_section(baseline, output)
-    report.extend(dance_section)
-    if dance_failed:
-        failed_sections.append("live.sqlite3:dance_events")
+    settlement_section, settlement_failed = _playback_records_diff_section(baseline, output)
+    report.extend(settlement_section)
+    if settlement_failed:
+        failed_sections.append("live.sqlite3:playback_records")
 
     if args.manual_gt:
         report.extend(_manual_gt_section(Path(args.manual_gt), output / "live.sqlite3"))
@@ -224,11 +252,11 @@ def _run_replay(*, log_dir: Path, pattern: str, output: Path):
         started_at=REPLAY_STARTED_AT,
         live_session_id=REPLAY_LIVE_SESSION_ID,
         live_db=True,
-        promote_live=True,
+        record_playback=True,
     )
 
 
-def _promotion_threshold_label() -> str:
+def _acceptance_threshold_label() -> str:
     from dancing_log.vrc_log_watcher import PROMOTION_COMPLETION_RATIO
 
     return f"{PROMOTION_COMPLETION_RATIO:.0%}"
@@ -353,13 +381,13 @@ def _live_playback_diff_section(baseline: Path, output: Path) -> tuple[list[str]
     )
 
 
-def _dance_events_diff_section(baseline: Path, output: Path) -> tuple[list[str], bool]:
+def _playback_records_diff_section(baseline: Path, output: Path) -> tuple[list[str], bool]:
     return _sqlite_indexed_diff_section(
-        label="Promoted Dance Events SQLite Diff",
+        label="Playback Records Settlement SQLite Diff",
         baseline=baseline,
         output=output,
-        rows_reader=_read_dance_event_rows,
-        key_field="event_key",
+        rows_reader=_read_playback_record_rows,
+        key_field="source_fingerprint",
     )
 
 
@@ -430,34 +458,29 @@ def _read_live_playback_rows(db_path: Path) -> list[dict]:
     return [_decode_sqlite_json_columns(dict(row)) for row in rows]
 
 
-def _read_dance_event_rows(db_path: Path) -> list[dict]:
+def _read_playback_record_rows(db_path: Path) -> list[dict]:
+    columns = ", ".join(PLAYBACK_RECORD_COLUMNS)
     with closing(sqlite3.connect(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            """
-            SELECT
-                de.event_key,
-                de.played_at,
-                ds.key AS dance_system_key,
-                dt.external_id AS dance_external_id,
-                de.source,
-                de.confidence,
-                de.event_source,
-                de.video_url,
-                de.video_name,
-                de.requester_display_name,
-                de.requester_user_id,
-                de.location,
-                de.note,
-                de.recording_id,
-                de.recording_offset_seconds
-            FROM dance_events de
-            LEFT JOIN dance_tracks dt ON dt.id = de.dance_track_id
-            LEFT JOIN dance_systems ds ON ds.id = dt.system_id
-            ORDER BY de.event_key
+            f"""
+            SELECT {columns}
+            FROM playback_records
+            WHERE source_kind = 'live_watcher'
+            ORDER BY source_fingerprint
             """
         ).fetchall()
-    return [dict(row) for row in rows]
+    return [_decode_playback_record_row(dict(row)) for row in rows]
+
+
+def _decode_playback_record_row(row: dict) -> dict:
+    value = row.get("provenance_json")
+    if isinstance(value, str):
+        try:
+            row["provenance_json"] = json.loads(value)
+        except json.JSONDecodeError:
+            pass
+    return row
 
 
 def _decode_sqlite_json_columns(row: dict) -> dict:
@@ -486,60 +509,56 @@ def _manual_gt_section(manual_gt: Path, db_path: Path) -> list[str]:
 
     with closing(sqlite3.connect(db_path)) as conn:
         conn.row_factory = sqlite3.Row
-        promoted = conn.execute(
+        playback_records = conn.execute(
             """
-            SELECT de.played_at, ds.key AS system_key, dt.external_id
-            FROM dance_events de
-            JOIN dance_tracks dt ON dt.id = de.dance_track_id
-            JOIN dance_systems ds ON ds.id = dt.system_id
-            ORDER BY de.played_at
-            """
-        ).fetchall()
-        live = conn.execute(
-            """
-            SELECT actual_play_at, dance_system_key, dance_external_id,
-                   completion_status, completion_reason,
-                   played_seconds, required_played_seconds
-            FROM live_playback_events
-            ORDER BY actual_play_at, first_seen_at
+            SELECT played_at, dance_system_key, dance_external_id,
+                   playback_status, counts_in_history, status_reason,
+                   completion_status, completion_reason
+            FROM playback_records
+            WHERE source_kind = 'live_watcher'
+            ORDER BY played_at
             """
         ).fetchall()
 
-    should_promote = [row for row in expected if row["expected_completed"]]
-    should_not_promote = [row for row in expected if not row["expected_completed"]]
+    should_accept = [row for row in expected if row["expected_completed"]]
+    should_not_accept = [row for row in expected if not row["expected_completed"]]
     missing = [
         row
-        for row in should_promote
+        for row in should_accept
         if not _matches_manual_row(
-            promoted,
+            playback_records,
             row,
-            system_field="system_key",
-            external_id_field="external_id",
+            system_field="dance_system_key",
+            external_id_field="dance_external_id",
             time_field="played_at",
+            status_field="playback_status",
+            status="accepted",
         )
     ]
     unexpected = [
         row
-        for row in should_not_promote
+        for row in should_not_accept
         if _matches_manual_row(
-            promoted,
-            row,
-            system_field="system_key",
-            external_id_field="external_id",
-            time_field="played_at",
-        )
-    ]
-    interrupted_ok = [
-        row
-        for row in should_not_promote
-        if _matches_manual_row(
-            live,
+            playback_records,
             row,
             system_field="dance_system_key",
             external_id_field="dance_external_id",
-            time_field="actual_play_at",
-            status_field="completion_status",
-            status="interrupted",
+            time_field="played_at",
+            status_field="playback_status",
+            status="accepted",
+        )
+    ]
+    attention_ok = [
+        row
+        for row in should_not_accept
+        if _matches_manual_row(
+            playback_records,
+            row,
+            system_field="dance_system_key",
+            external_id_field="dance_external_id",
+            time_field="played_at",
+            status_field="playback_status",
+            status="needs_attention",
         )
     ]
 
@@ -547,14 +566,14 @@ def _manual_gt_section(manual_gt: Path, db_path: Path) -> list[str]:
         "## Manual GT",
         "",
         f"- manual rows: {len(expected)}",
-        f"- expected promotions: {len(should_promote)}",
-        f"- missing expected promotions: {len(missing)}",
-        f"- unexpected promotions: {len(unexpected)}",
-        f"- expected non-promotions interrupted: {len(interrupted_ok)}/{len(should_not_promote)}",
+        f"- expected accepted records: {len(should_accept)}",
+        f"- missing expected accepted records: {len(missing)}",
+        f"- unexpected accepted records: {len(unexpected)}",
+        f"- expected non-accepted records needing attention: {len(attention_ok)}/{len(should_not_accept)}",
     ]
     if missing:
         lines.append("- missing: " + ", ".join(f"{row['time']} {row['external_id']}" for row in missing))
-        diagnostics = _missing_manual_diagnostics(missing, live)
+        diagnostics = _missing_manual_diagnostics(missing, playback_records)
         if diagnostics:
             lines.append("- needs_human_confirmation:")
             lines.extend(f"  - {line}" for line in diagnostics)
@@ -650,27 +669,27 @@ def _matches_manual_row(
     return False
 
 
-def _missing_manual_diagnostics(missing: list[dict], live_rows: list[sqlite3.Row]) -> list[str]:
+def _missing_manual_diagnostics(missing: list[dict], records: list[sqlite3.Row]) -> list[str]:
     diagnostics: list[str] = []
     for expected in missing:
-        live_row, delta_seconds = _nearest_manual_row(
-            live_rows,
+        record, delta_seconds = _nearest_manual_row(
+            records,
             expected,
             system_field="dance_system_key",
             external_id_field="dance_external_id",
-            time_field="actual_play_at",
+            time_field="played_at",
         )
-        if live_row is None:
+        if record is None:
             diagnostics.append(
-                f"{expected['time']} {expected['external_id']}: no matching live playback row"
+                f"{expected['time']} {expected['external_id']}: no matching watcher playback record"
             )
             continue
         diagnostics.append(
             f"{expected['time']} {expected['external_id']}: "
-            f"live={live_row['completion_status'] or 'pending'}, "
-            f"reason={live_row['completion_reason'] or 'none'}, "
-            f"played={_display_number(live_row['played_seconds'])}/"
-            f"{_display_number(live_row['required_played_seconds'])}s, "
+            f"playback_status={record['playback_status'] or 'unknown'}, "
+            f"status_reason={record['status_reason'] or 'none'}, "
+            f"completion={record['completion_status'] or 'none'}, "
+            f"completion_reason={record['completion_reason'] or 'none'}, "
             f"nearest_delta={int(delta_seconds)}s"
         )
     return diagnostics

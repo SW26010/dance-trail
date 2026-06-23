@@ -26,8 +26,8 @@ Timeline 和 Insights 查询使用的 Local Playback Evidence v0 读模型 contr
   读取使用的 Local Playback Evidence 根。
 - `dance_events`、`vrcx_import_events` 和 `live_playback_events` 在过渡期保留为
   Legacy Playback Root、staging 溯源或运行时观察表。
-- 手动 log、VRCX import、queued-self sync 和默认 live promotion 会把普通历史写入
-  当前 app root 拥有的 Local Playback Evidence，也就是 `playback_records`。
+- 手动 log、VRCX import、queued-self sync 和 watcher-derived live evidence 会写入当前
+  app root 拥有的 Local Playback Evidence，也就是 `playback_records`。
 - 音乐平台匹配和热度快照暂缓。
 
 ## 为什么改模型
@@ -220,7 +220,7 @@ legacy cleanup 之后的 v0 读模型 contract。
 | `source_row_id` | INTEGER NOT NULL | 原始来源 row id |
 | `source_event_key` | TEXT | 原始来源 event key |
 | `source_fingerprint` | TEXT NOT NULL UNIQUE | 用于去重的稳定来源 row 指纹 |
-| `playback_status` | TEXT NOT NULL | `accepted`、`needs_attention` 或未来状态 |
+| `playback_status` | TEXT NOT NULL | `pending`、`accepted`、`needs_attention` 或未来状态 |
 | `counts_in_history` | INTEGER NOT NULL DEFAULT 0 | manual overlay 前，基于 evidence 推导出的默认历史统计状态 |
 | `status_reason` | TEXT NOT NULL | 当前默认状态的原因 |
 | `source_priority` | INTEGER NOT NULL DEFAULT 0 | overlap 复查时使用的 Evidence Source Priority |
@@ -333,9 +333,9 @@ cleanup 使用。它不是普通 Timeline 或 Insights 根。当前 `import-vrcx
 
 ### `live_playback_events`
 
-live watcher workflow 使用的运行时表。它保存每个 live playback event 的最新折叠状态，
-并在原始日志信号到来时持续 upsert。默认 promotion 会先写这张表，再把符合条件的 row
-推进 accepted history；`--live-db --no-promote-live` 会保留这张表但不写 accepted history。
+deprecated experimental 运行时表，用于 legacy live watcher 取证。正常 watcher workflow
+会把有稳定舞蹈身份的 folded observation 直接写入 `playback_records`；`--live-db` 只是在
+这里额外镜像 folded state 方便诊断。
 
 字段形状贴近取证用的 `playback_events.jsonl`，包括：
 
@@ -350,14 +350,11 @@ live watcher workflow 使用的运行时表。它保存每个 live playback even
 - `completion_status`、`completion_reason`、`completed_at`、`interrupted_at`、
   `played_seconds`、`required_played_seconds` 等完成度字段
 - `last_updated_at`、`promoted_dance_event_id`、`promoted_playback_record_id`
-  和 `promoted_at`
+  和 `promoted_at`，用于 legacy 兼容
 
-live promotion 路径可以把 row 推进到 accepted `playback_records`，watcher-driven workflow
-默认启用这条路径。promotion 要求 `completion_status = completed`、存在 `actual_play_at`、
-有已知 `duration_seconds`、`played_seconds >= 80% * duration_seconds`、
-`observed_mid_play = false`，并且有解析出的舞蹈身份字段。半路观察和 interrupted row
-都不应自动成为普通延迟或统计事件。半路观察可以先保持为 `pending`，用于 OBS overlay
-显示直接进房时的当前曲目；interrupted row 则保留用于取证复查。
+正常 watcher settlement 现在更新 watcher-derived `playback_records`。pending record 在
+保守完成规则通过后变为 accepted；如果生命周期或停止边界先到，则变为不计入历史的
+`needs_attention` record。
 
 ## 关系图
 

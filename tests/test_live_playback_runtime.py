@@ -2,6 +2,7 @@ import unittest
 from dataclasses import dataclass, field
 
 from dancing_log.live_playback_runtime import LivePlaybackRuntime
+from dancing_log.watcher_playback_materializer import make_watcher_playback_event_key
 
 
 @dataclass
@@ -10,6 +11,7 @@ class RuntimeStats:
     last_log_timestamp: str | None = None
     live_db_updates: int = 0
     live_promotions: int = 0
+    playback_record_updates: int = 0
     overlay_url: str | None = None
     errors: list[str] = field(default_factory=list)
 
@@ -20,39 +22,48 @@ class FakeLivePlaybackStore:
         self.commits = 0
         self.rollbacks = 0
         self.closed = False
-        self.promote_calls: list[str] = []
 
     def make_event_key(self, session_id: str | None, playback_event_key: str) -> str:
         return f"{session_id or ''}:{playback_event_key}"
 
-    def upsert(self, event: dict, *, session_id: str | None, event_key: str) -> int:
+    def upsert_pending(self, event: dict, *, session_id: str | None, event_key: str) -> int:
+        if not event.get("dance_system_key") or not event.get("dance_external_id"):
+            return 0
         row = self.rows.setdefault(
             event_key,
             {
                 "event_key": event_key,
                 "session_id": session_id,
-                "completion_status": "pending",
-                "completion_reason": None,
-                "promoted_playback_record_id": None,
             },
         )
-        row.update(event)
+        row.update(
+            event,
+            playback_status="pending",
+            counts_in_history=0,
+            status_reason="live_observation_pending",
+            completion_status="pending",
+            completion_reason=None,
+        )
         return 1
 
     def mark_completed(
         self,
         event_key: str,
         *,
+        event: dict,
         completed_at: str,
         played_seconds: float,
         required_played_seconds: float,
         reason: str,
     ) -> bool:
         row = self.rows[event_key]
-        if row["completion_status"] != "pending" or row["promoted_playback_record_id"] is not None:
+        if row["completion_status"] != "pending":
             return False
         row.update(
             {
+                "playback_status": "accepted",
+                "counts_in_history": 1,
+                "status_reason": reason,
                 "completion_status": "completed",
                 "completion_reason": reason,
                 "completed_at": completed_at,
@@ -67,16 +78,20 @@ class FakeLivePlaybackStore:
         self,
         event_key: str,
         *,
+        event: dict,
         interrupted_at: str,
         played_seconds: float | None,
         required_played_seconds: float | None,
         reason: str,
     ) -> bool:
         row = self.rows[event_key]
-        if row["completion_status"] != "pending" or row["promoted_playback_record_id"] is not None:
+        if row["completion_status"] != "pending":
             return False
         row.update(
             {
+                "playback_status": "needs_attention",
+                "counts_in_history": 0,
+                "status_reason": reason,
                 "completion_status": "interrupted",
                 "completion_reason": reason,
                 "interrupted_at": interrupted_at,
@@ -89,20 +104,6 @@ class FakeLivePlaybackStore:
             }
         )
         return True
-
-    def promote_completed_event(self, event_key: str) -> int | None:
-        self.promote_calls.append(event_key)
-        row = self.rows[event_key]
-        if row["completion_status"] != "completed":
-            return None
-        if not row.get("actual_play_at"):
-            return None
-        if not row.get("dance_system_key") or not row.get("dance_external_id"):
-            return None
-        if row.get("duration_seconds") is None or bool(row.get("observed_mid_play")):
-            return None
-        row["promoted_playback_record_id"] = len(self.promote_calls)
-        return row["promoted_playback_record_id"]
 
     def commit(self) -> None:
         self.commits += 1
@@ -158,6 +159,10 @@ def playback_event(
     }
 
 
+def stored_key(playback_event_key: str = "wannadance:3114#1") -> str:
+    return make_watcher_playback_event_key("session-1", playback_event_key)
+
+
 class LivePlaybackRuntimeModuleTest(unittest.TestCase):
     def test_room_left_interrupts_pending_event_and_clears_overlay(self):
         stats = RuntimeStats()
@@ -173,9 +178,11 @@ class LivePlaybackRuntimeModuleTest(unittest.TestCase):
             {"event_type": "room-left", "timestamp": "2026.05.17 15:30:05"}
         )
 
-        row = store.rows["session-1:wannadance:3114#1"]
+        row = store.rows[stored_key()]
         self.assertEqual(row["completion_status"], "interrupted")
         self.assertEqual(row["completion_reason"], "room_left")
+        self.assertEqual(row["playback_status"], "needs_attention")
+        self.assertEqual(row["counts_in_history"], 0)
         self.assertEqual(row["played_seconds"], 5.0)
         self.assertEqual(overlay.statuses[-1]["room_name"], "WannaDance")
         self.assertTrue(overlay.statuses[-1]["clear_current"])
@@ -193,9 +200,10 @@ class LivePlaybackRuntimeModuleTest(unittest.TestCase):
             }
         )
 
-        row = store.rows["session-1:wannadance:3114#1"]
+        row = store.rows[stored_key()]
         self.assertEqual(row["completion_status"], "interrupted")
         self.assertEqual(row["completion_reason"], "application_quit")
+        self.assertEqual(row["playback_status"], "needs_attention")
         self.assertEqual(row["played_seconds"], 4.0)
 
     def test_preview_video_is_suppressed_before_runtime_store_or_overlay(self):
@@ -228,7 +236,7 @@ class LivePlaybackRuntimeModuleTest(unittest.TestCase):
 
         self.assertEqual(store.rows, {})
         self.assertEqual(overlay.published, [])
-        self.assertEqual(stats.live_db_updates, 0)
+        self.assertEqual(stats.playback_record_updates, 0)
 
     def test_vrcx_play_after_preview_marker_reaches_runtime(self):
         stats = RuntimeStats()
@@ -259,15 +267,15 @@ class LivePlaybackRuntimeModuleTest(unittest.TestCase):
             }
         )
 
-        row = store.rows["session-1:wannadance:3335#1"]
+        row = store.rows[stored_key("wannadance:3335#1")]
         self.assertEqual(row["dance_external_id"], "3335")
         self.assertEqual(row["video_name"], "Real Song")
-        self.assertEqual(stats.live_db_updates, 1)
+        self.assertEqual(stats.playback_record_updates, 1)
 
-    def test_progress_lifecycle_event_completes_and_promotes_when_enabled(self):
+    def test_progress_lifecycle_event_accepts_watcher_record(self):
         stats = RuntimeStats()
         store = FakeLivePlaybackStore()
-        runtime = LivePlaybackRuntime(stats=stats, store=store, promote_live=True)
+        runtime = LivePlaybackRuntime(stats=stats, store=store)
 
         runtime.observe_playback_event(playback_event(duration_seconds=10.0))
         runtime.observe_lifecycle_event(
@@ -278,31 +286,28 @@ class LivePlaybackRuntimeModuleTest(unittest.TestCase):
             }
         )
 
-        row = store.rows["session-1:wannadance:3114#1"]
+        row = store.rows[stored_key()]
         self.assertEqual(row["completion_status"], "completed")
         self.assertEqual(row["completion_reason"], "observed_completion_threshold")
+        self.assertEqual(row["playback_status"], "accepted")
+        self.assertEqual(row["counts_in_history"], 1)
         self.assertEqual(row["played_seconds"], 8.0)
-        self.assertEqual(stats.live_promotions, 1)
-        self.assertEqual(store.promote_calls, ["session-1:wannadance:3114#1"])
+        self.assertEqual(stats.playback_record_updates, 2)
 
-    def test_completed_event_does_not_promote_without_explicit_flag(self):
+    def test_graceful_stop_sets_incomplete_record_to_attention(self):
         stats = RuntimeStats()
         store = FakeLivePlaybackStore()
-        runtime = LivePlaybackRuntime(stats=stats, store=store, promote_live=False)
+        runtime = LivePlaybackRuntime(stats=stats, store=store)
 
         runtime.observe_playback_event(playback_event(duration_seconds=10.0))
-        runtime.observe_lifecycle_event(
-            {
-                "event_type": "log-progress",
-                "timestamp": "2026.05.17 15:30:08",
-                "observed_at": "2026.05.17 15:30:08",
-            }
-        )
+        stats.last_log_timestamp = "2026.05.17 15:30:05"
+        runtime.settle_graceful_stop()
 
-        row = store.rows["session-1:wannadance:3114#1"]
-        self.assertEqual(row["completion_status"], "completed")
-        self.assertEqual(stats.live_promotions, 0)
-        self.assertEqual(store.promote_calls, [])
+        row = store.rows[stored_key()]
+        self.assertEqual(row["completion_status"], "interrupted")
+        self.assertEqual(row["completion_reason"], "watcher_stopped")
+        self.assertEqual(row["playback_status"], "needs_attention")
+        self.assertEqual(row["counts_in_history"], 0)
 
 
 if __name__ == "__main__":

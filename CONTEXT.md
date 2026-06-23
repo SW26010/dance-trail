@@ -148,6 +148,14 @@ _Avoid_: status buckets, live monitor, insights, data operations
 The Web UI timeline item representing one parsed playback-related record, whether it comes from historical import, live observation, interrupted observation, or another parsed source. It is not the same as a raw VRChat log line.
 _Avoid_: raw log line, database row
 
+**Watcher-Derived Playback Record**:
+A Playback Record created from live watcher evidence once the observation has a dance identity. It may represent playback observed from the start or playback discovered after it is already in progress. Its existence means the event is reviewable in Timeline; whether it counts in history is decided separately by acceptance policy.
+_Avoid_: live playback record, overlay state, accepted playback record, actual-play-only record
+
+**Watcher Settlement**:
+The watcher action that resolves a pending Watcher-Derived Playback Record into its default acceptance result after enough lifecycle or playback evidence is available. Settlement may accept a record, mark it attention-needed, exclude it, or leave it pending when the observation is still active or the watcher ended before settlement.
+_Avoid_: raw event parsing, manual decision, playback record creation
+
 **Request Source Type**:
 The request/playback-source classification stored on a playback record, such as queued_self, recommend, self, other, random, or unknown. Request Source Type is stored today in `source_type`; it is not evidence strength and does not decide whether the record is effectively accepted, excluded, or needs attention.
 _Avoid_: evidence source priority, acceptance status, review status
@@ -156,21 +164,25 @@ _Avoid_: evidence source priority, acceptance status, review status
 A playback record included in normal history and Insights under the trust-by-default policy. A record may be accepted because it comes from a supported source, was automatically settled, or was manually confirmed; manual confirmation is not required for ordinary inclusion.
 _Avoid_: manually confirmed only, promotion-only record, raw parser row
 
+**Pending Playback Record**:
+A playback record whose evidence is reviewable but not yet settled into accepted, attention-needed, or excluded state. Pending is for active or incomplete observation state; it is not a request for human review by itself and does not count in normal history or Insights. Pending should normally be settled when the watcher stops gracefully; a leftover pending watcher-derived record indicates the watcher ended unexpectedly before settlement. Recovery or repair workflows may convert stale pending watcher records into attention-needed records, but ordinary Timeline or Insights reads should not mutate them.
+_Avoid_: needs attention, excluded, accepted, raw live state, graceful final state, read-time repair
+
 **Default Acceptance Result**:
-The accepted, excluded, or attention-needed result inferred from playback evidence and Evidence Source Priority before any active manual decision is applied. Restoring the default result means removing the manual decision overlay and letting the evidence rules decide again.
+The accepted, pending, excluded, or attention-needed result inferred from playback evidence and Evidence Source Priority before any active manual decision is applied. Restoring the default result means removing the manual decision overlay and letting the evidence rules decide again.
 _Avoid_: stored truth, permanent user state, raw parser status
 
 **Manual Playback Decision**:
-A reversible user-authored decision about whether a playback record should be accepted, excluded, or reviewed. Manual Playback Decision is strongest while active, but it does not erase playback evidence or permanently replace the Default Acceptance Result.
-_Avoid_: deletion, source rewrite, irreversible confirmation
+A reversible user-authored decision about whether a playback record should be accepted, excluded, or reviewed. Manual Playback Decision is strongest while active, but it does not erase playback evidence or permanently replace the Default Acceptance Result. Pending is not a Manual Playback Decision because active observation state is inferred from evidence rather than chosen by the user.
+_Avoid_: deletion, source rewrite, irreversible confirmation, pending playback
 
 **Manual Exclusion**:
 A reversible Manual Playback Decision that a playback record should not count as accepted playback. Manual Exclusion is the normal way for the user to correct false positives without needing to confirm every normal record.
 _Avoid_: deletion, parser interruption, automatic conflict
 
 **Review Attention**:
-A user-facing cue that a playback record may need human attention because of a conflict, low-confidence evidence, or unusual source state. Review Attention is separate from acceptance: most accepted records should not require attention.
-_Avoid_: required confirmation, acceptance status, parser status
+A user-facing cue that a playback record may need human attention because of a conflict, low-confidence evidence, or unusual source state. Review Attention is separate from acceptance and pending observation state: most accepted records should not require attention, and pending records should not be treated as attention-needed until settlement or evidence rules say so.
+_Avoid_: required confirmation, acceptance status, parser status, pending playback
 
 **Trust-By-Default Playback Policy**:
 The product rule that supported playback evidence is accepted unless stronger evidence or explicit user judgment excludes it. This policy keeps day-to-day use lightweight: the user handles exceptions instead of confirming every dance.

@@ -13,6 +13,7 @@ import sqlite3
 EFFECTIVE_PLAYBACK_ACCEPTED = "accepted"
 EFFECTIVE_PLAYBACK_EXCLUDED = "excluded"
 EFFECTIVE_PLAYBACK_NEEDS_ATTENTION = "needs_attention"
+EFFECTIVE_PLAYBACK_PENDING = "pending"
 
 MANUAL_PLAYBACK_DECISIONS_TABLE = "manual_playback_decisions"
 
@@ -144,6 +145,8 @@ def default_playback_status_sql() -> str:
                     THEN '{EFFECTIVE_PLAYBACK_ACCEPTED}'
                 WHEN pr.playback_status = '{EFFECTIVE_PLAYBACK_NEEDS_ATTENTION}'
                     THEN '{EFFECTIVE_PLAYBACK_NEEDS_ATTENTION}'
+                WHEN pr.playback_status = '{EFFECTIVE_PLAYBACK_PENDING}'
+                    THEN '{EFFECTIVE_PLAYBACK_PENDING}'
                 ELSE '{EFFECTIVE_PLAYBACK_EXCLUDED}'
             END
         """

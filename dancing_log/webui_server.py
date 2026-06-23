@@ -13,7 +13,7 @@ import time
 from urllib.parse import urlsplit
 import webbrowser
 
-from dancing_log.app_paths import AppPaths, default_app_root
+from dancing_log.app_paths import AppPaths, AppRuntimeConfig, default_app_root
 from dancing_log.live_app_session import (
     LiveAppSessionRuntime,
     WatchVrcLogsFunc,
@@ -82,6 +82,7 @@ class WebUiServer:
             session_runtime=session_runtime,
             watch_vrc_logs_func=watch_vrc_logs_func,
         )
+        _run_startup_maintenance(self.runtime.app_root)
         self._owns_session = session_runtime is None
         self._server: _WebUiHTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -106,6 +107,19 @@ class WebUiServer:
             self._thread = None
         if self._owns_session:
             self.runtime.session.close()
+
+
+def _run_startup_maintenance(app_root: Path) -> None:
+    try:
+        config = AppRuntimeConfig.load(app_root=app_root, migrate_legacy=True)
+        app_db_path = config.path("app_db")
+        from dancing_log.storage import connect_db, repair_stale_watcher_pending_records
+
+        with connect_db(app_db_path) as conn:
+            repair_stale_watcher_pending_records(conn)
+            conn.commit()
+    except Exception:
+        return
 
 
 class _WebUiHTTPServer(ThreadingHTTPServer):

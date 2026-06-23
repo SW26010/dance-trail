@@ -29,8 +29,8 @@ The first refactor implements the core model directly:
 - `dance_events`, `vrcx_import_events`, and `live_playback_events` are retained
   as Legacy Playback Roots, staging provenance, or runtime observation tables
   during the transition.
-- Manual logging, VRCX import, queued-self sync, and default live promotion
-  write target-owned Local Playback Evidence into `playback_records`.
+- Manual logging, VRCX import, queued-self sync, and watcher-derived live
+  evidence write target-owned Local Playback Evidence into `playback_records`.
 - Provider matching and popularity snapshots are deferred.
 
 ## Why The Model Changed
@@ -232,7 +232,7 @@ This table is the v0 read contract after the one-time legacy cleanup.
 | `source_row_id` | INTEGER NOT NULL | Original source row id |
 | `source_event_key` | TEXT | Original source event key |
 | `source_fingerprint` | TEXT NOT NULL UNIQUE | Stable source-row fingerprint for dedupe |
-| `playback_status` | TEXT NOT NULL | `accepted`, `needs_attention`, or future status |
+| `playback_status` | TEXT NOT NULL | `pending`, `accepted`, `needs_attention`, or future status |
 | `counts_in_history` | INTEGER NOT NULL DEFAULT 0 | Default evidence-derived history inclusion before manual overlay |
 | `status_reason` | TEXT NOT NULL | Reason for the current default status |
 | `source_priority` | INTEGER NOT NULL DEFAULT 0 | Evidence Source Priority used for overlap review |
@@ -353,10 +353,10 @@ this table as staging provenance and writes accepted Local Playback Evidence to
 
 ### `live_playback_events`
 
-Runtime table for live watcher workflows. This table holds the latest folded
-state for each live playback event and is upserted as raw log signals arrive.
-Default promotion writes it before promoting eligible rows; `--live-db
---no-promote-live` keeps this table without writing accepted history.
+Deprecated experimental runtime table for legacy live watcher forensics. Normal
+watcher workflows write folded observations with stable dance identity directly
+to `playback_records`; `--live-db` additionally mirrors folded state here for
+diagnosis.
 
 Columns mirror the forensic `playback_events.jsonl` shape, including:
 
@@ -374,15 +374,12 @@ Columns mirror the forensic `playback_events.jsonl` shape, including:
   `completed_at`, `interrupted_at`, `played_seconds`, and
   `required_played_seconds`
 - `last_updated_at`, `promoted_dance_event_id`,
-  `promoted_playback_record_id`, and `promoted_at`
+  `promoted_playback_record_id`, and `promoted_at` for legacy compatibility
 
-Rows from this table can be promoted into accepted `playback_records` through
-the live promotion path, which watcher-driven workflows enable by default.
-Promotion requires `completion_status = completed`, `actual_play_at`, known
-`duration_seconds`, `played_seconds >= 80% * duration_seconds`,
-`observed_mid_play = false`, and parsed dance identity fields. Mid-play
-observations may remain `pending` so the OBS overlay can show the current track
-after a mid-room join, and interrupted rows remain useful for forensic review.
+Normal watcher settlement now updates watcher-derived `playback_records`.
+Pending records become accepted when conservative completion rules pass, or
+non-counting `needs_attention` records when lifecycle or stop boundaries arrive
+before acceptance.
 Neither case should automatically become a normal delay/statistics event.
 `duration_source` records where the runtime duration came from, such as a VRCX
 payload or WannaDance queue JSON; it is runtime provenance only and is not added

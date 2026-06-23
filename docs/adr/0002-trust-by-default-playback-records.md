@@ -53,7 +53,7 @@ Manual work is focused on false positives, conflicts, and corrections instead of
 
 Automatic watcher settlement is encouraged when the rules are conservative enough, because it reduces user labor while preserving the ability to correct mistakes later.
 
-Watcher-driven workflows now enable automatic acceptance by default for conservative completed live evidence. `--promote-live` remains accepted as a compatibility spelling, and `--no-promote-live` keeps a capture-only workflow available for forensic runs.
+Watcher-driven workflows now enable automatic acceptance by default for conservative settled watcher evidence. ADR 0005 supersedes the old live-promotion CLI compatibility surface; normal watcher evidence now starts from watcher-derived `playback_records`.
 
 The product must provide a clear Manual Exclusion path so the user can quickly remove false positives from statistics.
 

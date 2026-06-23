@@ -423,6 +423,7 @@ const TEXT = {
     status_accepted: "accepted",
     status_excluded: "excluded",
     status_needs_attention: "needs attention",
+    status_pending: "pending",
     searchCatalog: "Search catalog",
     search: "Search",
     noTracks: "No tracks",
@@ -533,6 +534,7 @@ const TEXT = {
     status_accepted: "已接受",
     status_excluded: "已排除",
     status_needs_attention: "需注意",
+    status_pending: "待定",
     searchCatalog: "搜索目录",
     search: "搜索",
     noTracks: "没有条目",
@@ -667,6 +669,7 @@ function reviewStatusLabel(value) {
 function reviewStatusClass(value) {
   if (value === "accepted") return "green";
   if (value === "excluded") return "red";
+  if (value === "pending") return "blue";
   return "orange";
 }
 

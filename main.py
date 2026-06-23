@@ -321,7 +321,7 @@ def cmd_sample_recording_frames():
 
 
 def cmd_watch_vrc_log():
-    """Watch VRChat logs and promote completed playbacks."""
+    """Watch VRChat logs and materialize watcher playback evidence."""
     import argparse
 
     parser = argparse.ArgumentParser(description="Watch VRChat output logs for video playback lines")
@@ -356,24 +356,11 @@ def cmd_watch_vrc_log():
         action="store_true",
         help="Do not incrementally archive source VRChat output logs",
     )
-    parser.add_argument("--app-db", default=None, help="SQLite path for live DB writes")
+    parser.add_argument("--app-db", default=None, help="SQLite path for watcher playback records")
     parser.add_argument(
         "--live-db",
         action="store_true",
-        help="Upsert folded playback state into live_playback_events even when promotion is disabled",
-    )
-    promote_group = parser.add_mutually_exclusive_group()
-    promote_group.add_argument(
-        "--promote-live",
-        action="store_true",
-        default=True,
-        help="Promote eligible live events into playback_records; this is the default and implies --live-db",
-    )
-    promote_group.add_argument(
-        "--no-promote-live",
-        action="store_false",
-        dest="promote_live",
-        help="Do not promote eligible live events into playback_records",
+        help="Experimental/deprecated: also mirror folded state into live_playback_events",
     )
     parser.add_argument(
         "--overlay-port",
@@ -406,7 +393,7 @@ def cmd_watch_vrc_log():
         from_start=args.from_start,
         include_raw=not args.no_raw,
         live_db=args.live_db,
-        promote_live=args.promote_live,
+        record_playback=True,
         overlay_port=args.overlay_port,
         poll_seconds=args.poll_seconds,
         stop_after_idle_seconds=args.stop_after_idle_seconds,
@@ -424,10 +411,12 @@ def cmd_watch_vrc_log():
     print(f"  candidate lines: {stats.candidate_lines}")
     print(f"  parsed events: {stats.parsed_events}")
     print(f"  playback events: {stats.playback_events}")
+    if args.live_db:
+        print("  warning: --live-db is deprecated experimental output; normal watcher evidence is stored in playback_records")
     if stats.live_db_updates:
         print(f"  live DB updates: {stats.live_db_updates}")
-    if args.promote_live:
-        print(f"  live promotions: {stats.live_promotions}")
+    if getattr(stats, "playback_record_updates", 0):
+        print(f"  playback record updates: {stats.playback_record_updates}")
     if stats.overlay_url:
         print(f"  overlay URL: {stats.overlay_url}")
     if stats.source_log_dir:
@@ -489,7 +478,7 @@ def main():
         "import-favorites": ("Import favorite track flags from text", cmd_import_favorites),
         "import-vrcx": (operation_descriptions["import-vrcx"], cmd_import_vrcx),
         "sync-queued-self": (operation_descriptions["sync-queued-self"], cmd_sync_queued_self),
-        "watch-vrc-log": ("Watch VRChat logs and promote completed playbacks", cmd_watch_vrc_log),
+        "watch-vrc-log": ("Watch VRChat logs and materialize watcher playback evidence", cmd_watch_vrc_log),
         "webui": ("Start the local Web UI", cmd_webui),
         "rebuild-data": (operation_descriptions["rebuild-data"], cmd_rebuild_data),
     }

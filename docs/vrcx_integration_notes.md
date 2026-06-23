@@ -318,11 +318,10 @@ uv run python main.py watch-vrc-log
 ```
 
 The base command is the default live watcher workflow. It tails VRChat
-`output_log_*.txt` files, stores the session under `logs/captures/`, updates the
-app DB live sink, and promotes eligible completed rows into accepted
-`playback_records`. For forensic capture without SQLite writes, run
-`watch-vrc-log --no-promote-live`; to keep `live_playback_events` without
-accepted-history writes, run `watch-vrc-log --live-db --no-promote-live`.
+`output_log_*.txt` files, stores the session under `logs/captures/`, and writes
+watcher-derived playback evidence into `playback_records` once a folded
+observation has a stable dance identity. To also mirror folded state into the
+deprecated `live_playback_events` forensic table, run `watch-vrc-log --live-db`.
 
 The watcher defaults to `config/dancing-log.local.json` key `vrc_log_dir`, falling back
 to the standard Windows LocalLow VRChat log directory. It starts from the current
@@ -422,8 +421,9 @@ WannaDance duration for live watcher and overlay state must come from VRChat log
 signals only. The overlay must not query or depend on the main app database,
 `dance_tracks`, `wannadance_songs`, catalog sync output, favorites, or other
 stored catalog metadata to fill missing runtime fields. The main database can be
-a sink for `live_playback_events` and default playback-record promotion, but it
-must not become the source of truth for what the overlay shows.
+a sink for watcher-derived `playback_records` and optional deprecated
+`live_playback_events` forensic rows, but it must not become the source of truth
+for what the overlay shows.
 
 Historical log inspection on 2026-05-18 found two useful log-derived duration
 sources:
@@ -472,19 +472,17 @@ Preferred runtime order:
    a total duration or progress percentage; it should not backfill from catalog
    tables.
 
-Live watcher workflows promote eligible completed rows into accepted
-`playback_records` by default. Promotion requires a completed live row with
-`completion_status = completed`, `actual_play_at`, known `duration_seconds`, no
-`observed_mid_play`, and a parsed dance system/external id. The watcher marks
-completion after observing at least 80% of the known duration. If a next song
-appears too early, or a room leave / VRChat quit / video shutdown appears before
-completion, the pending live row is marked `interrupted` and is not promoted.
+Live watcher workflows materialize watcher-derived `playback_records` by
+default once a folded observation has stable dance identity. New records start
+as `pending`, `counts_in_history = 0`, and
+`status_reason = live_observation_pending`. Settlement accepts records after
+observing at least 80% of the known duration; if a next song appears too early,
+or a room leave / VRChat quit / video shutdown / graceful watcher stop appears
+before completion, the record becomes non-counting `needs_attention` evidence.
 
-`--live-db` remains the runtime/forensic sink for `live_playback_events` and is
-implied by default promotion. Use `--no-promote-live` for capture-only runs that
-should not write SQLite state, or `--live-db --no-promote-live` to keep
-`live_playback_events` without writing accepted history. `--promote-live`
-remains accepted as a compatibility spelling.
+`--live-db` is deprecated experimental output for additionally mirroring folded
+state into `live_playback_events`. Normal watcher evidence belongs in
+`playback_records`; overlay/live status should use runtime in-memory state.
 
 Current watcher/overlay behavior is based on the 2026-05-17 and 2026-05-18 live
 captures:
@@ -506,7 +504,7 @@ captures:
   overlay and does not make a row `observed_mid_play`.
 - True mid-room joins are detected from explicit positive progress offsets.
   These rows can remain visible as pending overlay current playback, but they
-  remain ineligible for playback-record promotion or accepted history.
+  remain ineligible for automatic acceptance until watcher settlement.
 
 ## Self Identity Detection
 

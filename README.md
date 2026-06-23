@@ -43,8 +43,8 @@ transition. They may be read for compatibility, migration, and diagnosis, but
 normal Timeline reads use the effective playback projection over
 `playback_records`, while Insights, daily reports, and recommendations read the
 effective accepted projection. Manual logging, VRCX import, queued-self sync,
-and default live promotion now write target-owned Local Playback Evidence into
-`playback_records`.
+and watcher-derived live evidence now write target-owned Local Playback
+Evidence into `playback_records`.
 
 Deferred tables:
 
@@ -157,7 +157,7 @@ Each line is formatted as `HH:MM:SS song-id. song name`, for example:
 Daily history is read from accepted `playback_records`. Without `--live`, the
 command prints all accepted playback records for the day, including accepted
 live-derived records. With `--live`, it filters that same Local Playback
-Evidence root to accepted records whose source table was `live_playback_events`.
+Evidence root to accepted records whose source kind is `live_watcher`.
 Interrupted, pending, and other review-attention live evidence is retained in
 `playback_records`, but it does not print in normal day history until accepted
 and counting in history.
@@ -212,8 +212,8 @@ history rows in legacy `dance_events`.
 
 ## Live VRChat Log Capture
 
-Watch live VRChat Unity output logs, write capture artifacts, and promote
-eligible completed playbacks into default accepted Local Playback Evidence:
+Watch live VRChat Unity output logs, write capture artifacts, and materialize
+watcher-derived Local Playback Evidence:
 
 ```bash
 uv run python main.py watch-vrc-log
@@ -246,18 +246,15 @@ event view is `playback_events.jsonl`, which tracks request, resolve, load,
 actual-play, source, mid-play progress, and delay fields when those signals appear
 in the VRChat log.
 
-Default promotion also writes live runtime state to `live_playback_events` and
-default accepted Local Playback Evidence to `playback_records` when the
-completion rules pass. For capture-only runs, use:
+The normal watcher path writes a `playback_records` row as soon as a folded
+watcher observation has a stable dance identity. New rows start as `pending`
+with `counts_in_history=0`, then watcher settlement updates them to accepted
+or needs-attention evidence. `live_playback_events` is deprecated for normal
+operation. To also mirror folded runtime state into the legacy forensic table,
+use the experimental flag:
 
 ```bash
-uv run python main.py watch-vrc-log --no-promote-live
-```
-
-To keep the live forensic table without writing accepted history, use:
-
-```bash
-uv run python main.py watch-vrc-log --live-db --no-promote-live
+uv run python main.py watch-vrc-log --live-db
 ```
 
 ## Local Web UI
@@ -286,7 +283,7 @@ python scripts/replay_vrc_logs.py compare --baseline analysis/replay_gt/current-
 
 `baseline` and `compare` replay every matched log file in filename order and
 write ignored artifacts under `analysis/`. `diff_report.md` compares folded
-playback events, live SQLite promotion results, the optional manual GT file, and
+playback events, watcher settlement results, the optional manual GT file, and
 an optional read-only VRCX row count for the manual window.
 
 For live local state, default automatic acceptance, and OBS overlay output:
@@ -297,22 +294,17 @@ uv run python main.py watch-vrc-log --overlay-port 8765
 
 The local overlay page is available at `http://127.0.0.1:8765/overlay`. It is
 self-contained, binds only to localhost, and updates through server-sent events.
-`live_playback_events` is updated immediately as log signals arrive. Eligible
-completed live rows are promoted into accepted `playback_records` by default
-when the row has played at least 80% of the known `duration_seconds`. Normal
-Timeline reads the effective playback projection and shows accepted, excluded,
-and needs-attention status. Insights, daily history, and recommendation history
-read the effective accepted projection instead of the legacy source tables.
-`--live-db` remains the runtime/forensic live-status sink and is implied by
-default promotion. Use `--no-promote-live` for capture-only runs that should not
-write SQLite state, or `--live-db --no-promote-live` to keep
-`live_playback_events` without writing accepted history. `--promote-live`
-remains accepted as a compatibility spelling.
+Normal watcher evidence is persisted directly in `playback_records` using the
+logical source table `watcher_playback_events`. Normal Timeline reads the
+effective playback projection and shows accepted, pending, excluded, and
+needs-attention status. Insights, daily history, and recommendation history read
+the effective accepted projection instead of the legacy source tables. `--live-db`
+is deprecated experimental output for legacy forensic inspection only.
 
 Room leave and VRChat quit/shutdown log events clear the overlay's current
-playback and mark pending live rows as interrupted. Entering-room status is
-shown only until a newer playback event arrives, so stale room transitions do
-not cover the current track.
+playback and settle pending watcher-derived playback records. Graceful watcher
+stop also settles pending records: completed-enough observations become
+accepted; the rest become non-counting needs-attention records.
 
 WannaDance `PreviewVideo` lines suppress the preview player's load/resolve/start
 noise, but a later real VRCX `VideoPlay` for the same song is still accepted.
@@ -329,7 +321,7 @@ WannaDance/PyPyDance `Playing synced` lines are recorded as `synced_play_at`
 only; they do not by themselves clear the overlay or mark a row as mid-play.
 Mid-play detection comes from explicit progress offsets. Mid-play rows remain
 visible in the overlay as pending current playback, but they remain ineligible
-for playback-record promotion or accepted history.
+for automatic acceptance until watcher settlement.
 
 ## Queued-Self Manifests
 

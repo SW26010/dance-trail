@@ -78,9 +78,10 @@ overlay, or quit the background app session.
 DancingLogCli.exe watch-vrc-log --overlay-port 8765 %*
 ```
 
-The command promotes eligible completed live rows into accepted history by
+The command writes watcher-derived playback evidence into `playback_records` by
 default. Extra arguments are appended, so a user can still pass options such as
-`--no-promote-live`, `--log-dir`, or another `--overlay-port`.
+`--log-dir`, `--live-db` for deprecated forensic mirroring, or another
+`--overlay-port`.
 
 Development/research commands are not part of the portable release. In
 particular, `sample-frames` and its ffmpeg dependency are excluded from the zip.

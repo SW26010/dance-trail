@@ -206,10 +206,9 @@ uv run python main.py watch-vrc-log
 ```
 
 基础命令是默认 live watcher workflow。它会 tail VRChat `output_log_*.txt`，把 session
-存到 `logs/captures/`，更新 app DB live sink，并把符合条件的 completed row promotion 到
-accepted `playback_records`。需要只做取证 capture、不写 SQLite 时，运行
-`watch-vrc-log --no-promote-live`；需要保留 `live_playback_events` 但不写 accepted history
-时，运行 `watch-vrc-log --live-db --no-promote-live`。
+存到 `logs/captures/`，并在 folded observation 有稳定舞蹈身份后写入 watcher-derived
+`playback_records`。如需额外把 folded state 镜像到 deprecated 的
+`live_playback_events` 取证表，运行 `watch-vrc-log --live-db`。
 
 watcher 默认读取 `config/dancing-log.local.json` 的 `vrc_log_dir`，否则回退到 Windows
 LocalLow 下的 VRChat 标准日志目录。默认从当前日志文件末尾开始，避免游玩时重扫旧
@@ -296,8 +295,8 @@ overlay 页面通过 server-sent events 读取同一份 live state。它显示�
 实时 watcher 和 overlay 里的 WannaDance duration 必须来自 VRChat 日志中的运行时信号。
 overlay 不应依靠主数据库的信息补运行时字段：不要从 `dance_tracks`、`wannadance_songs`、
 目录同步结果、收藏数据或已落库的 catalog metadata 反查 duration。主数据库可以作为
-`live_playback_events` 和默认 playback-record promotion 的写入目标，但不能作为 overlay
-当前状态的事实来源。
+watcher-derived `playback_records` 和可选 deprecated `live_playback_events` 取证 row
+的写入目标，但不能作为 overlay 当前状态的事实来源。
 
 历史日志里有两个可用的日志侧 duration 来源：
 
@@ -330,17 +329,15 @@ JSON 没有携带 duration；WannaDance 的 VRCX `VideoPlay` payload 里 duratio
 3. 如果两个来源都存在且冲突，记录 anomaly，不能静默覆盖。
 4. 如果没有任何运行时 duration，overlay 只显示 elapsed，不从 catalog 或主数据库回填。
 
-Live watcher 工作流默认会把符合条件的 completed row promotion 到 accepted
-`playback_records`。promotion 要求 live row 已经 `completion_status = completed`，
-存在 `actual_play_at`，有已知 `duration_seconds`，没有 `observed_mid_play`，并且有解析出的
-dance system/external id。watcher 只有在观察到已知时长的至少 80% 后才标记完成。下一首
-过早出现、离开房间、退出 VRChat 或视频系统关闭时，尚未完成的 live row 会标记为
-`interrupted`，不会推进 accepted history。
+Live watcher 工作流默认会在 folded observation 有稳定舞蹈身份后 materialize
+watcher-derived `playback_records`。新记录先是 `pending`、`counts_in_history = 0`、
+`status_reason = live_observation_pending`。watcher 观察到已知时长至少 80% 后会把记录
+settle 为 accepted；下一首过早出现、离开房间、退出 VRChat、视频系统关闭或 graceful
+watcher stop 出现在自动接受前，则 settle 为不计入历史的 `needs_attention` 证据。
 
-`--live-db` 仍是 `live_playback_events` 的运行时/取证写入目标，并由默认 promotion 隐含
-启用。需要只写 capture artifacts、不写 SQLite 状态时使用 `--no-promote-live`；需要保留
-`live_playback_events` 但不写 accepted history 时使用 `--live-db --no-promote-live`。
-`--promote-live` 仍作为兼容写法保留。
+`--live-db` 是 deprecated experimental 输出，只额外把 folded state 镜像到
+`live_playback_events`。正常 watcher evidence 属于 `playback_records`；overlay/live
+status 应使用运行时内存状态。
 
 当前 watcher/overlay 行为基于 2026-05-17 和 2026-05-18 的真实 live capture 收口：
 
@@ -353,7 +350,7 @@ dance system/external id。watcher 只有在观察到已知时长的至少 80% �
 - `Playing synced` 只记录为 `synced_play_at`，不会清空 overlay，也不会让 row 变成
   `observed_mid_play`。
 - 真正半路进房由明确的正 progress offset 判断。这类 row 可以保持为 overlay 的 pending
-  current playback，但不会 promotion 到 legacy history 或 accepted history。
+  current playback，但在 watcher settlement 前不会自动进入 accepted history。
 
 ## 还不能完全确定的事
 

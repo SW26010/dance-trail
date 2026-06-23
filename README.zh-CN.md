@@ -45,8 +45,8 @@ WannaDance 专有缓存字段放在 `wannadance_songs`，不放在
 Legacy Playback Root、staging 溯源或运行时观察表。它们可以继续用于兼容、迁移和
 排查，但普通 Timeline 读取基于 `playback_records` 的 effective playback projection，
 Insights、daily report 和 recommendations 读取 effective accepted projection。
-手动 log、VRCX import、queued-self sync 和默认 live promotion 现在都会把普通历史写入
-`playback_records`。
+手动 log、VRCX import、queued-self sync 和 watcher-derived live evidence 现在都会把
+Local Playback Evidence 写入 `playback_records`。
 
 暂缓设计的表：
 
@@ -131,9 +131,9 @@ uv run python main.py day 2026-06-07 --live
 ```
 
 普通每日历史读取 accepted `playback_records`。不带 `--live` 时读取所有 accepted
-历史；`--live` 会过滤到来源为 `live_playback_events` 的 accepted 记录。实时
-`live_playback_events` 表仍用于 overlay 当前状态和取证排查，可能包含 `interrupted`
-或 `pending` live row，但不再是普通每日历史根。
+历史；`--live` 会过滤到来源为 `live_watcher` 的 accepted 记录。实时 watcher
+证据会统一进入 `playback_records`；`live_playback_events` 只保留为 deprecated
+实验/取证路径。
 
 当前推荐分数使用：
 
@@ -164,8 +164,8 @@ unsupported，不会误判成 WannaDance。
 
 ## 实时 VRChat 日志和 OBS Overlay
 
-监听 VRChat Unity 输出日志、写入 capture artifacts，并默认把符合条件的 completed
-playback promotion 到默认 accepted 的 Local Playback Evidence：
+监听 VRChat Unity 输出日志、写入 capture artifacts，并把有稳定舞蹈身份的 watcher
+观察写成 watcher-derived Local Playback Evidence：
 
 ```bash
 uv run python main.py watch-vrc-log
@@ -180,29 +180,21 @@ uv run python main.py watch-vrc-log --overlay-port 8765
 overlay 地址是 `http://127.0.0.1:8765/overlay`。它只绑定本机，通过
 server-sent events 更新，不依赖外部字体、图片、CDN 或网络请求。
 
-`live_playback_events` 会随着日志信号即时更新。符合条件的 completed live row 默认会
-promotion 到 accepted `playback_records`：要求播放到已知 `duration_seconds` 的至少 80%。
-普通 Timeline 读取 effective playback projection，并显示 accepted、excluded 和
-needs-attention 状态。Insights、daily history 和 recommendation history 读取
-effective accepted projection。`--live-db` 仍是运行时/取证 sink，默认 promotion
-会隐含启用它；`--promote-live` 仍作为兼容写法保留。
-需要只写 capture artifacts、不写 SQLite 状态时：
+普通 watcher 路径会在 folded event 有稳定 dance identity 后直接写入
+`playback_records`。新记录先是 `pending + counts_in_history=0`，后续 watcher
+settlement 再把它更新成 accepted 或 needs-attention。`live_playback_events`
+在正式场景下 deprecated；如需额外保留 legacy forensic table，可使用实验参数：
 
 ```bash
-uv run python main.py watch-vrc-log --no-promote-live
-```
-
-需要保留 live forensic table 但不写 accepted history 时：
-
-```bash
-uv run python main.py watch-vrc-log --live-db --no-promote-live
+uv run python main.py watch-vrc-log --live-db
 ```
 半路进房、带正 progress offset、未播完离开、未播完切歌、两次播放间隔小于曲目时长的记录
-都不会进入 playback-record promotion 或 accepted history。
+会进入 Timeline 复查，但在结算前或未被接受前不会进入 accepted history。
 
 watcher 会识别离开房间和 VRChat 退出/视频系统关闭日志，用它们清空 overlay 当前播放，
-并把尚未完成的 live row 标记为 `interrupted`。进入房间状态只会显示到更新的播放事件
-到来为止，避免没有当前曲目时残留旧的“Entering Room/进入房间”状态。
+并结算尚未完成的 watcher-derived playback record。graceful stop 也会先判断是否
+满足自动接受条件；否则写成不计入历史的 needs-attention 记录。进入房间状态只会显示
+到更新的播放事件到来为止，避免没有当前曲目时残留旧的“Entering Room/进入房间”状态。
 
 WannaDance 的 `PreviewVideo` 会抑制预览播放器带来的 load/resolve/start 噪声；如果之后
 出现真正的 VRCX `VideoPlay`，同一首歌仍会被接受为真实播放。同一首歌的 retry/resolve
@@ -216,7 +208,7 @@ event 补 `songId`、曲名、点歌人、duration 和 `duration_source`，但�
 WannaDance/PyPyDance 的 `Playing synced` 行现在只记录为 `synced_play_at`，不会单独
 清空 overlay，也不会直接把 live row 判定为半路播放。半路播放以 VRCX 的正 progress
 offset 等明确偏移信号为准；这类 row 会作为 pending current 显示在 overlay 上，但不会
-进入 playback-record promotion 或 accepted history。
+在 watcher settlement 前自动进入 accepted history。
 
 ## Queued-Self 清单
 

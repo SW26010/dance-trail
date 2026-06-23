@@ -75,9 +75,9 @@ UI，启动或停止 live watcher 和 OBS overlay，或退出后台应用会话�
 DancingLogCli.exe watch-vrc-log --overlay-port 8765 %*
 ```
 
-这个命令默认会把符合条件的 completed live row promotion 到 accepted history。额外参数
-会继续追加在后面，所以仍然可以传 `--no-promote-live`、`--log-dir`，或者用另一个
-`--overlay-port` 覆盖端口。
+这个命令默认会把 watcher-derived playback evidence 写入 `playback_records`。额外参数
+会继续追加在后面，所以仍然可以传 `--log-dir`、用于 deprecated 取证镜像的
+`--live-db`，或者用另一个 `--overlay-port` 覆盖端口。
 
 开发/研究命令不是 portable release 的一部分。特别是 `sample-frames` 以及
 它依赖的 ffmpeg 不会包含在 zip 里。

@@ -18,8 +18,10 @@ from dancing_log.queued_self_importer import sync_queued_self_manifests
 from dancing_log.playback_projection import (
     EFFECTIVE_PLAYBACK_ACCEPTED,
     EFFECTIVE_PLAYBACK_EXCLUDED,
+    EFFECTIVE_PLAYBACK_PENDING,
     set_manual_playback_decision,
 )
+from dancing_log.playback_evidence import read_timeline_playback_rows
 from dancing_log.playback_record_writer import (
     PROJECT_SOURCE_ROOT_KEY,
     PlaybackRecordWrite,
@@ -37,7 +39,13 @@ from dancing_log.storage import (
     mark_live_playback_event_completed,
     make_live_playback_event_key,
     promote_live_playback_event,
+    repair_stale_watcher_pending_records,
     upsert_live_playback_event,
+)
+from dancing_log.watcher_playback_materializer import (
+    WATCHER_INTERRUPTED_UNEXPECTEDLY_REASON,
+    WATCHER_PENDING_REASON,
+    WATCHER_PLAYBACK_SOURCE_TABLE,
 )
 from dancing_log.vrcx_importer import import_vrcx_database
 from dancing_log.wanna_catalog import sync_wanna_catalog, upsert_catalog
@@ -470,7 +478,13 @@ class SQLiteRuntimeTest(unittest.TestCase):
                     conn,
                     WANNA_SYSTEM_KEY,
                     "400",
-                    {"title": "Manual Song", "artist": "Manual Artist"},
+                        {"title": "Manual Song", "artist": "Manual Artist"},
+                )
+                pending_track_id = ensure_dance_track(
+                    conn,
+                    WANNA_SYSTEM_KEY,
+                    "500",
+                    {"title": "Pending Song", "artist": "Pending Artist"},
                 )
                 insert_playback_record(
                     conn,
@@ -491,6 +505,17 @@ class SQLiteRuntimeTest(unittest.TestCase):
                     source_type="player",
                     playback_status="needs_attention",
                     counts_in_history=0,
+                )
+                pending_record_id = insert_playback_record(
+                    conn,
+                    track_id=pending_track_id,
+                    played_at="2026-06-18T20:30:00+08:00",
+                    source_kind="live_watcher",
+                    source_table=WATCHER_PLAYBACK_SOURCE_TABLE,
+                    source_type="player",
+                    playback_status=EFFECTIVE_PLAYBACK_PENDING,
+                    counts_in_history=0,
+                    status_reason=WATCHER_PENDING_REASON,
                 )
                 set_manual_playback_decision(
                     conn,
@@ -522,6 +547,8 @@ class SQLiteRuntimeTest(unittest.TestCase):
                 conn.commit()
 
             records = load_dance_log(db_path)
+            with connect_db(db_path) as conn:
+                timeline_rows = read_timeline_playback_rows(conn)
 
             self.assertEqual(len(records), 2)
             self.assertEqual(records[0]["dance_track_id"], evidence_track_id)
@@ -532,6 +559,46 @@ class SQLiteRuntimeTest(unittest.TestCase):
                 excluded_track_id,
                 {record["dance_track_id"] for record in records},
             )
+            by_event_id = {row["event_id"]: row for row in timeline_rows}
+            self.assertEqual(
+                by_event_id[pending_record_id]["effective_playback_status"],
+                EFFECTIVE_PLAYBACK_PENDING,
+            )
+            self.assertNotIn(
+                pending_track_id,
+                {record["dance_track_id"] for record in records},
+            )
+
+    def test_repair_stale_watcher_pending_records_marks_unexpected_interruption(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "app.sqlite3"
+            with connect_db(db_path) as conn:
+                track_id = ensure_dance_track(conn, WANNA_SYSTEM_KEY, "5038")
+                pending_record_id = insert_playback_record(
+                    conn,
+                    track_id=track_id,
+                    played_at="2026-06-18T20:30:00+08:00",
+                    source_kind="live_watcher",
+                    source_table=WATCHER_PLAYBACK_SOURCE_TABLE,
+                    playback_status=EFFECTIVE_PLAYBACK_PENDING,
+                    counts_in_history=0,
+                    status_reason=WATCHER_PENDING_REASON,
+                )
+
+                changed = repair_stale_watcher_pending_records(conn)
+                second_changed = repair_stale_watcher_pending_records(conn)
+                row = conn.execute(
+                    "SELECT * FROM playback_records WHERE id = ?",
+                    (pending_record_id,),
+                ).fetchone()
+
+            self.assertEqual(changed, 1)
+            self.assertEqual(second_changed, 0)
+            self.assertEqual(row["playback_status"], "needs_attention")
+            self.assertEqual(row["counts_in_history"], 0)
+            self.assertEqual(row["status_reason"], WATCHER_INTERRUPTED_UNEXPECTEDLY_REASON)
+            self.assertEqual(row["completion_status"], "interrupted")
+            self.assertEqual(row["completion_reason"], WATCHER_INTERRUPTED_UNEXPECTEDLY_REASON)
 
     def test_recommendation_uses_dance_track_ids_without_popularity(self):
         with tempfile.TemporaryDirectory() as tmp:

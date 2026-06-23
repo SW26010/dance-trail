@@ -14,6 +14,7 @@ from dancing_log.playback_projection import (
     EFFECTIVE_PLAYBACK_ACCEPTED,
     EFFECTIVE_PLAYBACK_EXCLUDED,
     EFFECTIVE_PLAYBACK_NEEDS_ATTENTION,
+    EFFECTIVE_PLAYBACK_PENDING,
     accepted_playback_where_sql,
     effective_playback_status_sql,
     playback_projection_join_sql,
@@ -22,7 +23,9 @@ from dancing_log.playback_projection import (
 
 PLAYBACK_STATUS_ACCEPTED = EFFECTIVE_PLAYBACK_ACCEPTED
 PLAYBACK_STATUS_NEEDS_ATTENTION = EFFECTIVE_PLAYBACK_NEEDS_ATTENTION
+PLAYBACK_STATUS_PENDING = EFFECTIVE_PLAYBACK_PENDING
 LIVE_PLAYBACK_SOURCE_TABLE = "live_playback_events"
+LIVE_WATCHER_SOURCE_KIND = "live_watcher"
 
 
 def init_playback_records_schema(conn: sqlite3.Connection) -> None:
@@ -211,8 +214,8 @@ def _read_projected_playback_rows(
         where.append(f"{effective_playback_status_sql(conn)} = ?")
         params.append(effective_status)
     if source == "live":
-        where.append("pr.source_table = ?")
-        params.append(LIVE_PLAYBACK_SOURCE_TABLE)
+        where.append("pr.source_kind = ?")
+        params.append(LIVE_WATCHER_SOURCE_KIND)
     where_sql = " AND ".join(where) if where else "1 = 1"
     rows = conn.execute(
         f"""

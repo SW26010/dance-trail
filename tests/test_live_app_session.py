@@ -50,8 +50,8 @@ class LiveAppSessionRuntimeTest(unittest.TestCase):
                 self.assertEqual(calls[-1]["output_dir"], root / "logs" / "captures")
                 self.assertEqual(calls[-1]["app_db_path"], root / "data" / "dancing_log.sqlite3")
                 self.assertEqual(calls[-1]["source_log_dir"], root / "logs" / "source-vrc-logs")
-                self.assertTrue(calls[-1]["live_db"])
-                self.assertTrue(calls[-1]["promote_live"])
+                self.assertFalse(calls[-1]["live_db"])
+                self.assertTrue(calls[-1]["record_playback"])
                 self.assertIsNone(calls[-1]["overlay_port"])
 
                 runtime.start_overlay()
@@ -59,14 +59,14 @@ class LiveAppSessionRuntimeTest(unittest.TestCase):
                 self.assertTrue(runtime.status().watcher_running)
                 self.assertTrue(runtime.status().overlay_running)
                 self.assertEqual(calls[-1]["overlay_port"], 9911)
-                self.assertTrue(calls[-1]["promote_live"])
+                self.assertTrue(calls[-1]["record_playback"])
 
                 runtime.stop_overlay()
                 wait_for_call_count(calls, 3)
                 self.assertTrue(runtime.status().watcher_running)
                 self.assertFalse(runtime.status().overlay_running)
                 self.assertIsNone(calls[-1]["overlay_port"])
-                self.assertTrue(calls[-1]["promote_live"])
+                self.assertTrue(calls[-1]["record_playback"])
             finally:
                 runtime.close()
 
@@ -97,7 +97,7 @@ class LiveAppSessionRuntimeTest(unittest.TestCase):
                 app_db_path="data/live.sqlite3",
                 from_start=True,
                 include_raw=False,
-                promote_live=True,
+                record_playback=True,
                 overlay_port=9999,
                 poll_seconds=0.1,
                 stop_after_idle_seconds=0.2,
@@ -115,8 +115,8 @@ class LiveAppSessionRuntimeTest(unittest.TestCase):
         self.assertEqual(calls[0]["app_db_path"], root / "data" / "live.sqlite3")
         self.assertTrue(calls[0]["from_start"])
         self.assertFalse(calls[0]["include_raw"])
-        self.assertTrue(calls[0]["live_db"])
-        self.assertTrue(calls[0]["promote_live"])
+        self.assertFalse(calls[0]["live_db"])
+        self.assertTrue(calls[0]["record_playback"])
         self.assertEqual(calls[0]["overlay_port"], 9999)
         self.assertEqual(calls[0]["poll_seconds"], 0.1)
         self.assertEqual(calls[0]["stop_after_idle_seconds"], 0.2)

@@ -16,11 +16,19 @@ import unicodedata
 from dancing_log.app_paths import AppPaths
 from dancing_log.live_playback_settlement import is_live_playback_promotable
 from dancing_log.playback_evidence import (
+    PLAYBACK_STATUS_NEEDS_ATTENTION,
+    PLAYBACK_STATUS_PENDING,
     init_playback_records_schema,
     read_accepted_playback_history,
 )
 from dancing_log.playback_projection import init_manual_playback_decision_schema
 from dancing_log.playback_record_writer import PlaybackRecordWrite, upsert_playback_record
+from dancing_log.watcher_playback_materializer import (
+    WATCHER_INTERRUPTED_UNEXPECTEDLY_REASON,
+    WATCHER_PENDING_REASON,
+    WATCHER_PLAYBACK_SOURCE_KIND,
+    WATCHER_PLAYBACK_SOURCE_TABLE,
+)
 
 WANNA_SYSTEM_KEY = "wannadance"
 WANNA_SYSTEM_NAME = "WannaDance"
@@ -722,6 +730,36 @@ def promote_live_playback_event(
         (write_result.playback_record_id, event_key),
     )
     return write_result.playback_record_id
+
+
+def repair_stale_watcher_pending_records(conn: sqlite3.Connection) -> int:
+    """Convert stale watcher pending records left by an ungraceful exit."""
+    cursor = conn.execute(
+        """
+        UPDATE playback_records
+        SET
+            playback_status = ?,
+            counts_in_history = 0,
+            status_reason = ?,
+            completion_status = 'interrupted',
+            completion_reason = ?
+        WHERE source_kind = ?
+            AND source_table = ?
+            AND playback_status = ?
+            AND counts_in_history = 0
+            AND status_reason = ?
+        """,
+        (
+            PLAYBACK_STATUS_NEEDS_ATTENTION,
+            WATCHER_INTERRUPTED_UNEXPECTEDLY_REASON,
+            WATCHER_INTERRUPTED_UNEXPECTEDLY_REASON,
+            WATCHER_PLAYBACK_SOURCE_KIND,
+            WATCHER_PLAYBACK_SOURCE_TABLE,
+            PLAYBACK_STATUS_PENDING,
+            WATCHER_PENDING_REASON,
+        ),
+    )
+    return int(cursor.rowcount or 0)
 
 
 def mark_live_playback_event_completed(

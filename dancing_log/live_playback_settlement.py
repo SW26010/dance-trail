@@ -1,4 +1,4 @@
-"""Completion, interruption, and promotion rules for live Playback Records."""
+"""Completion and interruption rules for live watcher Playback Records."""
 
 from __future__ import annotations
 

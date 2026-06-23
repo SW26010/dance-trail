@@ -71,8 +71,8 @@ class TrayRuntimeTest(unittest.TestCase):
                 self.assertEqual(calls[-1]["output_dir"], root / "logs" / "captures")
                 self.assertEqual(calls[-1]["app_db_path"], root / "data" / "dancing_log.sqlite3")
                 self.assertEqual(calls[-1]["source_log_dir"], root / "logs" / "source-vrc-logs")
-                self.assertTrue(calls[-1]["live_db"])
-                self.assertTrue(calls[-1]["promote_live"])
+                self.assertFalse(calls[-1]["live_db"])
+                self.assertTrue(calls[-1]["record_playback"])
                 self.assertIsNone(calls[-1]["overlay_port"])
 
                 labels = [item.label for item in runtime.menu_items() if item.command_id]
@@ -84,7 +84,7 @@ class TrayRuntimeTest(unittest.TestCase):
                 self.assertTrue(runtime.watcher_running)
                 self.assertTrue(runtime.overlay_running)
                 self.assertEqual(calls[-1]["overlay_port"], 9911)
-                self.assertTrue(calls[-1]["promote_live"])
+                self.assertTrue(calls[-1]["record_playback"])
 
                 labels = [item.label for item in runtime.menu_items() if item.command_id]
                 self.assertIn("Stop watcher", labels)
@@ -95,7 +95,7 @@ class TrayRuntimeTest(unittest.TestCase):
                 self.assertTrue(runtime.watcher_running)
                 self.assertFalse(runtime.overlay_running)
                 self.assertIsNone(calls[-1]["overlay_port"])
-                self.assertTrue(calls[-1]["promote_live"])
+                self.assertTrue(calls[-1]["record_playback"])
             finally:
                 runtime.close()
 

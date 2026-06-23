@@ -175,6 +175,7 @@ class CliEntrypointTests(unittest.TestCase):
                     playback_events=1,
                     live_db_updates=4,
                     live_promotions=1,
+                    playback_record_updates=2,
                     overlay_url="http://127.0.0.1:9876/overlay",
                     source_log_dir="source-logs",
                     source_log_bytes=123,
@@ -198,7 +199,6 @@ class CliEntrypointTests(unittest.TestCase):
             "--app-db",
             "data/live.sqlite3",
             "--live-db",
-            "--no-promote-live",
             "--overlay-port",
             "9876",
             "--poll-seconds",
@@ -228,15 +228,17 @@ class CliEntrypointTests(unittest.TestCase):
         self.assertTrue(options.from_start)
         self.assertFalse(options.include_raw)
         self.assertTrue(options.live_db)
-        self.assertFalse(options.promote_live)
+        self.assertTrue(options.record_playback)
         self.assertEqual(options.overlay_port, 9876)
         self.assertEqual(options.poll_seconds, 0.1)
         self.assertEqual(options.stop_after_idle_seconds, 0.2)
         self.assertFalse(options.archive_source_logs)
         self.assertIn("Watching VRChat logs: C:\\VRChat\\Logs", output.getvalue())
+        self.assertIn("--live-db is deprecated experimental output", output.getvalue())
+        self.assertIn("playback record updates: 2", output.getvalue())
         self.assertIn("overlay URL: http://127.0.0.1:9876/overlay", output.getvalue())
 
-    def test_watch_vrc_log_promotes_by_default(self):
+    def test_watch_vrc_log_records_playback_by_default(self):
         calls = {}
 
         class FakeRuntime:
@@ -257,6 +259,7 @@ class CliEntrypointTests(unittest.TestCase):
                     playback_events=0,
                     live_db_updates=0,
                     live_promotions=0,
+                    playback_record_updates=0,
                     overlay_url=None,
                     source_log_dir=None,
                     source_log_bytes=0,
@@ -276,9 +279,9 @@ class CliEntrypointTests(unittest.TestCase):
             sys.argv = original_argv
 
         options = calls["run_options"]
-        self.assertTrue(options.promote_live)
+        self.assertTrue(options.record_playback)
         self.assertFalse(options.live_db)
-        self.assertIn("live promotions: 0", output.getvalue())
+        self.assertNotIn("live promotions", output.getvalue())
 
     def test_frozen_entrypoint_excludes_research_commands(self):
         original_argv = sys.argv

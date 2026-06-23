@@ -68,7 +68,6 @@ class LocalReadSnapshots:
                     "legacy_vrcx_import_events": _table_count(conn, "vrcx_import_events"),
                 }
                 summary["recent"] = read_recent_playback_records(conn)
-                summary["current_live"] = _current_live_event(conn)
         except sqlite3.Error as exc:
             summary["database_error"] = str(exc)
         return summary

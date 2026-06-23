@@ -80,6 +80,7 @@ class WatchStats:
     live_session_id: str | None = None
     live_db_updates: int = 0
     live_promotions: int = 0
+    playback_record_updates: int = 0
     overlay_url: str | None = None
     stop_requested: bool = False
     replayed_files: list[str] = field(default_factory=list)
@@ -107,6 +108,7 @@ class WatchStats:
             "live_session_id": self.live_session_id,
             "live_db_updates": self.live_db_updates,
             "live_promotions": self.live_promotions,
+            "playback_record_updates": self.playback_record_updates,
             "overlay_url": self.overlay_url,
             "stop_requested": self.stop_requested,
             "replayed_files": self.replayed_files,
@@ -246,7 +248,7 @@ def watch_vrc_logs(
     from_start: bool = False,
     include_raw: bool = True,
     live_db: bool = False,
-    promote_live: bool = False,
+    record_playback: bool = False,
     overlay_port: int | None = None,
     poll_seconds: float = 0.25,
     stop_after_idle_seconds: float | None = None,
@@ -271,6 +273,8 @@ def watch_vrc_logs(
 
     stats = WatchStats(session_dir=session_dir, started_at=_utc_now())
     stats.live_session_id = _live_session_id(session_dir, stats.started_at)
+    if record_playback:
+        _repair_stale_watcher_pending_records(app_db_path, stats.errors)
     if archive_source_logs:
         stats.source_log_dir = str(resolved_source_log_dir)
     initial_latest = _latest_log_file(resolved_log_dir, stats.errors)
@@ -283,7 +287,7 @@ def watch_vrc_logs(
         stats=stats,
         app_db_path=app_db_path,
         live_db=live_db,
-        promote_live=promote_live,
+        record_playback=record_playback,
         overlay_port=overlay_port,
     )
     playback_builder = runtime.create_playback_builder()
@@ -402,6 +406,7 @@ def watch_vrc_logs(
         for handle in (raw_handle, candidates_handle, parsed_handle):
             if handle is not None:
                 handle.close()
+        runtime.settle_graceful_stop()
         playback_records = playback_builder.records()
         stats.playback_events = len(playback_records)
         stats.delay_metrics = playback_delay_metrics(playback_records)
@@ -422,7 +427,7 @@ def replay_vrc_log_files(
     live_session_id: str | None = None,
     include_raw: bool = True,
     live_db: bool = True,
-    promote_live: bool = False,
+    record_playback: bool = False,
 ) -> WatchStats:
     """Replay a fixed sequence of VRChat logs into capture artifacts."""
     replay_files = sorted((Path(path) for path in log_files), key=lambda path: path.name)
@@ -431,7 +436,7 @@ def replay_vrc_log_files(
     session_dir.mkdir(parents=True, exist_ok=True)
 
     default_db_path: Path | None = None
-    if (live_db or promote_live) and app_db_path is None:
+    if (live_db or record_playback) and app_db_path is None:
         default_db_path = session_dir / "live.sqlite3"
         if default_db_path.exists():
             default_db_path.unlink()
@@ -440,11 +445,13 @@ def replay_vrc_log_files(
     stats = WatchStats(session_dir=session_dir, started_at=started_at or _utc_now())
     stats.live_session_id = live_session_id or _live_session_id(session_dir, stats.started_at)
     stats.replayed_files = [str(path) for path in replay_files]
+    if record_playback:
+        _repair_stale_watcher_pending_records(app_db_path, stats.errors)
     runtime = LivePlaybackRuntime(
         stats=stats,
         app_db_path=app_db_path,
         live_db=live_db,
-        promote_live=promote_live,
+        record_playback=record_playback,
         overlay_port=None,
     )
     playback_builder = runtime.create_playback_builder()
@@ -493,6 +500,7 @@ def replay_vrc_log_files(
         for handle in (raw_handle, candidates_handle, parsed_handle):
             if handle is not None:
                 handle.close()
+        runtime.settle_graceful_stop()
         playback_records = playback_builder.records()
         stats.playback_events = len(playback_records)
         stats.delay_metrics = playback_delay_metrics(playback_records)
@@ -501,6 +509,20 @@ def replay_vrc_log_files(
         runtime.close()
 
     return stats
+
+
+def _repair_stale_watcher_pending_records(
+    app_db_path: Path | str | None,
+    errors: list[str],
+) -> None:
+    try:
+        from dancing_log.storage import connect_db, repair_stale_watcher_pending_records
+
+        with connect_db(app_db_path) as conn:
+            repair_stale_watcher_pending_records(conn)
+            conn.commit()
+    except Exception as exc:
+        _record_error(errors, f"watcher startup maintenance failed: {exc}")
 
 
 def _drain_handle(

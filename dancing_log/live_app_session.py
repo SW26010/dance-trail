@@ -23,7 +23,7 @@ class LiveWatcherRunOptions:
     from_start: bool = False
     include_raw: bool = True
     live_db: bool = False
-    promote_live: bool = True
+    record_playback: bool = True
     overlay_port: int | None = None
     poll_seconds: float = 0.25
     stop_after_idle_seconds: float | None = None
@@ -155,7 +155,7 @@ class LiveAppSessionRuntime:
         try:
             stats = self._watch_vrc_logs(
                 **self._watcher_kwargs(
-                    LiveWatcherRunOptions(live_db=True, promote_live=True),
+                    LiveWatcherRunOptions(record_playback=True),
                     stop_event=stop_event,
                     use_configured_overlay_port=overlay,
                 )
@@ -192,8 +192,8 @@ class LiveAppSessionRuntime:
             "app_db_path": watcher_config.app_db_path,
             "from_start": options.from_start,
             "include_raw": options.include_raw,
-            "live_db": options.live_db or options.promote_live,
-            "promote_live": options.promote_live,
+            "live_db": options.live_db,
+            "record_playback": options.record_playback,
             "overlay_port": overlay_port,
             "poll_seconds": options.poll_seconds,
             "stop_after_idle_seconds": options.stop_after_idle_seconds,

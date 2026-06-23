@@ -688,7 +688,7 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertEqual(playback[0]["delay_to_actual_seconds"], 2.0)
             self.assertIn("playback-sync", playback[0]["raw_event_types"])
 
-    def test_watcher_keeps_live_wanna_synced_event_pending(self):
+    def test_watcher_settles_live_wanna_synced_event_on_graceful_stop(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             log_dir = root / "logs"
@@ -723,7 +723,8 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertEqual(live_row["dance_external_id"], "3823")
             self.assertEqual(live_row["video_name"], "Synced Title")
             self.assertEqual(live_row["actual_play_at"], "2026.05.17 15:30:02")
-            self.assertEqual(live_row["completion_status"], "pending")
+            self.assertEqual(live_row["completion_status"], "interrupted")
+            self.assertEqual(live_row["completion_reason"], "watcher_stopped")
             self.assertEqual(live_row["observed_mid_play"], 0)
 
     def test_watcher_keeps_active_song_when_preview_overlaps_pending_loads(self):
@@ -812,7 +813,8 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertNotIn("3768", by_id)
             self.assertEqual(by_id["5723"]["completion_status"], "interrupted")
             self.assertEqual(by_id["5723"]["completion_reason"], "superseded_before_completion")
-            self.assertEqual(by_id["8619"]["completion_status"], "pending")
+            self.assertEqual(by_id["8619"]["completion_status"], "interrupted")
+            self.assertEqual(by_id["8619"]["completion_reason"], "watcher_stopped")
             self.assertEqual(by_id["8619"]["actual_play_at"], "2026.05.18 00:22:59")
 
     def test_replay_vrc_log_files_replays_multiple_logs_in_name_order(self):
@@ -872,7 +874,7 @@ class VrcLogWatcherTest(unittest.TestCase):
                 live_count = conn.execute("SELECT count(*) FROM live_playback_events").fetchone()[0]
             self.assertEqual(live_count, 0)
 
-    def test_watcher_promotes_wanna_after_duration_from_log_metadata(self):
+    def test_watcher_accepts_wanna_after_duration_from_log_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             log_dir = root / "logs"
@@ -901,12 +903,12 @@ class VrcLogWatcherTest(unittest.TestCase):
                 session_name="wanna-duration-promote",
                 app_db_path=db_path,
                 from_start=True,
-                promote_live=True,
+                record_playback=True,
                 poll_seconds=0.01,
                 stop_after_idle_seconds=0.05,
             )
 
-            self.assertEqual(stats.live_promotions, 1)
+            self.assertGreaterEqual(stats.playback_record_updates, 2)
             playback = read_jsonl(stats.session_dir / "playback_events.jsonl")
             first = next(event for event in playback if event["dance_external_id"] == "3114")
             self.assertEqual(first["duration_seconds"], 2.0)
@@ -914,14 +916,22 @@ class VrcLogWatcherTest(unittest.TestCase):
             with connect_db(db_path) as conn:
                 event_count = conn.execute("SELECT count(*) FROM dance_events").fetchone()[0]
                 playback_count = conn.execute("SELECT count(*) FROM playback_records").fetchone()[0]
-                live_row = conn.execute(
-                    "SELECT * FROM live_playback_events WHERE dance_external_id = '3114'"
+                live_count = conn.execute("SELECT count(*) FROM live_playback_events").fetchone()[0]
+                accepted_row = conn.execute(
+                    "SELECT * FROM playback_records WHERE dance_external_id = '3114'"
+                ).fetchone()
+                attention_row = conn.execute(
+                    "SELECT * FROM playback_records WHERE dance_external_id = '5038'"
                 ).fetchone()
             self.assertEqual(event_count, 0)
-            self.assertEqual(playback_count, 1)
-            self.assertIsNotNone(live_row["promoted_playback_record_id"])
-            self.assertEqual(live_row["completion_status"], "completed")
-            self.assertEqual(live_row["duration_source"], "wanna_queue_json")
+            self.assertEqual(playback_count, 2)
+            self.assertEqual(live_count, 0)
+            self.assertEqual(accepted_row["playback_status"], "accepted")
+            self.assertEqual(accepted_row["counts_in_history"], 1)
+            self.assertEqual(accepted_row["completion_status"], "completed")
+            self.assertEqual(accepted_row["status_reason"], "observed_completion_threshold")
+            self.assertEqual(attention_row["playback_status"], "needs_attention")
+            self.assertEqual(attention_row["status_reason"], "watcher_stopped")
 
     def test_watcher_uses_wanna_play_video_duration_for_live_overlay_state(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -972,7 +982,7 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertEqual(live_row["duration_source"], "wanna_video_duration")
             self.assertEqual(live_row["source_type"], "random")
 
-    def test_watcher_promotes_wanna_before_late_manual_cut(self):
+    def test_watcher_accepts_wanna_before_late_manual_cut(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             log_dir = root / "logs"
@@ -1004,25 +1014,25 @@ class VrcLogWatcherTest(unittest.TestCase):
                 session_name="wanna-late-manual-cut",
                 app_db_path=db_path,
                 from_start=True,
-                promote_live=True,
+                record_playback=True,
                 poll_seconds=0.01,
                 stop_after_idle_seconds=0.05,
             )
 
-            self.assertEqual(stats.live_promotions, 1)
+            self.assertGreaterEqual(stats.playback_record_updates, 2)
             with connect_db(db_path) as conn:
-                live_row = conn.execute(
-                    "SELECT * FROM live_playback_events WHERE dance_external_id = '3919'"
+                accepted_row = conn.execute(
+                    "SELECT * FROM playback_records WHERE dance_external_id = '3919'"
                 ).fetchone()
                 event_count = conn.execute("SELECT count(*) FROM dance_events").fetchone()[0]
                 playback_count = conn.execute("SELECT count(*) FROM playback_records").fetchone()[0]
+                live_count = conn.execute("SELECT count(*) FROM live_playback_events").fetchone()[0]
             self.assertEqual(event_count, 0)
-            self.assertEqual(playback_count, 1)
-            self.assertIsNotNone(live_row["promoted_playback_record_id"])
-            self.assertEqual(live_row["completion_status"], "completed")
-            self.assertEqual(live_row["completion_reason"], "observed_completion_threshold")
-            self.assertEqual(live_row["played_seconds"], 9.0)
-            self.assertEqual(live_row["required_played_seconds"], 8.0)
+            self.assertEqual(playback_count, 2)
+            self.assertEqual(live_count, 0)
+            self.assertEqual(accepted_row["playback_status"], "accepted")
+            self.assertEqual(accepted_row["completion_status"], "completed")
+            self.assertEqual(accepted_row["completion_reason"], "observed_completion_threshold")
 
     def test_watcher_does_not_promote_wanna_room_leave_before_metadata_duration(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1051,22 +1061,25 @@ class VrcLogWatcherTest(unittest.TestCase):
                 session_name="wanna-duration-room-left",
                 app_db_path=db_path,
                 from_start=True,
-                promote_live=True,
+                record_playback=True,
                 poll_seconds=0.01,
                 stop_after_idle_seconds=0.05,
             )
 
-            self.assertEqual(stats.live_promotions, 0)
             with connect_db(db_path) as conn:
                 event_count = conn.execute("SELECT count(*) FROM dance_events").fetchone()[0]
                 playback_count = conn.execute("SELECT count(*) FROM playback_records").fetchone()[0]
-                live_row = conn.execute("SELECT * FROM live_playback_events").fetchone()
+                playback_row = conn.execute("SELECT * FROM playback_records").fetchone()
+                live_count = conn.execute("SELECT count(*) FROM live_playback_events").fetchone()[0]
             self.assertEqual(event_count, 0)
-            self.assertEqual(playback_count, 0)
-            self.assertEqual(live_row["completion_status"], "interrupted")
-            self.assertEqual(live_row["completion_reason"], "room_left")
+            self.assertEqual(playback_count, 1)
+            self.assertEqual(live_count, 0)
+            self.assertEqual(playback_row["playback_status"], "needs_attention")
+            self.assertEqual(playback_row["counts_in_history"], 0)
+            self.assertEqual(playback_row["completion_status"], "interrupted")
+            self.assertEqual(playback_row["completion_reason"], "room_left")
 
-    def test_watcher_live_db_updates_without_promoting_by_default(self):
+    def test_watcher_live_db_updates_without_playback_records_when_experimental_only(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             log_dir = root / "logs"
@@ -1105,8 +1118,10 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertEqual(playback_count, 0)
             self.assertEqual(row["dance_external_id"], "3114")
             self.assertEqual(row["actual_play_at"], "2026.05.17 15:30:10")
+            self.assertEqual(row["completion_status"], "interrupted")
+            self.assertEqual(row["completion_reason"], "watcher_stopped")
 
-    def test_watcher_does_not_promote_when_playback_has_not_completed(self):
+    def test_watcher_marks_incomplete_graceful_stop_needs_attention(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             log_dir = root / "logs"
@@ -1129,19 +1144,22 @@ class VrcLogWatcherTest(unittest.TestCase):
                 session_name="early-stop-no-promote",
                 app_db_path=db_path,
                 from_start=True,
-                promote_live=True,
+                record_playback=True,
                 poll_seconds=0.01,
                 stop_after_idle_seconds=0.05,
             )
 
-            self.assertEqual(stats.live_promotions, 0)
             with connect_db(db_path) as conn:
                 event_count = conn.execute("SELECT count(*) FROM dance_events").fetchone()[0]
                 playback_count = conn.execute("SELECT count(*) FROM playback_records").fetchone()[0]
-                live_row = conn.execute("SELECT * FROM live_playback_events").fetchone()
+                playback_row = conn.execute("SELECT * FROM playback_records").fetchone()
+                live_count = conn.execute("SELECT count(*) FROM live_playback_events").fetchone()[0]
             self.assertEqual(event_count, 0)
-            self.assertEqual(playback_count, 0)
-            self.assertEqual(live_row["completion_status"], "pending")
+            self.assertEqual(playback_count, 1)
+            self.assertEqual(live_count, 0)
+            self.assertEqual(playback_row["playback_status"], "needs_attention")
+            self.assertEqual(playback_row["completion_status"], "interrupted")
+            self.assertEqual(playback_row["completion_reason"], "watcher_stopped")
 
     def test_watcher_starts_new_occurrence_after_room_left_for_same_song(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1194,10 +1212,11 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertEqual(rows[0]["completion_status"], "interrupted")
             self.assertEqual(rows[0]["completion_reason"], "room_left")
             self.assertEqual(rows[1]["playback_event_key"], "wannadance:2838#2")
-            self.assertEqual(rows[1]["completion_status"], "pending")
+            self.assertEqual(rows[1]["completion_status"], "interrupted")
+            self.assertEqual(rows[1]["completion_reason"], "watcher_stopped")
             self.assertEqual(rows[1]["actual_play_at"], "2026.05.17 15:30:12")
 
-    def test_watcher_marks_cut_song_interrupted_instead_of_promoting(self):
+    def test_watcher_marks_cut_song_needs_attention(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             log_dir = root / "logs"
@@ -1222,30 +1241,36 @@ class VrcLogWatcherTest(unittest.TestCase):
                 session_name="cut-song-no-promote",
                 app_db_path=db_path,
                 from_start=True,
-                promote_live=True,
+                record_playback=True,
                 poll_seconds=0.01,
                 stop_after_idle_seconds=0.05,
             )
 
-            self.assertEqual(stats.live_promotions, 0)
             with connect_db(db_path) as conn:
                 event_count = conn.execute("SELECT count(*) FROM dance_events").fetchone()[0]
                 playback_count = conn.execute("SELECT count(*) FROM playback_records").fetchone()[0]
                 rows = conn.execute(
                     """
-                    SELECT dance_external_id, completion_status, completion_reason
-                    FROM live_playback_events
+                    SELECT dance_external_id, playback_status, counts_in_history,
+                           completion_status, completion_reason
+                    FROM playback_records
                     ORDER BY dance_external_id
                     """
                 ).fetchall()
+                live_count = conn.execute("SELECT count(*) FROM live_playback_events").fetchone()[0]
             self.assertEqual(event_count, 0)
-            self.assertEqual(playback_count, 0)
+            self.assertEqual(playback_count, 2)
+            self.assertEqual(live_count, 0)
             by_id = {row["dance_external_id"]: row for row in rows}
+            self.assertEqual(by_id["3114"]["playback_status"], "needs_attention")
+            self.assertEqual(by_id["3114"]["counts_in_history"], 0)
             self.assertEqual(by_id["3114"]["completion_status"], "interrupted")
             self.assertEqual(by_id["3114"]["completion_reason"], "superseded_before_completion")
-            self.assertEqual(by_id["5038"]["completion_status"], "pending")
+            self.assertEqual(by_id["5038"]["playback_status"], "needs_attention")
+            self.assertEqual(by_id["5038"]["completion_status"], "interrupted")
+            self.assertEqual(by_id["5038"]["completion_reason"], "watcher_stopped")
 
-    def test_watcher_does_not_promote_mid_play(self):
+    def test_watcher_marks_mid_play_needs_attention_on_graceful_stop(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             log_dir = root / "logs"
@@ -1266,21 +1291,23 @@ class VrcLogWatcherTest(unittest.TestCase):
                 session_name="mid-play-no-promote",
                 app_db_path=db_path,
                 from_start=True,
-                promote_live=True,
+                record_playback=True,
                 poll_seconds=0.01,
                 stop_after_idle_seconds=0.05,
             )
 
-            self.assertEqual(stats.live_promotions, 0)
             with connect_db(db_path) as conn:
                 event_count = conn.execute("SELECT count(*) FROM dance_events").fetchone()[0]
                 playback_count = conn.execute("SELECT count(*) FROM playback_records").fetchone()[0]
-                live_row = conn.execute("SELECT * FROM live_playback_events").fetchone()
+                playback_row = conn.execute("SELECT * FROM playback_records").fetchone()
+                live_count = conn.execute("SELECT count(*) FROM live_playback_events").fetchone()[0]
             self.assertEqual(event_count, 0)
-            self.assertEqual(playback_count, 0)
-            self.assertEqual(live_row["observed_mid_play"], 1)
-            self.assertEqual(live_row["completion_status"], "pending")
-            self.assertIsNone(live_row["completion_reason"])
+            self.assertEqual(playback_count, 1)
+            self.assertEqual(live_count, 0)
+            self.assertEqual(playback_row["playback_status"], "needs_attention")
+            self.assertEqual(playback_row["counts_in_history"], 0)
+            self.assertEqual(playback_row["completion_status"], "interrupted")
+            self.assertEqual(playback_row["completion_reason"], "observed_mid_play")
 
 
 if __name__ == "__main__":
