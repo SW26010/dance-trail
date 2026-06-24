@@ -497,7 +497,7 @@ def _daily_dances_from_rows(
                 requester_display_name=_optional_text(row.get("requester_display_name")),
             )
         )
-    dances.sort(key=lambda dance: (dance.played_at_local, dance.event_id))
+    dances.sort(key=lambda dance: (dance.played_at_local.replace(tzinfo=None), dance.event_id))
     return dances
 
 

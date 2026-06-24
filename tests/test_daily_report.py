@@ -147,6 +147,45 @@ class DailyReportTest(unittest.TestCase):
         self.assertEqual(parsed.date(), date(2026, 6, 7))
         self.assertEqual(parsed.strftime("%H:%M:%S"), "18:04:57")
 
+    def test_daily_report_sorts_mixed_local_and_timezone_aware_timestamps(self):
+        local_tz = timezone(timedelta(hours=8))
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "app.sqlite3"
+            with connect_db(db_path) as conn:
+                first_track = ensure_dance_track(
+                    conn,
+                    WANNA_SYSTEM_KEY,
+                    "100",
+                    {"title": "Local Time"},
+                )
+                second_track = ensure_dance_track(
+                    conn,
+                    WANNA_SYSTEM_KEY,
+                    "200",
+                    {"title": "UTC Time"},
+                )
+                insert_playback_record(
+                    conn,
+                    track_id=second_track,
+                    played_at="2026-06-07T10:05:00Z",
+                )
+                insert_playback_record(
+                    conn,
+                    track_id=first_track,
+                    played_at="2026.06.07 18:00:00",
+                )
+                conn.commit()
+
+            dances = load_daily_dances(date(2026, 6, 7), db_path, local_tz=local_tz)
+
+            self.assertEqual(
+                [format_daily_dance_line(dance) for dance in dances],
+                [
+                    "18:00:00 100. Local Time",
+                    "18:05:00 200. UTC Time",
+                ],
+            )
+
     def test_daily_live_report_prints_live_db_rows(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "app.sqlite3"

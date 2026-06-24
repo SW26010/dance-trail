@@ -551,6 +551,7 @@ const TEXT = {
     copyDailyDancesTitle: "Copy valid events",
     copiedDailyDances: "Copied valid events",
     noAcceptedTimelineRecords: "No valid dance events for this day",
+    timelineLoadFailed: "Timeline load failed",
     copyDailyDancesFailed: "Copy failed",
     sourceRandom: "Random",
     sourceOther: "Other",
@@ -686,6 +687,7 @@ const TEXT = {
     copyDailyDancesTitle: "复制有效事件",
     copiedDailyDances: "已复制有效事件",
     noAcceptedTimelineRecords: "这一天没有有效跳舞事件",
+    timelineLoadFailed: "时间线加载失败",
     copyDailyDancesFailed: "复制失败",
     sourceRandom: "随机",
     sourceOther: "他人",
@@ -1534,7 +1536,16 @@ async function renderTimeline() {
     }
     const requestId = ++loadRequest;
     const path = hasSelectedDate ? `/api/timeline?date=${encodeURIComponent(normalizedDate)}` : "/api/timeline";
-    const data = await api(path);
+    let data;
+    try {
+      data = await api(path);
+    } catch (error) {
+      if (requestId !== loadRequest) return;
+      currentRecords = [];
+      renderRecords();
+      showMessage("timeline-message", `${ui("timelineLoadFailed")}: ${translatedError(error.message)}`, "error");
+      return;
+    }
     if (requestId !== loadRequest) return;
     const resolvedDate = normalizeTimelineDateInput(data.date || normalizedDate);
     if (isValidLocalDate(resolvedDate)) {
