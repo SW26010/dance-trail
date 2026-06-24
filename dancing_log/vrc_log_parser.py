@@ -48,6 +48,11 @@ LIFECYCLE_TOKENS = (
     "handleapplicationquit",
     "[avprovideo] shutdown",
 )
+IDENTITY_TOKENS = (
+    "onplayerjoined",
+    "onplayerleft",
+    "user authenticated:",
+)
 
 URL_RE = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
 COLOR_TAG_RE = re.compile(r"</?color(?:=[^>]*)?>", re.IGNORECASE)
@@ -142,6 +147,11 @@ ROOM_ENTERING_RE = re.compile(
 )
 APPLICATION_QUIT_RE = re.compile(r"\bVRCApplication:\s+HandleApplicationQuit\b", re.IGNORECASE)
 AVPRO_SHUTDOWN_RE = re.compile(r"\[AVProVideo\]\s+Shutdown\b", re.IGNORECASE)
+USER_IDENTITY_RE = re.compile(
+    r"(?:\[Behaviour\]\s+OnPlayer(?P<player_action>Joined|Left)|User Authenticated:)\s+"
+    r"(?P<display_name>.+?)\s+\((?P<user_id>usr_[^)]+)\)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -158,6 +168,8 @@ class ParsedVrcLogEvent:
     video_name: str | None = None
     video_id: str | None = None
     requester_marker: str | None = None
+    requester_user_id: str | None = None
+    requester_user_id_source: str | None = None
     source_hint: str | None = None
     actual_play_at: str | None = None
     actual_play_signal_at: str | None = None
@@ -188,6 +200,8 @@ class ParsedVrcLogEvent:
             "video_name": self.video_name,
             "video_id": self.video_id,
             "requester_marker": self.requester_marker,
+            "requester_user_id": self.requester_user_id,
+            "requester_user_id_source": self.requester_user_id_source,
             "source_hint": self.source_hint,
             "actual_play_at": self.actual_play_at,
             "actual_play_signal_at": self.actual_play_signal_at,
@@ -223,6 +237,12 @@ def is_lifecycle_candidate_line(line: str) -> bool:
     """Return true when the line may describe a room or app lifecycle event."""
     folded = _strip_color_tags(line).casefold()
     return any(token in folded for token in LIFECYCLE_TOKENS)
+
+
+def is_identity_candidate_line(line: str) -> bool:
+    """Return true when the line may contain a VRChat display-name/user-id pair."""
+    folded = _strip_color_tags(line).casefold()
+    return any(token in folded for token in IDENTITY_TOKENS)
 
 
 def parse_vrc_lifecycle_event(line: str) -> dict | None:
@@ -277,6 +297,45 @@ def parse_vrc_lifecycle_event(line: str) -> dict | None:
         )
 
     return None
+
+
+def parse_vrc_identity_event(line: str) -> dict | None:
+    """Parse a VRChat player identity line into a transient session event."""
+    if not is_identity_candidate_line(line):
+        return None
+
+    plain_line = _strip_color_tags(line)
+    match = USER_IDENTITY_RE.search(plain_line)
+    if not match:
+        return None
+
+    action = (match.group("player_action") or "authenticated").casefold()
+    if action == "joined":
+        event_type = "player-joined"
+        parser_name = "vrc_player_joined"
+    elif action == "left":
+        event_type = "player-left"
+        parser_name = "vrc_player_left"
+    else:
+        event_type = "user-authenticated"
+        parser_name = "vrc_user_authenticated"
+
+    timestamp = _extract_timestamp(line)
+    display_name = _clean_display_name(match.group("display_name"))
+    user_id = (match.group("user_id") or "").strip()
+    if not display_name or not user_id:
+        return None
+
+    return {
+        "captured_at": _utc_now(),
+        "timestamp": timestamp,
+        "observed_at": timestamp,
+        "event_type": event_type,
+        "parser_name": parser_name,
+        "display_name": display_name,
+        "user_id": user_id,
+        "raw_line": _trim_newline(line),
+    }
 
 
 def parse_vrc_log_line(line: str) -> list[ParsedVrcLogEvent]:
@@ -668,6 +727,8 @@ def _events_from_payload(
             video_name=parsed_payload["video_name"],
             video_id=parsed_payload["video_id"],
             requester_marker=parsed_payload["requester_marker"],
+            requester_user_id=parsed_payload["requester_user_id"],
+            requester_user_id_source="payload" if parsed_payload["requester_user_id"] else None,
             source_hint=parsed_payload["source_hint"],
             actual_play_at=actual_play_at,
             actual_play_signal_at=actual_play_signal_at,
@@ -690,6 +751,7 @@ def _parse_video_play_payload(payload: str) -> dict:
     video_name = None
     video_id = None
     requester_marker = None
+    requester_user_id = _requester_user_id_from_payload(payload)
     source_hint = None
 
     if fields:
@@ -731,6 +793,7 @@ def _parse_video_play_payload(payload: str) -> dict:
         "video_name": video_name,
         "video_id": video_id,
         "requester_marker": requester_marker,
+        "requester_user_id": requester_user_id,
         "source_hint": source_hint,
         "video_offset_seconds": video_offset_seconds,
         "duration_seconds": duration_seconds,
@@ -768,6 +831,31 @@ def _display_name_from_payload(payload: str) -> str | None:
                 if candidate.strip() and not URL_RE.search(candidate):
                     return _clean_display_name(candidate)
     return None
+
+
+def _requester_user_id_from_payload(payload: str) -> str | None:
+    structured = _try_json(payload)
+    if structured is None:
+        return None
+    value = _find_key(
+        structured,
+        {
+            "userid",
+            "user_id",
+            "requesterid",
+            "requester_id",
+            "playerid",
+            "player_id",
+            "vrchatuserid",
+            "vrchat_user_id",
+        },
+    )
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text.startswith("usr_"):
+        return None
+    return text
 
 
 def _extract_urls(payload: str) -> list[str]:

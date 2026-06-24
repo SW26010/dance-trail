@@ -23,6 +23,7 @@ from dancing_log.live_playback_settlement import (
     COMPLETION_EPSILON_SECONDS,
     PROMOTION_COMPLETION_RATIO,
 )
+from dancing_log.requester_identity_enrichment import RequesterIdentityEnricher
 from dancing_log.vrc_log_utils import (
     extract_timestamp,
     timestamp_before,
@@ -30,8 +31,10 @@ from dancing_log.vrc_log_utils import (
 )
 from dancing_log.vrc_log_parser import (
     ParsedVrcLogEvent,
+    is_identity_candidate_line,
     is_lifecycle_candidate_line,
     is_video_candidate_line,
+    parse_vrc_identity_event,
     parse_vrc_lifecycle_event,
     parse_vrc_log_line,
 )
@@ -39,6 +42,7 @@ from dancing_log.vrc_log_parser import (
 
 LOG_FILE_PATTERN = "output_log_*.txt"
 SOURCE_LOG_COPY_CHUNK_BYTES = 4 * 1024 * 1024
+REQUESTER_IDENTITY_PREREAD_MAX_BYTES = 4 * 1024 * 1024
 
 __all__ = [
     "COMPLETION_EPSILON_SECONDS",
@@ -50,8 +54,10 @@ __all__ = [
     "PlaybackEventBuilder",
     "WatchStats",
     "default_vrc_log_dir",
+    "is_identity_candidate_line",
     "is_lifecycle_candidate_line",
     "is_video_candidate_line",
+    "parse_vrc_identity_event",
     "parse_vrc_lifecycle_event",
     "parse_vrc_log_line",
     "replay_vrc_log_files",
@@ -70,9 +76,11 @@ class WatchStats:
     candidate_lines: int = 0
     parsed_events: int = 0
     lifecycle_events: int = 0
+    identity_events: int = 0
     playback_events: int = 0
     delay_metrics: dict[str, float | int | None] = field(default_factory=dict)
     parser_counts: dict[str, int] = field(default_factory=dict)
+    requester_identity: dict[str, int | str] = field(default_factory=dict)
     last_file: str | None = None
     last_offset: int = 0
     last_log_timestamp: str | None = None
@@ -87,6 +95,7 @@ class WatchStats:
     source_log_dir: str | None = None
     source_log_bytes: int = 0
     source_log_files: list[dict] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -98,9 +107,11 @@ class WatchStats:
             "candidate_lines": self.candidate_lines,
             "parsed_events": self.parsed_events,
             "lifecycle_events": self.lifecycle_events,
+            "identity_events": self.identity_events,
             "playback_events": self.playback_events,
             "delay_metrics": self.delay_metrics,
             "parser_counts": dict(sorted(self.parser_counts.items())),
+            "requester_identity": dict(sorted(self.requester_identity.items())),
             "last_file": self.last_file,
             "last_offset": self.last_offset,
             "last_log_timestamp": self.last_log_timestamp,
@@ -115,6 +126,7 @@ class WatchStats:
             "source_log_dir": self.source_log_dir,
             "source_log_bytes": self.source_log_bytes,
             "source_log_files": self.source_log_files,
+            "warnings": self.warnings,
             "errors": self.errors,
         }
 
@@ -256,6 +268,7 @@ def watch_vrc_logs(
     archive_source_logs: bool = True,
     source_log_dir: Path | str | None = None,
     source_log_copy_bytes_per_tick: int = SOURCE_LOG_COPY_CHUNK_BYTES,
+    tail_ready_event: threading.Event | None = None,
 ) -> WatchStats:
     """Tail VRChat output logs and write raw/candidate/parsed capture artifacts."""
     resolved_log_dir = Path(log_dir) if log_dir is not None else default_vrc_log_dir()
@@ -291,6 +304,7 @@ def watch_vrc_logs(
         overlay_port=overlay_port,
     )
     playback_builder = runtime.create_playback_builder()
+    identity_enricher = RequesterIdentityEnricher(warnings=stats.warnings)
 
     raw_handle = None
     candidates_handle = None
@@ -304,6 +318,7 @@ def watch_vrc_logs(
         if archive_source_logs
         else None
     )
+    ended_normally = False
 
     try:
         if include_raw:
@@ -348,6 +363,13 @@ def watch_vrc_logs(
                         opened_any_file=opened_any_file,
                         from_start=from_start,
                     )
+                    if not opened_any_file and start_offset > 0:
+                        _prime_requester_identity_from_log(
+                            path=latest_path,
+                            end_offset=start_offset,
+                            identity_enricher=identity_enricher,
+                            stats=stats,
+                        )
                     current_handle = open(
                         latest_path,
                         "r",
@@ -355,6 +377,8 @@ def watch_vrc_logs(
                         errors="replace",
                     )
                     current_handle.seek(start_offset)
+                    if tail_ready_event is not None:
+                        tail_ready_event.set()
                     stats.last_file = str(latest_path)
                     stats.last_offset = start_offset
                     opened_any_file = True
@@ -370,6 +394,7 @@ def watch_vrc_logs(
                     parsed_handle=parsed_handle,
                     stats=stats,
                     playback_builder=playback_builder,
+                    identity_enricher=identity_enricher,
                     line_number=current_line_number,
                     lifecycle_event_callback=runtime.observe_lifecycle_event,
                 )
@@ -393,6 +418,7 @@ def watch_vrc_logs(
                     stats.idle_stopped = True
                     break
                 time.sleep(max(poll_seconds, 0.01))
+        ended_normally = True
     except KeyboardInterrupt:
         pass
     finally:
@@ -406,10 +432,16 @@ def watch_vrc_logs(
         for handle in (raw_handle, candidates_handle, parsed_handle):
             if handle is not None:
                 handle.close()
+        if ended_normally:
+            _apply_identity_backfills(
+                playback_builder,
+                identity_enricher.release_session_end_expired(),
+            )
         runtime.settle_graceful_stop()
         playback_records = playback_builder.records()
         stats.playback_events = len(playback_records)
         stats.delay_metrics = playback_delay_metrics(playback_records)
+        stats.requester_identity = identity_enricher.summary()
         _write_jsonl_file(session_dir / "playback_events.jsonl", playback_records)
         _write_json(session_dir / "summary.json", stats.to_dict())
         runtime.close()
@@ -455,10 +487,12 @@ def replay_vrc_log_files(
         overlay_port=None,
     )
     playback_builder = runtime.create_playback_builder()
+    identity_enricher = RequesterIdentityEnricher(warnings=stats.warnings)
 
     raw_handle = None
     candidates_handle = None
     parsed_handle = None
+    ended_normally = False
 
     try:
         if include_raw:
@@ -492,18 +526,26 @@ def replay_vrc_log_files(
                     parsed_handle=parsed_handle,
                     stats=stats,
                     playback_builder=playback_builder,
+                    identity_enricher=identity_enricher,
                     line_number=0,
                     lifecycle_event_callback=runtime.observe_lifecycle_event,
                 )
+        ended_normally = True
     finally:
         stats.ended_at = _utc_now()
         for handle in (raw_handle, candidates_handle, parsed_handle):
             if handle is not None:
                 handle.close()
+        if ended_normally:
+            _apply_identity_backfills(
+                playback_builder,
+                identity_enricher.release_session_end_expired(),
+            )
         runtime.settle_graceful_stop()
         playback_records = playback_builder.records()
         stats.playback_events = len(playback_records)
         stats.delay_metrics = playback_delay_metrics(playback_records)
+        stats.requester_identity = identity_enricher.summary()
         _write_jsonl_file(session_dir / "playback_events.jsonl", playback_records)
         _write_json(session_dir / "summary.json", stats.to_dict())
         runtime.close()
@@ -534,6 +576,7 @@ def _drain_handle(
     parsed_handle,
     stats: WatchStats,
     playback_builder: PlaybackEventBuilder,
+    identity_enricher: RequesterIdentityEnricher,
     line_number: int,
     lifecycle_event_callback: Callable[[dict], None] | None = None,
 ) -> tuple[bool, int]:
@@ -555,14 +598,16 @@ def _drain_handle(
             stats.last_log_timestamp = timestamp
         elif timestamp:
             timestamp_for_settlement = None
-        if timestamp_for_settlement is not None and lifecycle_event_callback is not None:
-            lifecycle_event_callback(
-                {
-                    "event_type": "log-progress",
-                    "observed_at": timestamp_for_settlement,
-                    "timestamp": timestamp_for_settlement,
-                }
-            )
+        release_deferred_expired = timestamp_for_settlement is not None
+        if timestamp_for_settlement is not None:
+            if lifecycle_event_callback is not None:
+                lifecycle_event_callback(
+                    {
+                        "event_type": "log-progress",
+                        "observed_at": timestamp_for_settlement,
+                        "timestamp": timestamp_for_settlement,
+                    }
+                )
 
         if raw_handle is not None:
             raw_handle.write(line)
@@ -573,8 +618,26 @@ def _drain_handle(
             lifecycle_event["source_file"] = str(current_path)
             lifecycle_event["line_number"] = line_number
             lifecycle_event["byte_offset"] = byte_offset
+            identity_enricher.observe_lifecycle(lifecycle_event)
             if lifecycle_event_callback is not None:
                 lifecycle_event_callback(lifecycle_event)
+
+        identity_event = parse_vrc_identity_event(line)
+        if identity_event is not None:
+            stats.identity_events += 1
+            identity_event["source_file"] = str(current_path)
+            identity_event["line_number"] = line_number
+            identity_event["byte_offset"] = byte_offset
+            _apply_identity_backfills(
+                playback_builder,
+                identity_enricher.observe_identity(identity_event),
+            )
+
+        if release_deferred_expired:
+            _apply_identity_backfills(
+                playback_builder,
+                identity_enricher.release_deferred_expired(timestamp_for_settlement),
+            )
 
         if not is_video_candidate_line(line):
             continue
@@ -601,12 +664,78 @@ def _drain_handle(
                 line_number=line_number,
                 byte_offset=byte_offset,
             )
+            record = identity_enricher.enrich_record(record)
             _write_jsonl(
                 parsed_handle,
                 record,
             )
-            playback_builder.observe(record)
+            folded_event = playback_builder.observe(record)
+            identity_enricher.remember_pending(record, folded_event)
     return made_progress, line_number
+
+
+def _apply_identity_backfills(
+    playback_builder: PlaybackEventBuilder,
+    backfills,
+) -> None:
+    for backfill in backfills:
+        playback_builder.backfill_requester_user_id(
+            backfill.event_key,
+            backfill.requester_user_id,
+            source=backfill.source,
+        )
+
+
+def _prime_requester_identity_from_log(
+    *,
+    path: Path,
+    end_offset: int,
+    identity_enricher: RequesterIdentityEnricher,
+    stats: WatchStats,
+    max_bytes: int = REQUESTER_IDENTITY_PREREAD_MAX_BYTES,
+) -> None:
+    read_size = min(max(0, int(end_offset)), max(1, int(max_bytes)))
+    if read_size <= 0:
+        return
+    start_offset = max(0, int(end_offset) - read_size)
+    try:
+        with path.open("rb") as handle:
+            handle.seek(start_offset)
+            text = handle.read(read_size).decode("utf-8", errors="replace")
+    except OSError as exc:
+        _record_warning(stats.warnings, f"requester identity preread failed for {path}: {exc}")
+        return
+
+    lines = text.splitlines()
+    if start_offset > 0 and lines:
+        lines = lines[1:]
+
+    room_start_index = None
+    for index, line in enumerate(lines):
+        event = parse_vrc_lifecycle_event(line)
+        if event is not None and event.get("event_type") == "room-entering":
+            room_start_index = index
+
+    identity_enricher.counts["preread_bytes"] += read_size
+    identity_enricher.counts["preread_lines"] += len(lines)
+    if room_start_index is None:
+        identity_enricher.counts["preread_no_room_context"] += 1
+        if start_offset > 0:
+            _record_warning(
+                stats.warnings,
+                "requester identity preread reached byte limit without finding a room boundary",
+            )
+        return
+
+    identity_enricher.counts["preread_room_contexts"] += 1
+    for line in lines[room_start_index:]:
+        lifecycle_event = parse_vrc_lifecycle_event(line)
+        if lifecycle_event is not None:
+            identity_enricher.observe_lifecycle(lifecycle_event)
+
+        identity_event = parse_vrc_identity_event(line)
+        if identity_event is not None:
+            identity_enricher.observe_identity(identity_event, warn=False)
 
 
 def _latest_log_file(log_dir: Path, errors: list[str]) -> Path | None:
@@ -694,6 +823,11 @@ def _write_jsonl_file(path: Path, values: list[dict]) -> None:
 def _record_error(errors: list[str], message: str) -> None:
     if not errors or errors[-1] != message:
         errors.append(message)
+
+
+def _record_warning(warnings: list[str], message: str) -> None:
+    if not warnings or warnings[-1] != message:
+        warnings.append(message)
 
 
 def _live_session_id(session_dir: Path, started_at: str) -> str:

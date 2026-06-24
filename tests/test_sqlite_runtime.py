@@ -156,6 +156,47 @@ class SQLiteRuntimeTest(unittest.TestCase):
             self.assertEqual(current["event"]["video_name"], "Updated Title")
             self.assertFalse(current["observed_mid_play"])
 
+    def test_live_playback_upsert_preserves_existing_requester_user_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "app.sqlite3"
+            event = {
+                "event_key": "wannadance:3114#1",
+                "canonical_key": "wannadance:3114",
+                "first_seen_at": "2026.05.17 15:30:00",
+                "actual_play_at": None,
+                "observed_mid_play": False,
+                "video_url": "https://api.udon.dance/Api/Songs/play?id=3114",
+                "dance_system_key": WANNA_SYSTEM_KEY,
+                "dance_external_id": "3114",
+                "video_name": "First Title",
+                "source_type": "player",
+                "source_display_name": "Alice",
+                "requester_user_id": "usr_alice",
+                "requester_user_id_source": "active",
+                "signal_count": 1,
+                "parser_names": ["video_playback_resolve"],
+                "raw_event_types": ["resolve-attempt"],
+            }
+
+            with connect_db(db_path) as conn:
+                upsert_live_playback_event(conn, event, session_id="session-one")
+                updated = dict(event)
+                updated["video_name"] = "Updated Title"
+                updated["requester_user_id"] = "usr_bob"
+                updated["requester_user_id_source"] = "expired"
+                upsert_live_playback_event(conn, updated, session_id="session-one")
+                conn.commit()
+                row = conn.execute("SELECT * FROM live_playback_events").fetchone()
+
+            current = load_current_live_playback_event(db_path)
+            row_event = json.loads(row["event_json"])
+            self.assertEqual(row["video_name"], "Updated Title")
+            self.assertEqual(row["requester_user_id"], "usr_alice")
+            self.assertEqual(row_event["requester_user_id"], "usr_alice")
+            self.assertEqual(row_event["requester_user_id_source"], "active")
+            self.assertEqual(current["event"]["requester_user_id"], "usr_alice")
+            self.assertEqual(current["event"]["requester_user_id_source"], "active")
+
     def test_promote_live_playback_event_is_explicit_and_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "app.sqlite3"
@@ -172,6 +213,7 @@ class SQLiteRuntimeTest(unittest.TestCase):
                 "video_name": "Promoted Title",
                 "source_type": "player",
                 "source_display_name": "Alice",
+                "requester_user_id": "usr_alice",
                 "signal_count": 3,
                 "parser_names": ["usharp_delayed_video_ready"],
                 "raw_event_types": ["actual-play"],
@@ -204,6 +246,8 @@ class SQLiteRuntimeTest(unittest.TestCase):
             self.assertEqual(len(playback_rows), 1)
             self.assertEqual(playback_rows[0]["source_type"], "player")
             self.assertEqual(playback_rows[0]["requester_display_name"], "Alice")
+            self.assertEqual(playback_rows[0]["requester_user_id"], "usr_alice")
+            self.assertEqual(live_row["requester_user_id"], "usr_alice")
             self.assertEqual(live_row["promoted_playback_record_id"], first_id)
             self.assertEqual(live_row["completion_status"], "completed")
 
@@ -1141,6 +1185,88 @@ class SQLiteRuntimeTest(unittest.TestCase):
             self.assertFalse((root / "songs.csv").exists())
             self.assertEqual(len(stats.archived), 3)
             self.assertTrue((stats.archive_dir / "dancing_log.sqlite3").exists())
+
+    def test_playback_record_upsert_preserves_existing_requester_user_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "app.sqlite3"
+            with connect_db(db_path) as conn:
+                track_id = ensure_dance_track(conn, WANNA_SYSTEM_KEY, "3114")
+                base = dict(
+                    played_at="2026.05.17 15:30:00",
+                    original_played_at="2026.05.17 15:30:00",
+                    dance_track_id=track_id,
+                    dance_system_key=WANNA_SYSTEM_KEY,
+                    dance_external_id="3114",
+                    source_kind="live_watcher",
+                    source_table=WATCHER_PLAYBACK_SOURCE_TABLE,
+                    source_row_id=0,
+                    source_event_key="watcher-event-key",
+                    status_reason=WATCHER_PENDING_REASON,
+                    source_priority=30,
+                    confidence=1.0,
+                    event_source="vrc_log_live",
+                    source_type="player",
+                    source_display_name="Alice",
+                    requester_display_name="Alice",
+                )
+                upsert_playback_record(
+                    conn,
+                    PlaybackRecordWrite(
+                        **base,
+                        video_name="Original Title",
+                        requester_user_id="usr_alice",
+                        provenance={
+                            "watcher_playback_event": {
+                                "event_key": "watcher-event-key",
+                                "video_name": "Original Title",
+                                "requester_user_id": "usr_alice",
+                                "requester_user_id_source": "active",
+                            }
+                        },
+                    ),
+                )
+                upsert_playback_record(
+                    conn,
+                    PlaybackRecordWrite(
+                        **base,
+                        video_name="Updated Title",
+                        requester_user_id="usr_bob",
+                        provenance={
+                            "watcher_playback_event": {
+                                "event_key": "watcher-event-key",
+                                "video_name": "Updated Title",
+                                "requester_user_id": "usr_bob",
+                                "requester_user_id_source": "expired",
+                            }
+                        },
+                    ),
+                )
+                upsert_playback_record(
+                    conn,
+                    PlaybackRecordWrite(
+                        **base,
+                        video_name="Final Title",
+                        requester_user_id=None,
+                        provenance={
+                            "watcher_playback_event": {
+                                "event_key": "watcher-event-key",
+                                "video_name": "Final Title",
+                                "requester_user_id": None,
+                                "requester_user_id_source": None,
+                            }
+                        },
+                    ),
+                )
+                conn.commit()
+                row = conn.execute("SELECT * FROM playback_records").fetchone()
+
+            provenance = json.loads(row["provenance_json"])
+            provenance_event = provenance["watcher_playback_event"]
+            self.assertEqual(row["video_name"], "Final Title")
+            self.assertEqual(row["requester_user_id"], "usr_alice")
+            self.assertEqual(provenance_event["video_name"], "Final Title")
+            self.assertEqual(provenance_event["requester_user_id"], "usr_alice")
+            self.assertEqual(provenance_event["requester_user_id_source"], "active")
 
     def test_archive_existing_data_archives_custom_app_db(self):
         with tempfile.TemporaryDirectory() as tmp:

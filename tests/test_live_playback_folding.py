@@ -27,6 +27,7 @@ class LivePlaybackFoldingModuleTest(unittest.TestCase):
                 "event_type": "request",
                 "video_url": video_url,
                 "display_name": "Alice",
+                "requester_user_id": "usr_alice",
                 "parser_name": "user_added_url",
                 "dance_system_key": "wannadance",
                 "dance_external_id": "3114",
@@ -48,6 +49,7 @@ class LivePlaybackFoldingModuleTest(unittest.TestCase):
         self.assertEqual(records[0]["duration_source"], "wanna_queue_json")
         self.assertEqual(records[0]["source_type"], "player")
         self.assertEqual(records[0]["source_display_name"], "Alice")
+        self.assertEqual(records[0]["requester_user_id"], "usr_alice")
         self.assertEqual(records[0]["delay_to_actual_seconds"], 10.0)
         self.assertEqual(playback_delay_metrics(records)["avg_seconds"], 10.0)
 

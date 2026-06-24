@@ -142,6 +142,7 @@ def watcher_playback_record(
         video_url=event.get("video_url") or event.get("resolved_url") or event.get("routed_url"),
         video_name=event.get("video_name"),
         requester_display_name=display_name,
+        requester_user_id=event.get("requester_user_id"),
         completion_status=completion_status,
         completion_reason=completion_reason,
         provenance={"watcher_playback_event": dict(event)},

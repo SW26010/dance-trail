@@ -40,22 +40,22 @@ class PlaybackEventBuilder:
         self._active_key: str | None = None
         self._update_callback = update_callback
 
-    def observe(self, record: dict) -> None:
+    def observe(self, record: dict) -> dict | None:
         canonical_key = self._canonical_key_for_record(record)
         event_type = record.get("event_type")
         if event_type == "metadata":
             if canonical_key is not None:
-                self._remember_metadata(canonical_key, record)
-            return
+                return self._remember_metadata(canonical_key, record)
+            return None
         if event_type == "preview":
             if canonical_key is not None:
                 self._mark_preview(canonical_key, record.get("timestamp"))
-            return
+            return None
 
         if canonical_key is not None and record.get("parser_name") in {"user_added_url", "vrcx_video_play"}:
             self._preview_until_by_canonical.pop(canonical_key, None)
         elif canonical_key is not None and self._is_preview_suppressed(canonical_key, record.get("timestamp")):
-            return
+            return None
 
         key = None
         if canonical_key is not None:
@@ -67,7 +67,7 @@ class PlaybackEventBuilder:
         if key is None and record.get("event_type") == "actual-play":
             key = self._active_key or self._key_for_actual_play(timestamp)
         if key is None:
-            return
+            return None
 
         event = self._events.setdefault(key, self._new_event(key))
         if canonical_key is not None and canonical_key in self._metadata_by_canonical:
@@ -76,8 +76,10 @@ class PlaybackEventBuilder:
 
         if record.get("video_url"):
             self._active_key = key
+        finalized = self._finalize_event(event)
         if self._update_callback is not None:
-            self._update_callback(self._finalize_event(event))
+            self._update_callback(finalized)
+        return finalized
 
     def records(self) -> list[dict]:
         records = [self._finalize_event(event) for event in self._events.values()]
@@ -92,6 +94,27 @@ class PlaybackEventBuilder:
     def close_open_events(self) -> None:
         self._open_by_canonical.clear()
         self._active_key = None
+
+    def backfill_requester_user_id(
+        self,
+        event_key: str,
+        requester_user_id: str,
+        *,
+        source: str | None = None,
+    ) -> dict | None:
+        """Fill a missing requester user id on one folded event."""
+        event = self._events.get(event_key)
+        if event is None or event.get("requester_user_id"):
+            return None
+        if not requester_user_id:
+            return None
+        event["requester_user_id"] = requester_user_id
+        if source:
+            event["requester_user_id_source"] = source
+        finalized = self._finalize_event(event)
+        if self._update_callback is not None:
+            self._update_callback(finalized)
+        return finalized
 
     def _new_event(self, key: str, canonical_key: str | None = None) -> dict:
         return {
@@ -123,6 +146,8 @@ class PlaybackEventBuilder:
             "video_id": None,
             "display_name": None,
             "requester_marker": None,
+            "requester_user_id": None,
+            "requester_user_id_source": None,
             "source_hint": None,
             "source_type": None,
             "source_display_name": None,
@@ -156,6 +181,8 @@ class PlaybackEventBuilder:
             self._copy_first(event, record, "video_name")
             self._copy_first(event, record, "display_name")
             self._copy_first(event, record, "requester_marker")
+            self._copy_first(event, record, "requester_user_id")
+            self._copy_first(event, record, "requester_user_id_source")
             self._copy_first(event, record, "source_hint")
             self._merge_duration(event, record)
             for field_name in ("video_url", "routed_url", "resolved_url"):
@@ -180,6 +207,8 @@ class PlaybackEventBuilder:
         self._copy_first(event, record, "video_name")
         self._copy_first(event, record, "display_name")
         self._copy_first(event, record, "requester_marker")
+        self._copy_first(event, record, "requester_user_id")
+        self._copy_first(event, record, "requester_user_id_source")
         self._copy_first(event, record, "source_hint")
         self._merge_duration(event, record)
 
@@ -235,7 +264,7 @@ class PlaybackEventBuilder:
             if event["actual_play_method"] is None:
                 event["actual_play_method"] = record.get("parser_name")
 
-    def _remember_metadata(self, canonical_key: str, record: dict) -> None:
+    def _remember_metadata(self, canonical_key: str, record: dict) -> dict | None:
         metadata = self._metadata_by_canonical.setdefault(canonical_key, dict(record))
         for field_name in (
             "video_url",
@@ -243,6 +272,8 @@ class PlaybackEventBuilder:
             "video_name",
             "video_id",
             "requester_marker",
+            "requester_user_id",
+            "requester_user_id_source",
             "source_hint",
             "dance_system_key",
             "dance_external_id",
@@ -256,13 +287,15 @@ class PlaybackEventBuilder:
 
         current_key = self._open_by_canonical.get(canonical_key)
         if current_key is None:
-            return
+            return None
         current_event = self._events.get(current_key)
         if current_event is None:
-            return
+            return None
         self._merge_signal(current_event, record)
+        finalized = self._finalize_event(current_event)
         if self._update_callback is not None:
-            self._update_callback(self._finalize_event(current_event))
+            self._update_callback(finalized)
+        return finalized
 
     def _finalize_event(self, event: dict) -> dict:
         finalized = dict(event)

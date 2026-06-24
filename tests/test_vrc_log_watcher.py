@@ -319,6 +319,69 @@ class VrcLogWatcherTest(unittest.TestCase):
             parsed = read_jsonl(stats.session_dir / "parsed_events.jsonl")
             self.assertEqual(parsed[0]["dance_external_id"], "5038")
 
+    def test_watcher_prereads_current_room_identity_before_tailing_eof(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            log_path = log_dir / "output_log_0001.txt"
+            log_path.write_text(
+                "2026.05.17 15:29:55 Debug - [Behaviour] Entering Room: WannaDance\n"
+                "2026.05.17 15:29:56 Debug - [Behaviour] OnPlayerJoined Alice (usr_alice)\n",
+                encoding="utf-8",
+            )
+
+            def append_line():
+                time.sleep(0.05)
+                with open(log_path, "a", encoding="utf-8") as handle:
+                    handle.write(
+                        '2026.05.17 15:30:00 Debug - [VRCX] VideoPlay(PyPyDance) '
+                        '"https://api.udon.dance/Api/Songs/play?id=3114",0,10,'
+                        '"$3114. Test Song (Alice)"\n'
+                    )
+
+            thread = threading.Thread(target=append_line)
+            thread.start()
+            stats = watch_vrc_logs(
+                log_dir=log_dir,
+                output_dir=root / "capture",
+                session_name="preread-identity",
+                from_start=False,
+                poll_seconds=0.01,
+                stop_after_idle_seconds=0.15,
+                archive_source_logs=False,
+            )
+            thread.join()
+
+            parsed = read_jsonl(stats.session_dir / "parsed_events.jsonl")
+            self.assertEqual(parsed[0]["requester_user_id"], "usr_alice")
+            self.assertEqual(parsed[0]["requester_user_id_source"], "active")
+            self.assertEqual(stats.requester_identity["preread_room_contexts"], 1)
+
+    def test_watcher_signals_tail_ready_after_initial_seek(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            (log_dir / "output_log_0001.txt").write_text(
+                "2026.05.17 15:29:55 Debug - [Behaviour] Entering Room: WannaDance\n",
+                encoding="utf-8",
+            )
+            tail_ready = threading.Event()
+
+            watch_vrc_logs(
+                log_dir=log_dir,
+                output_dir=root / "capture",
+                session_name="tail-ready",
+                from_start=False,
+                poll_seconds=0.01,
+                stop_after_idle_seconds=0.05,
+                archive_source_logs=False,
+                tail_ready_event=tail_ready,
+            )
+
+            self.assertTrue(tail_ready.is_set())
+
     def test_source_archive_copies_current_log_from_start_while_parser_tails_eof(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1308,6 +1371,170 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertEqual(playback_row["counts_in_history"], 0)
             self.assertEqual(playback_row["completion_status"], "interrupted")
             self.assertEqual(playback_row["completion_reason"], "observed_mid_play")
+
+    def test_watcher_enriches_requester_user_id_from_active_room_mapping(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            db_path = root / "app.sqlite3"
+            (log_dir / "output_log_0001.txt").write_text(
+                "2026.05.17 15:29:55 Debug - [Behaviour] Entering Room: WannaDance\n"
+                "2026.05.17 15:29:56 Debug - [Behaviour] OnPlayerJoined Alice (usr_alice)\n"
+                '2026.05.17 15:30:00 Debug - [VRCX] VideoPlay(PyPyDance) '
+                '"https://api.udon.dance/Api/Songs/play?id=3114",0,10,'
+                '"$3114. Test Song (Alice)"\n'
+                "2026.05.17 15:30:00 Debug - "
+                "[<color=#9C6994>USharpVideo (WannaDance)</color>] "
+                "DelayedVideoReady: Time's up, let's play\n",
+                encoding="utf-8",
+            )
+
+            stats = watch_vrc_logs(
+                log_dir=log_dir,
+                output_dir=root / "capture",
+                session_name="requester-active-id",
+                app_db_path=db_path,
+                from_start=True,
+                record_playback=True,
+                poll_seconds=0.01,
+                stop_after_idle_seconds=0.05,
+            )
+
+            playback = read_jsonl(stats.session_dir / "playback_events.jsonl")
+            event = playback[0]
+            self.assertEqual(event["requester_user_id"], "usr_alice")
+            self.assertEqual(event["requester_user_id_source"], "active")
+            self.assertGreaterEqual(stats.requester_identity["active_enrichments"], 1)
+            with connect_db(db_path) as conn:
+                row = conn.execute("SELECT * FROM playback_records").fetchone()
+            self.assertEqual(row["requester_display_name"], "Alice")
+            self.assertEqual(row["requester_user_id"], "usr_alice")
+
+    def test_current_room_identity_wins_at_expired_grace_boundary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            db_path = root / "app.sqlite3"
+            (log_dir / "output_log_0001.txt").write_text(
+                "2026.05.17 15:00:00 Debug - [Behaviour] Entering Room: OldRoom\n"
+                "2026.05.17 15:00:01 Debug - [Behaviour] OnPlayerJoined Alice (usr_old)\n"
+                "2026.05.17 15:00:10 Debug - [Behaviour] OnLeftRoom\n"
+                "2026.05.17 16:00:00 Debug - [Behaviour] Entering Room: NewRoom\n"
+                '2026.05.17 16:00:05 Debug - [VRCX] VideoPlay(PyPyDance) '
+                '"https://api.udon.dance/Api/Songs/play?id=3114",0,10,'
+                '"$3114. Test Song (Alice)"\n'
+                "2026.05.17 16:00:05 Debug - "
+                "[<color=#9C6994>USharpVideo (WannaDance)</color>] "
+                "DelayedVideoReady: Time's up, let's play\n"
+                "2026.05.17 16:01:00 Debug - [Behaviour] OnPlayerJoined Alice (usr_new)\n",
+                encoding="utf-8",
+            )
+
+            stats = watch_vrc_logs(
+                log_dir=log_dir,
+                output_dir=root / "capture",
+                session_name="requester-current-room-wins",
+                app_db_path=db_path,
+                from_start=True,
+                record_playback=True,
+                poll_seconds=0.01,
+                stop_after_idle_seconds=0.05,
+            )
+
+            playback = read_jsonl(stats.session_dir / "playback_events.jsonl")
+            self.assertEqual(playback[0]["requester_user_id"], "usr_new")
+            self.assertEqual(playback[0]["requester_user_id_source"], "active")
+            with connect_db(db_path) as conn:
+                row = conn.execute("SELECT * FROM playback_records").fetchone()
+            self.assertEqual(row["requester_user_id"], "usr_new")
+
+    def test_watcher_session_end_backfills_pending_with_expired_mapping(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            db_path = root / "app.sqlite3"
+            (log_dir / "output_log_0001.txt").write_text(
+                "2026.05.17 15:00:00 Debug - [Behaviour] Entering Room: OldRoom\n"
+                "2026.05.17 15:00:01 Debug - [Behaviour] OnPlayerJoined Alice (usr_old)\n"
+                "2026.05.17 15:00:10 Debug - [Behaviour] OnLeftRoom\n"
+                "2026.05.17 16:00:00 Debug - [Behaviour] Entering Room: NewRoom\n"
+                '2026.05.17 16:00:05 Debug - [VRCX] VideoPlay(PyPyDance) '
+                '"https://api.udon.dance/Api/Songs/play?id=3114",0,10,'
+                '"$3114. Test Song (Alice)"\n'
+                "2026.05.17 16:00:05 Debug - "
+                "[<color=#9C6994>USharpVideo (WannaDance)</color>] "
+                "DelayedVideoReady: Time's up, let's play\n",
+                encoding="utf-8",
+            )
+
+            stats = watch_vrc_logs(
+                log_dir=log_dir,
+                output_dir=root / "capture",
+                session_name="requester-session-end-expired",
+                app_db_path=db_path,
+                from_start=True,
+                record_playback=True,
+                poll_seconds=0.01,
+                stop_after_idle_seconds=0.05,
+            )
+
+            parsed = read_jsonl(stats.session_dir / "parsed_events.jsonl")
+            request_record = next(record for record in parsed if record["event_type"] == "request")
+            self.assertIsNone(request_record["requester_user_id"])
+            playback = read_jsonl(stats.session_dir / "playback_events.jsonl")
+            self.assertEqual(playback[0]["requester_user_id"], "usr_old")
+            self.assertEqual(playback[0]["requester_user_id_source"], "expired")
+            self.assertEqual(stats.requester_identity["expired_session_end_backfilled_events"], 1)
+            self.assertTrue(any("session end" in warning for warning in stats.warnings))
+            with connect_db(db_path) as conn:
+                row = conn.execute("SELECT * FROM playback_records").fetchone()
+            self.assertEqual(row["requester_user_id"], "usr_old")
+
+    def test_watcher_backfills_requester_user_id_from_player_left_after_room_left(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            db_path = root / "app.sqlite3"
+            (log_dir / "output_log_0001.txt").write_text(
+                "2026.05.17 15:29:55 Debug - [Behaviour] Entering Room: WannaDance\n"
+                '2026.05.17 15:30:00 Debug - [VRCX] VideoPlay(PyPyDance) '
+                '"https://api.udon.dance/Api/Songs/play?id=3114",0,10,'
+                '"$3114. Test Song (Alice)"\n'
+                "2026.05.17 15:30:00 Debug - "
+                "[<color=#9C6994>USharpVideo (WannaDance)</color>] "
+                "DelayedVideoReady: Time's up, let's play\n"
+                "2026.05.17 15:30:05 Debug - [Behaviour] OnLeftRoom\n"
+                "2026.05.17 15:30:05 Debug - [Behaviour] OnPlayerLeft Alice (usr_alice)\n",
+                encoding="utf-8",
+            )
+
+            stats = watch_vrc_logs(
+                log_dir=log_dir,
+                output_dir=root / "capture",
+                session_name="requester-left-backfill",
+                app_db_path=db_path,
+                from_start=True,
+                record_playback=True,
+                poll_seconds=0.01,
+                stop_after_idle_seconds=0.05,
+            )
+
+            parsed = read_jsonl(stats.session_dir / "parsed_events.jsonl")
+            request_record = next(record for record in parsed if record["event_type"] == "request")
+            self.assertIsNone(request_record["requester_user_id"])
+            playback = read_jsonl(stats.session_dir / "playback_events.jsonl")
+            self.assertEqual(playback[0]["requester_user_id"], "usr_alice")
+            self.assertEqual(playback[0]["requester_user_id_source"], "expired")
+            self.assertGreaterEqual(stats.requester_identity["backfilled_events"], 1)
+            self.assertTrue(any("expired mapping" in warning for warning in stats.warnings))
+            with connect_db(db_path) as conn:
+                row = conn.execute("SELECT * FROM playback_records").fetchone()
+            self.assertEqual(row["requester_user_id"], "usr_alice")
+            self.assertEqual(row["completion_status"], "interrupted")
 
 
 if __name__ == "__main__":

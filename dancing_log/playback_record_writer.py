@@ -114,6 +114,8 @@ def upsert_playback_record(
     )
     values = _record_values(record, fingerprint, batch_id)
     existing = _existing_record(conn, fingerprint)
+    if existing is not None:
+        _preserve_existing_requester_identity(values, existing)
     if existing is not None and _is_noop(existing, values):
         return PlaybackRecordWriteResult(
             playback_record_id=int(existing["id"]),
@@ -148,7 +150,7 @@ def upsert_playback_record(
             video_url = excluded.video_url,
             video_name = excluded.video_name,
             requester_display_name = excluded.requester_display_name,
-            requester_user_id = excluded.requester_user_id,
+            requester_user_id = COALESCE(NULLIF(playback_records.requester_user_id, ''), excluded.requester_user_id),
             location = excluded.location,
             completion_status = excluded.completion_status,
             completion_reason = excluded.completion_reason,
@@ -220,6 +222,62 @@ def _existing_record(
         """,
         (fingerprint,),
     ).fetchone()
+
+
+def _preserve_existing_requester_identity(
+    values: dict[str, object],
+    existing: sqlite3.Row,
+) -> None:
+    current_user_id = _text_or_none(existing["requester_user_id"])
+    if current_user_id is None:
+        return
+    values["requester_user_id"] = current_user_id
+    values["provenance_json"] = _provenance_json_with_requester_identity(
+        values["provenance_json"],
+        requester_user_id=current_user_id,
+        requester_user_id_source=_requester_user_id_source_from_provenance(
+            existing["provenance_json"]
+        ),
+    )
+
+
+def _provenance_json_with_requester_identity(
+    provenance_json: object,
+    *,
+    requester_user_id: str,
+    requester_user_id_source: str | None,
+) -> str:
+    provenance = _json_dict(str(provenance_json or "{}"))
+    event = provenance.get("watcher_playback_event")
+    if not isinstance(event, dict):
+        return str(provenance_json or "{}")
+
+    updated_event = dict(event)
+    updated_event["requester_user_id"] = requester_user_id
+    updated_event["requester_user_id_source"] = requester_user_id_source
+    provenance["watcher_playback_event"] = updated_event
+    return json.dumps(provenance, ensure_ascii=False, sort_keys=True)
+
+
+def _requester_user_id_source_from_provenance(provenance_json: object) -> str | None:
+    provenance = _json_dict(str(provenance_json or "{}"))
+    event = provenance.get("watcher_playback_event")
+    if not isinstance(event, dict):
+        return None
+    return _text_or_none(event.get("requester_user_id_source"))
+
+
+def _json_dict(value: str) -> dict:
+    try:
+        parsed = json.loads(value or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _text_or_none(value: object) -> str | None:
+    text = str(value or "").strip()
+    return text or None
 
 
 def _is_noop(existing: sqlite3.Row, values: dict[str, object]) -> bool:

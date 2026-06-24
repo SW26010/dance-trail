@@ -37,6 +37,10 @@ live watcher 写入 `playback_records` 时，尽量记录 Requester Identity 在
 
 - 优先查当前有效映射。
 - 当前有效映射没有时，可以查本 watcher session 的过期映射。
+- `cleared` 状态不使用过期映射补新的播放事件；无房间上下文下的孤立 `OnPlayerLeft` 只能计数/warning，不能写入过期映射。
+- 刚进入新房间后，不立即使用跨房间带来的过期映射。先给当前房间的 `OnPlayerJoined` / `User Authenticated` 留出一小段宽限窗口；宽限期内的播放事件登记为同房间 pending，若后续当前房间身份行出现则用当前有效映射回填。
+- 宽限窗口过后仍没有当前房间身份行时，可以对仍未补全的同房间 pending 事件使用过期映射回填，并记录 warning；宽限期后新出现的播放事件也可以使用过期映射补 id，并记录 warning。
+- watcher session 正常结束时，可以对仍未补全且已经捕获过期映射候选的 pending 事件做一次最终回填，并记录 warning。
 - 同一个 `display_name` 在当前有效映射和过期映射之间也应当只有一个可查结果；如果 `display_name` 重新进入当前有效映射，应从过期映射移除。
 - 使用过期映射补 id 时必须记录 warning，但不能阻塞 watcher。
 - 如果同一 display name 在 session-local cache 中被观察到新的 user id，更新该 display name 的当前可查 user id，并记录 warning。
@@ -48,7 +52,8 @@ live watcher 写入 `playback_records` 时，尽量记录 Requester Identity 在
 
 - 允许回填同一 watcher session 内同一 watcher playback event 的 `requester_user_id`，不限该记录当前是 pending、accepted/completed，还是 needs-attention。
 - 回填只填 `requester_user_id` 为空的事件/记录；已有 `requester_user_id` 不覆盖。
-- upsert/settlement 更新时必须避免用空 `requester_user_id` 覆盖数据库中已有的非空 `requester_user_id`。
+- upsert/settlement 更新时必须保留数据库中已有的非空 `requester_user_id`；自动 watcher 写入不能用空值或另一个新非空值覆盖它。
+- 保留已有 `requester_user_id` 时，`provenance_json` / live `event_json` 中的 `requester_user_id` 和 `requester_user_id_source` 也必须同步保留，避免顶层字段和证据 JSON 表达不同身份。
 - 回填只能按 watcher event/source event 的身份更新同一条事件记录，不能只凭 display name 去扫描旧历史。
 - 如果回填使用的信息来自过期映射，应继续记录 warning。
 - Requester Identity 是用户可纠正的播放字段；watcher 身份补全属于来源证据补全。未来如果存在 active Manual Record Update/overlay，自动补全不得覆盖用户手动纠正的 requester 身份。

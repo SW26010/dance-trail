@@ -44,6 +44,9 @@ class LivePlaybackStore(Protocol):
     def upsert_pending(self, event: dict, *, session_id: str | None, event_key: str) -> int:
         ...
 
+    def upsert_current_state(self, event: dict, *, session_id: str | None, event_key: str) -> int:
+        ...
+
     def mark_completed(
         self,
         event_key: str,
@@ -108,6 +111,29 @@ class SQLiteWatcherPlaybackStore:
 
     def upsert_pending(self, event: dict, *, session_id: str | None, event_key: str) -> int:
         record = self._pending_record(event, event_key=event_key)
+        if record is None:
+            return 0
+        from dancing_log.playback_record_writer import upsert_playback_record
+
+        return upsert_playback_record(self.conn, record).changed
+
+    def upsert_current_state(self, event: dict, *, session_id: str | None, event_key: str) -> int:
+        completion_status = event.get("completion_status")
+        completion_reason = str(event.get("completion_reason") or "")
+        if completion_status == "completed":
+            record = self._accepted_record(
+                event,
+                event_key=event_key,
+                reason=completion_reason or "observed_completion_threshold",
+            )
+        elif completion_status == "interrupted":
+            record = self._attention_record(
+                event,
+                event_key=event_key,
+                reason=completion_reason or WATCHER_GRACEFUL_STOP_REASON,
+            )
+        else:
+            record = self._pending_record(event, event_key=event_key)
         if record is None:
             return 0
         from dancing_log.playback_record_writer import upsert_playback_record
@@ -415,19 +441,6 @@ class LivePlaybackRuntime:
         update["live_event_key"] = watcher_event_key
         if self.store is not None or self.live_store is not None:
             try:
-                if self.store is not None and watcher_event_key not in self.finalized_live_keys:
-                    self.stats.playback_record_updates += self.store.upsert_pending(
-                        event,
-                        session_id=self.stats.live_session_id,
-                        event_key=watcher_event_key,
-                    )
-                if self.live_store is not None:
-                    self.live_store.upsert(
-                        event,
-                        session_id=self.stats.live_session_id,
-                        event_key=watcher_event_key,
-                    )
-                    self.stats.live_db_updates += 1
                 existing_update = self.live_events.get(watcher_event_key)
                 if existing_update is not None and existing_update.get("completion_status"):
                     for field_name in (
@@ -439,6 +452,43 @@ class LivePlaybackRuntime:
                         "required_played_seconds",
                     ):
                         update[field_name] = existing_update.get(field_name)
+                record_update = dict(event)
+                for field_name in (
+                    "completion_status",
+                    "completion_reason",
+                    "completed_at",
+                    "interrupted_at",
+                    "played_seconds",
+                    "required_played_seconds",
+                ):
+                    if field_name in update:
+                        record_update[field_name] = update.get(field_name)
+                identity_backfill = bool(event.get("requester_user_id")) and not bool(
+                    existing_update and existing_update.get("requester_user_id")
+                )
+                if self.store is not None and (
+                    watcher_event_key not in self.finalized_live_keys or identity_backfill
+                ):
+                    upsert_current_state = getattr(self.store, "upsert_current_state", None)
+                    if upsert_current_state is not None:
+                        self.stats.playback_record_updates += upsert_current_state(
+                            record_update,
+                            session_id=self.stats.live_session_id,
+                            event_key=watcher_event_key,
+                        )
+                    elif watcher_event_key not in self.finalized_live_keys:
+                        self.stats.playback_record_updates += self.store.upsert_pending(
+                            record_update,
+                            session_id=self.stats.live_session_id,
+                            event_key=watcher_event_key,
+                        )
+                if self.live_store is not None:
+                    self.live_store.upsert(
+                        event,
+                        session_id=self.stats.live_session_id,
+                        event_key=watcher_event_key,
+                    )
+                    self.stats.live_db_updates += 1
                 self.live_events[watcher_event_key] = update
                 actual_observed_at = event.get("actual_play_at")
                 if actual_observed_at:

@@ -205,6 +205,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             video_id TEXT,
             display_name TEXT,
             requester_marker TEXT,
+            requester_user_id TEXT,
             source_hint TEXT,
             source_type TEXT,
             source_display_name TEXT,
@@ -507,9 +508,16 @@ def upsert_live_playback_event(
     if not playback_event_key:
         raise ValueError("live playback event must include event_key")
     persistent_key = event_key or make_live_playback_event_key(session_id, playback_event_key)
+    stored_event = dict(event)
+    existing_requester_user_id, existing_requester_user_id_source = (
+        _existing_live_requester_identity(conn, persistent_key)
+    )
+    if existing_requester_user_id:
+        stored_event["requester_user_id"] = existing_requester_user_id
+        stored_event["requester_user_id_source"] = existing_requester_user_id_source
     parser_names_json = _json_text(event.get("parser_names") or [])
     raw_event_types_json = _json_text(event.get("raw_event_types") or [])
-    event_json = _json_text(event)
+    event_json = _json_text(stored_event)
 
     conn.execute(
         """
@@ -547,6 +555,7 @@ def upsert_live_playback_event(
             video_id,
             display_name,
             requester_marker,
+            requester_user_id,
             source_hint,
             source_type,
             source_display_name,
@@ -563,7 +572,7 @@ def upsert_live_playback_event(
             raw_event_types_json,
             event_json
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(event_key) DO UPDATE SET
             session_id = excluded.session_id,
             playback_event_key = excluded.playback_event_key,
@@ -597,6 +606,7 @@ def upsert_live_playback_event(
             video_id = excluded.video_id,
             display_name = excluded.display_name,
             requester_marker = excluded.requester_marker,
+            requester_user_id = COALESCE(NULLIF(live_playback_events.requester_user_id, ''), excluded.requester_user_id),
             source_hint = excluded.source_hint,
             source_type = excluded.source_type,
             source_display_name = excluded.source_display_name,
@@ -648,6 +658,7 @@ def upsert_live_playback_event(
             event.get("video_id"),
             event.get("display_name"),
             event.get("requester_marker"),
+            stored_event.get("requester_user_id"),
             event.get("source_hint"),
             event.get("source_type"),
             event.get("source_display_name"),
@@ -670,6 +681,27 @@ def upsert_live_playback_event(
         (persistent_key,),
     ).fetchone()
     return int(row["id"])
+
+
+def _existing_live_requester_identity(
+    conn: sqlite3.Connection,
+    event_key: str,
+) -> tuple[str | None, str | None]:
+    row = conn.execute(
+        "SELECT requester_user_id, event_json FROM live_playback_events WHERE event_key = ?",
+        (event_key,),
+    ).fetchone()
+    if row is None:
+        return None, None
+    value = str(row["requester_user_id"] or "").strip()
+    if not value:
+        return None, None
+    event = _json_object(row["event_json"] or "{}")
+    source = None
+    if isinstance(event, dict):
+        source_text = str(event.get("requester_user_id_source") or "").strip()
+        source = source_text or None
+    return value, source
 
 
 def promote_live_playback_event(
@@ -716,6 +748,7 @@ def promote_live_playback_event(
             video_url=row["video_url"] or row["resolved_url"] or row["routed_url"],
             video_name=row["video_name"],
             requester_display_name=display_name,
+            requester_user_id=row["requester_user_id"],
             completion_status=row["completion_status"],
             completion_reason=row["completion_reason"],
             provenance={"live_playback_event": dict(row)},
@@ -986,6 +1019,7 @@ def _ensure_live_playback_columns(conn: sqlite3.Connection) -> None:
         "played_seconds": "REAL",
         "required_played_seconds": "REAL",
         "duration_source": "TEXT",
+        "requester_user_id": "TEXT",
         "promoted_playback_record_id": "INTEGER",
     }
     for column, definition in additions.items():
