@@ -265,6 +265,15 @@ h1 { margin: 0; font-size: 24px; line-height: 1.2; }
 .pill.red { color: var(--red); border-color: var(--red-line); background: var(--red-bg); }
 .pill.violet { color: var(--violet); border-color: var(--violet-line); background: var(--violet-bg); }
 .timeline-record { display: grid; gap: 5px; }
+.timeline-record-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.timeline-record-title span:first-child { overflow-wrap: anywhere; }
+.timeline-system { border-radius: 6px; }
 .timeline-source {
   color: var(--muted);
   font-size: 12px;
@@ -766,6 +775,14 @@ const FIELD_TEXT = {
   overlay_port: { zh: { label: "Overlay 端口", group: "运行默认值", summary: "本地 OBS overlay 端口。" } }
 };
 const AUTOMATIC_SOURCE_PATH_KEYS = new Set(["vrcx_db_path", "vrc_log_dir"]);
+const DANCE_SYSTEM_LABELS = {
+  wannadance: "WannaDance",
+  pypydance: "PyPyDance",
+  pypy: "PyPyDance",
+  dududance: "Dudu",
+  dudu: "Dudu",
+  vrdancing: "VRDancing"
+};
 const state = {
   active: "settings",
   lang: initialLanguage(),
@@ -1687,9 +1704,13 @@ function renderTimelineRows(rows) {
 }
 
 function renderTimelineRecord(row) {
+  const systemLabel = danceSystemLabel(row);
   return `
     <div class="timeline-record">
-      <div>${esc(row.display)}</div>
+      <div class="timeline-record-title">
+        <span>${esc(row.display)}</span>
+        ${systemLabel ? `<span class="pill violet timeline-system">${esc(systemLabel)}</span>` : ""}
+      </div>
       ${renderTimelineSource(row)}
     </div>
   `;
@@ -1698,7 +1719,9 @@ function renderTimelineRecord(row) {
 function renderTimelineSource(row) {
   const source = timelineSource(row);
   const requester = source.showRequester ? String(row.requester_display_name || row.source_display_name || "").trim() : "";
-  return `<div class="timeline-source"><span>${esc(source.label)}</span>${requester ? ` · <strong>${esc(requester)}</strong>` : ""}</div>`;
+  const requesterUserId = String(row.requester_user_id || "").trim();
+  const requesterTitle = requester && requesterUserId ? ` title="${esc(requesterUserId)}"` : "";
+  return `<div class="timeline-source"><span>${esc(source.label)}</span>${requester ? ` · <strong${requesterTitle}>${esc(requester)}</strong>` : ""}</div>`;
 }
 
 function timelineSource(row) {
@@ -1709,6 +1732,14 @@ function timelineSource(row) {
   if (value === "queued_self" || value === "queued" || value === "reserved" || value === "reservation") return { label: ui("sourceQueuedSelf"), showRequester: true };
   if (value === "other" || value === "player" || value === "requester" || value === "requester_marker") return { label: ui("sourceOther"), showRequester: true };
   return { label: ui("sourceUnknown"), showRequester: true };
+}
+
+function danceSystemLabel(row) {
+  const key = String(row.dance_system_key || row.system_key || "").trim().toLowerCase();
+  const name = String(row.dance_system_name || "").trim();
+  if (name) return name;
+  if (DANCE_SYSTEM_LABELS[key]) return DANCE_SYSTEM_LABELS[key];
+  return key;
 }
 
 function renderTimelineStatus(row) {

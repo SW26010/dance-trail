@@ -34,9 +34,12 @@ class DailyDance:
     review_status: str = EFFECTIVE_PLAYBACK_ACCEPTED
     default_playback_status: str = EFFECTIVE_PLAYBACK_ACCEPTED
     manual_decision_status: str | None = None
+    dance_system_key: str | None = None
+    dance_system_name: str | None = None
     source_type: str | None = None
     source_display_name: str | None = None
     requester_display_name: str | None = None
+    requester_user_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -136,9 +139,12 @@ class LocalReadSnapshots:
                     "manual_decision_status": dance.manual_decision_status,
                     "effective_playback_status": dance.review_status,
                     "has_manual_decision": dance.manual_decision_status is not None,
+                    "dance_system_key": dance.dance_system_key,
+                    "dance_system_name": dance.dance_system_name,
                     "source_type": dance.source_type,
                     "source_display_name": dance.source_display_name,
                     "requester_display_name": dance.requester_display_name,
+                    "requester_user_id": dance.requester_user_id,
                 }
                 for dance in dances
             ],
@@ -492,9 +498,12 @@ def _daily_dances_from_rows(
                 review_status=review_status,
                 default_playback_status=default_status,
                 manual_decision_status=str(manual_status) if manual_status is not None else None,
+                dance_system_key=_optional_text(row.get("dance_system_key")),
+                dance_system_name=_optional_text(row.get("dance_system_name")),
                 source_type=_optional_text(row.get("source_type")),
                 source_display_name=_optional_text(row.get("source_display_name")),
                 requester_display_name=_optional_text(row.get("requester_display_name")),
+                requester_user_id=_optional_text(row.get("requester_user_id")),
             )
         )
     dances.sort(key=lambda dance: (dance.played_at_local.replace(tzinfo=None), dance.event_id))

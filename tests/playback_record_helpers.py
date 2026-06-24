@@ -18,6 +18,7 @@ def insert_playback_record(
     video_name: str | None = None,
     source_display_name: str | None = None,
     requester_display_name: str | None = None,
+    requester_user_id: str | None = None,
     catalog_attention: int = 0,
     source_row_id: int | None = None,
 ) -> int:
@@ -104,7 +105,7 @@ def insert_playback_record(
             None,
             video_name,
             requester_display_name,
-            None,
+            requester_user_id,
             None,
             "completed" if playback_status == "accepted" else None,
             status_reason,

@@ -227,6 +227,8 @@ def _read_projected_playback_rows(
                 pr.played_at,
                 pr.video_name,
                 pr.dance_external_id AS external_id,
+                COALESCE(ds.key, pr.dance_system_key) AS dance_system_key,
+                ds.name AS dance_system_name,
                 COALESCE(dt.title, pr.video_name) AS title,
                 dt.artist,
                 dt.dancer,
@@ -235,6 +237,7 @@ def _read_projected_playback_rows(
                 pr.source_type,
                 pr.source_display_name,
                 pr.requester_display_name,
+                pr.requester_user_id,
                 pr.playback_status,
                 pr.status_reason,
                 pr.catalog_attention,
@@ -242,6 +245,7 @@ def _read_projected_playback_rows(
             FROM playback_records pr
             {projection_join}
             LEFT JOIN dance_tracks dt ON dt.id = pr.dance_track_id
+            LEFT JOIN dance_systems ds ON ds.id = dt.system_id
             WHERE {where_sql}
             ORDER BY pr.played_at, pr.id
             """,

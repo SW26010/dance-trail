@@ -127,6 +127,17 @@ class WebUiServerTest(unittest.TestCase):
                 self.assertNotIn("timeline-date-picker-icon", html)
                 self.assertIn("timeline-source", html)
                 self.assertIn("renderTimelineSource", html)
+                self.assertIn("timeline-record-title", html)
+                self.assertIn("timeline-system", html)
+                self.assertIn("DANCE_SYSTEM_LABELS", html)
+                self.assertIn("danceSystemLabel", html)
+                self.assertIn(
+                    "if (name) return name;\n"
+                    "  if (DANCE_SYSTEM_LABELS[key]) return DANCE_SYSTEM_LABELS[key];",
+                    html,
+                )
+                self.assertIn("requester_user_id", html)
+                self.assertIn('title="${esc(requesterUserId)}"', html)
                 self.assertIn("copyTextToClipboard", html)
                 self.assertIn("Copy valid", html)
                 self.assertIn("复制有效事件", html)
@@ -656,6 +667,7 @@ class WebUiServerTest(unittest.TestCase):
                     source_type="player",
                     source_display_name="Alice",
                     requester_display_name="Alice",
+                    requester_user_id="usr_alice",
                     playback_status="needs_attention",
                     counts_in_history=0,
                     status_reason="interrupted",
@@ -813,6 +825,9 @@ class WebUiServerTest(unittest.TestCase):
             self.assertEqual(attention_timeline_record["source_type"], "player")
             self.assertEqual(attention_timeline_record["source_display_name"], "Alice")
             self.assertEqual(attention_timeline_record["requester_display_name"], "Alice")
+            self.assertEqual(attention_timeline_record["requester_user_id"], "usr_alice")
+            self.assertEqual(attention_timeline_record["dance_system_key"], WANNA_SYSTEM_KEY)
+            self.assertEqual(attention_timeline_record["dance_system_name"], "WannaDance")
             self.assertEqual(
                 [record["display"] for record in live_timeline["records"]],
                 ["400. Live Evidence - Live Artist"],
