@@ -23,6 +23,11 @@ from dancing_log.playback_evidence import (
 )
 from dancing_log.playback_projection import init_manual_playback_decision_schema
 from dancing_log.playback_record_writer import PlaybackRecordWrite, upsert_playback_record
+from dancing_log.time_utils import (
+    SQLITE_UTC_NOW,
+    normalize_timestamp,
+    normalize_timestamp_fields,
+)
 from dancing_log.watcher_playback_materializer import (
     WATCHER_INTERRUPTED_UNEXPECTEDLY_REASON,
     WATCHER_PENDING_REASON,
@@ -32,6 +37,23 @@ from dancing_log.watcher_playback_materializer import (
 
 WANNA_SYSTEM_KEY = "wannadance"
 WANNA_SYSTEM_NAME = "WannaDance"
+
+LIVE_PLAYBACK_TIME_FIELDS = (
+    "first_seen_at",
+    "request_at",
+    "load_started_at",
+    "resolve_attempt_at",
+    "resolved_at",
+    "video_loaded_at",
+    "expected_ready_at",
+    "last_seen_at",
+    "actual_play_at",
+    "actual_play_signal_at",
+    "on_video_start_at",
+    "synced_play_at",
+    "completed_at",
+    "interrupted_at",
+)
 
 
 class ClosingConnection(sqlite3.Connection):
@@ -58,12 +80,12 @@ def init_schema(conn: sqlite3.Connection) -> None:
     """Create the current multi-system dance-track schema."""
     _assert_not_legacy_schema(conn)
     conn.executescript(
-        """
+        f"""
         CREATE TABLE IF NOT EXISTS dance_systems (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             key TEXT NOT NULL UNIQUE,
             name TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            created_at TEXT NOT NULL DEFAULT ({SQLITE_UTC_NOW})
         );
 
         CREATE TABLE IF NOT EXISTS dance_tracks (
@@ -78,8 +100,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
             major TEXT,
             favorite INTEGER NOT NULL DEFAULT 0,
             want_to_learn INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            created_at TEXT NOT NULL DEFAULT ({SQLITE_UTC_NOW}),
+            updated_at TEXT NOT NULL DEFAULT ({SQLITE_UTC_NOW}),
             FOREIGN KEY(system_id) REFERENCES dance_systems(id),
             UNIQUE(system_id, external_id)
         );
@@ -112,8 +134,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
             artist TEXT,
             normalized_title TEXT NOT NULL,
             normalized_artist TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            created_at TEXT NOT NULL DEFAULT ({SQLITE_UTC_NOW}),
+            updated_at TEXT NOT NULL DEFAULT ({SQLITE_UTC_NOW}),
             UNIQUE(normalized_title, normalized_artist)
         );
 
@@ -122,8 +144,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
             music_track_id INTEGER NOT NULL,
             confidence REAL NOT NULL DEFAULT 1.0,
             match_method TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            created_at TEXT NOT NULL DEFAULT ({SQLITE_UTC_NOW}),
+            updated_at TEXT NOT NULL DEFAULT ({SQLITE_UTC_NOW}),
             PRIMARY KEY(dance_track_id, music_track_id),
             FOREIGN KEY(dance_track_id) REFERENCES dance_tracks(id),
             FOREIGN KEY(music_track_id) REFERENCES music_tracks(id)
@@ -145,7 +167,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             note TEXT,
             recording_id INTEGER,
             recording_offset_seconds REAL,
-            imported_at TEXT NOT NULL DEFAULT (datetime('now')),
+            imported_at TEXT NOT NULL DEFAULT ({SQLITE_UTC_NOW}),
             FOREIGN KEY(dance_track_id) REFERENCES dance_tracks(id)
         );
 
@@ -165,7 +187,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             inferred_source TEXT NOT NULL DEFAULT 'unknown',
             confidence REAL NOT NULL DEFAULT 0.5,
             event_key TEXT NOT NULL UNIQUE,
-            imported_at TEXT NOT NULL DEFAULT (datetime('now')),
+            imported_at TEXT NOT NULL DEFAULT ({SQLITE_UTC_NOW}),
             FOREIGN KEY(parsed_system_id) REFERENCES dance_systems(id),
             FOREIGN KEY(parsed_dance_track_id) REFERENCES dance_tracks(id)
         );
@@ -220,15 +242,15 @@ def init_schema(conn: sqlite3.Connection) -> None:
             signal_count INTEGER NOT NULL DEFAULT 0,
             parser_names_json TEXT NOT NULL DEFAULT '[]',
             raw_event_types_json TEXT NOT NULL DEFAULT '[]',
-            event_json TEXT NOT NULL DEFAULT '{}',
+            event_json TEXT NOT NULL DEFAULT '{{}}',
             completion_status TEXT NOT NULL DEFAULT 'pending',
             completion_reason TEXT,
             completed_at TEXT,
             interrupted_at TEXT,
             played_seconds REAL,
             required_played_seconds REAL,
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            last_updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            created_at TEXT NOT NULL DEFAULT ({SQLITE_UTC_NOW}),
+            last_updated_at TEXT NOT NULL DEFAULT ({SQLITE_UTC_NOW}),
             promoted_dance_event_id INTEGER,
             promoted_playback_record_id INTEGER,
             promoted_at TEXT,
@@ -289,9 +311,9 @@ def ensure_dance_system(conn: sqlite3.Connection, key: str, name: str) -> int:
         raise ValueError("system key must not be empty")
     display_name = name.strip() or normalized_key
     conn.execute(
-        """
-        INSERT INTO dance_systems (key, name)
-        VALUES (?, ?)
+        f"""
+        INSERT INTO dance_systems (key, name, created_at)
+        VALUES (?, ?, {SQLITE_UTC_NOW})
         ON CONFLICT(key) DO UPDATE SET
             name = excluded.name
         """,
@@ -315,7 +337,7 @@ def ensure_dance_track(
     external_id_text = _external_id_text(external_id)
     metadata = metadata or {}
     conn.execute(
-        """
+        f"""
         INSERT INTO dance_tracks (
             system_id,
             external_id,
@@ -324,9 +346,11 @@ def ensure_dance_track(
             dancer,
             player_count,
             group_name,
-            major
+            major,
+            created_at,
+            updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, {SQLITE_UTC_NOW}, {SQLITE_UTC_NOW})
         ON CONFLICT(system_id, external_id) DO UPDATE SET
             title = COALESCE(NULLIF(excluded.title, ''), dance_tracks.title),
             artist = COALESCE(NULLIF(excluded.artist, ''), dance_tracks.artist),
@@ -334,7 +358,7 @@ def ensure_dance_track(
             player_count = COALESCE(excluded.player_count, dance_tracks.player_count),
             group_name = COALESCE(NULLIF(excluded.group_name, ''), dance_tracks.group_name),
             major = COALESCE(NULLIF(excluded.major, ''), dance_tracks.major),
-            updated_at = datetime('now')
+            updated_at = {SQLITE_UTC_NOW}
         """,
         (
             system_id,
@@ -449,15 +473,17 @@ def add_dance_event(
     with connect_db(path) as conn:
         normalized_system_key = system_key.strip().lower()
         external_id_text = _external_id_text(external_id)
+        raw_played_at = played_at
+        normalized_played_at = normalize_timestamp(played_at)
         dance_track_id = ensure_dance_track(conn, normalized_system_key, external_id_text)
         system_external = f"{normalized_system_key}:{external_id_text}"
-        base_key = _event_key(event_source, played_at, system_external, source, note)
+        base_key = _event_key(event_source, raw_played_at, system_external, source, note)
         event_key = _unique_event_key(conn, base_key)
         upsert_playback_record(
             conn,
             PlaybackRecordWrite(
-                played_at=played_at,
-                original_played_at=played_at,
+                played_at=normalized_played_at,
+                original_played_at=raw_played_at,
                 dance_track_id=dance_track_id,
                 dance_system_key=normalized_system_key,
                 dance_external_id=external_id_text,
@@ -478,7 +504,8 @@ def add_dance_event(
                 provenance={
                     "manual_log": {
                         "event_key": event_key,
-                        "played_at": played_at,
+                        "played_at": normalized_played_at,
+                        "source_played_at": raw_played_at,
                         "system_key": normalized_system_key,
                         "external_id": external_id_text,
                         "source": source,
@@ -508,19 +535,22 @@ def upsert_live_playback_event(
     if not playback_event_key:
         raise ValueError("live playback event must include event_key")
     persistent_key = event_key or make_live_playback_event_key(session_id, playback_event_key)
-    stored_event = dict(event)
+    source_time_text = _source_time_text(event, LIVE_PLAYBACK_TIME_FIELDS)
+    stored_event = normalize_timestamp_fields(event, LIVE_PLAYBACK_TIME_FIELDS)
+    if source_time_text:
+        stored_event["source_time_text"] = source_time_text
     existing_requester_user_id, existing_requester_user_id_source = (
         _existing_live_requester_identity(conn, persistent_key)
     )
     if existing_requester_user_id:
         stored_event["requester_user_id"] = existing_requester_user_id
         stored_event["requester_user_id_source"] = existing_requester_user_id_source
-    parser_names_json = _json_text(event.get("parser_names") or [])
-    raw_event_types_json = _json_text(event.get("raw_event_types") or [])
+    parser_names_json = _json_text(stored_event.get("parser_names") or [])
+    raw_event_types_json = _json_text(stored_event.get("raw_event_types") or [])
     event_json = _json_text(stored_event)
 
     conn.execute(
-        """
+        f"""
         INSERT INTO live_playback_events (
             event_key,
             session_id,
@@ -570,9 +600,11 @@ def upsert_live_playback_event(
             signal_count,
             parser_names_json,
             raw_event_types_json,
-            event_json
+            event_json,
+            created_at,
+            last_updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, {SQLITE_UTC_NOW}, {SQLITE_UTC_NOW})
         ON CONFLICT(event_key) DO UPDATE SET
             session_id = excluded.session_id,
             playback_event_key = excluded.playback_event_key,
@@ -622,55 +654,55 @@ def upsert_live_playback_event(
             parser_names_json = excluded.parser_names_json,
             raw_event_types_json = excluded.raw_event_types_json,
             event_json = excluded.event_json,
-            last_updated_at = datetime('now')
+            last_updated_at = {SQLITE_UTC_NOW}
         """,
         (
             persistent_key,
             session_id,
             playback_event_key,
-            event.get("canonical_key"),
-            event.get("first_seen_at"),
-            event.get("request_at"),
-            event.get("load_started_at"),
-            event.get("resolve_attempt_at"),
-            event.get("resolved_at"),
-            event.get("video_loaded_at"),
-            event.get("expected_ready_at"),
-            event.get("last_seen_at"),
-            event.get("actual_play_at"),
-            event.get("actual_play_signal_at"),
-            event.get("actual_play_offset_seconds"),
-            event.get("actual_play_method"),
-            event.get("on_video_start_at"),
-            event.get("synced_play_at"),
-            _bool_int(event.get("observed_mid_play")),
-            event.get("elapsed_at_first_seen_seconds"),
-            event.get("delay_to_actual_seconds"),
-            event.get("load_to_actual_seconds"),
-            event.get("request_to_resolve_seconds"),
-            event.get("video_url"),
-            event.get("routed_url"),
-            event.get("resolved_url"),
-            event.get("dance_system_key"),
-            event.get("dance_external_id"),
-            event.get("url_kind"),
-            event.get("video_name"),
-            event.get("video_id"),
-            event.get("display_name"),
-            event.get("requester_marker"),
+            stored_event.get("canonical_key"),
+            stored_event.get("first_seen_at"),
+            stored_event.get("request_at"),
+            stored_event.get("load_started_at"),
+            stored_event.get("resolve_attempt_at"),
+            stored_event.get("resolved_at"),
+            stored_event.get("video_loaded_at"),
+            stored_event.get("expected_ready_at"),
+            stored_event.get("last_seen_at"),
+            stored_event.get("actual_play_at"),
+            stored_event.get("actual_play_signal_at"),
+            stored_event.get("actual_play_offset_seconds"),
+            stored_event.get("actual_play_method"),
+            stored_event.get("on_video_start_at"),
+            stored_event.get("synced_play_at"),
+            _bool_int(stored_event.get("observed_mid_play")),
+            stored_event.get("elapsed_at_first_seen_seconds"),
+            stored_event.get("delay_to_actual_seconds"),
+            stored_event.get("load_to_actual_seconds"),
+            stored_event.get("request_to_resolve_seconds"),
+            stored_event.get("video_url"),
+            stored_event.get("routed_url"),
+            stored_event.get("resolved_url"),
+            stored_event.get("dance_system_key"),
+            stored_event.get("dance_external_id"),
+            stored_event.get("url_kind"),
+            stored_event.get("video_name"),
+            stored_event.get("video_id"),
+            stored_event.get("display_name"),
+            stored_event.get("requester_marker"),
             stored_event.get("requester_user_id"),
-            event.get("source_hint"),
-            event.get("source_type"),
-            event.get("source_display_name"),
-            event.get("world_parser"),
-            event.get("duration_seconds"),
-            event.get("duration_source"),
-            event.get("load_seconds"),
-            event.get("wait_seconds"),
-            event.get("source_file"),
-            event.get("first_line_number"),
-            event.get("last_line_number"),
-            event.get("signal_count") or 0,
+            stored_event.get("source_hint"),
+            stored_event.get("source_type"),
+            stored_event.get("source_display_name"),
+            stored_event.get("world_parser"),
+            stored_event.get("duration_seconds"),
+            stored_event.get("duration_source"),
+            stored_event.get("load_seconds"),
+            stored_event.get("wait_seconds"),
+            stored_event.get("source_file"),
+            stored_event.get("first_line_number"),
+            stored_event.get("last_line_number"),
+            stored_event.get("signal_count") or 0,
             parser_names_json,
             raw_event_types_json,
             event_json,
@@ -727,11 +759,12 @@ def promote_live_playback_event(
         {"title": row["video_name"]},
     )
     display_name = row["source_display_name"] or row["display_name"]
+    original_played_at = _live_source_time_text(row, "actual_play_at") or row["actual_play_at"]
     write_result = upsert_playback_record(
         conn,
         PlaybackRecordWrite(
             played_at=row["actual_play_at"],
-            original_played_at=row["actual_play_at"],
+            original_played_at=original_played_at,
             dance_track_id=dance_track_id,
             dance_system_key=row["dance_system_key"],
             dance_external_id=row["dance_external_id"],
@@ -755,9 +788,9 @@ def promote_live_playback_event(
         ),
     )
     conn.execute(
-        """
+        f"""
         UPDATE live_playback_events
-        SET promoted_playback_record_id = ?, promoted_at = COALESCE(promoted_at, datetime('now'))
+        SET promoted_playback_record_id = ?, promoted_at = COALESCE(promoted_at, {SQLITE_UTC_NOW})
         WHERE event_key = ?
         """,
         (write_result.playback_record_id, event_key),
@@ -805,8 +838,9 @@ def mark_live_playback_event_completed(
     reason: str,
 ) -> bool:
     """Mark a live playback row as complete enough for strict promotion."""
+    normalized_completed_at = normalize_timestamp(completed_at)
     cursor = conn.execute(
-        """
+        f"""
         UPDATE live_playback_events
         SET
             completion_status = 'completed',
@@ -815,14 +849,14 @@ def mark_live_playback_event_completed(
             interrupted_at = NULL,
             played_seconds = ?,
             required_played_seconds = ?,
-            last_updated_at = datetime('now')
+            last_updated_at = {SQLITE_UTC_NOW}
         WHERE event_key = ?
             AND completion_status = 'pending'
             AND promoted_playback_record_id IS NULL
         """,
         (
             reason,
-            completed_at,
+            normalized_completed_at,
             round(float(played_seconds), 3),
             round(float(required_played_seconds), 3),
             event_key,
@@ -841,8 +875,9 @@ def mark_live_playback_event_interrupted(
     reason: str,
 ) -> bool:
     """Mark a live playback row as ineligible for legacy promotion."""
+    normalized_interrupted_at = normalize_timestamp(interrupted_at)
     cursor = conn.execute(
-        """
+        f"""
         UPDATE live_playback_events
         SET
             completion_status = 'interrupted',
@@ -850,14 +885,14 @@ def mark_live_playback_event_interrupted(
             interrupted_at = ?,
             played_seconds = ?,
             required_played_seconds = ?,
-            last_updated_at = datetime('now')
+            last_updated_at = {SQLITE_UTC_NOW}
         WHERE event_key = ?
             AND completion_status = 'pending'
             AND promoted_playback_record_id IS NULL
         """,
         (
             reason,
-            interrupted_at,
+            normalized_interrupted_at,
             round(float(played_seconds), 3) if played_seconds is not None else None,
             round(float(required_played_seconds), 3) if required_played_seconds is not None else None,
             event_key,
@@ -898,18 +933,20 @@ def ensure_music_track(conn: sqlite3.Connection, title: str, artist: str | None)
     if not normalized_title:
         raise ValueError("music title must not be empty")
     conn.execute(
-        """
+        f"""
         INSERT INTO music_tracks (
             title,
             artist,
             normalized_title,
-            normalized_artist
+            normalized_artist,
+            created_at,
+            updated_at
         )
-        VALUES (?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, {SQLITE_UTC_NOW}, {SQLITE_UTC_NOW})
         ON CONFLICT(normalized_title, normalized_artist) DO UPDATE SET
             title = COALESCE(NULLIF(excluded.title, ''), music_tracks.title),
             artist = COALESCE(NULLIF(excluded.artist, ''), music_tracks.artist),
-            updated_at = datetime('now')
+            updated_at = {SQLITE_UTC_NOW}
         """,
         (title, artist or "", normalized_title, normalized_artist),
     )
@@ -934,18 +971,20 @@ def link_dance_track_to_music(
 ) -> None:
     """Create or update a dance-track to music-track link."""
     conn.execute(
-        """
+        f"""
         INSERT INTO dance_track_music_links (
             dance_track_id,
             music_track_id,
             confidence,
-            match_method
+            match_method,
+            created_at,
+            updated_at
         )
-        VALUES (?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, {SQLITE_UTC_NOW}, {SQLITE_UTC_NOW})
         ON CONFLICT(dance_track_id, music_track_id) DO UPDATE SET
             confidence = excluded.confidence,
             match_method = excluded.match_method,
-            updated_at = datetime('now')
+            updated_at = {SQLITE_UTC_NOW}
         """,
         (dance_track_id, music_track_id, confidence, match_method),
     )
@@ -1025,6 +1064,28 @@ def _ensure_live_playback_columns(conn: sqlite3.Connection) -> None:
     for column, definition in additions.items():
         if column not in columns:
             conn.execute(f"ALTER TABLE live_playback_events ADD COLUMN {column} {definition}")
+
+
+def _source_time_text(event: dict, field_names: tuple[str, ...]) -> dict[str, str]:
+    source: dict[str, str] = {}
+    for field_name in field_names:
+        value = event.get(field_name)
+        if value not in (None, ""):
+            source[field_name] = str(value)
+    return source
+
+
+def _live_source_time_text(row: sqlite3.Row, field_name: str) -> str | None:
+    event = _json_object(row["event_json"] or "{}")
+    if not isinstance(event, dict):
+        return None
+    source_time_text = event.get("source_time_text")
+    if not isinstance(source_time_text, dict):
+        return None
+    value = source_time_text.get(field_name)
+    if value in (None, ""):
+        return None
+    return str(value)
 
 
 def _event_key(*parts: object) -> str:

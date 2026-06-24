@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from dancing_log.time_utils import SQLITE_UTC_NOW
 from dancing_log.playback_projection import (
     EFFECTIVE_PLAYBACK_ACCEPTED,
     EFFECTIVE_PLAYBACK_EXCLUDED,
@@ -31,7 +32,7 @@ LIVE_WATCHER_SOURCE_KIND = "live_watcher"
 def init_playback_records_schema(conn: sqlite3.Connection) -> None:
     """Create the Local Playback Evidence v0 schema."""
     conn.executescript(
-        """
+        f"""
         CREATE TABLE IF NOT EXISTS playback_records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             cleanup_batch_id TEXT NOT NULL,
@@ -65,7 +66,7 @@ def init_playback_records_schema(conn: sqlite3.Connection) -> None:
             catalog_status TEXT NOT NULL DEFAULT 'existing',
             catalog_attention INTEGER NOT NULL DEFAULT 0,
             provenance_json TEXT NOT NULL,
-            imported_at TEXT NOT NULL DEFAULT (datetime('now')),
+            imported_at TEXT NOT NULL DEFAULT ({SQLITE_UTC_NOW}),
             FOREIGN KEY(dance_track_id) REFERENCES dance_tracks(id)
         );
 

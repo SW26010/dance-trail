@@ -1,5 +1,6 @@
 import json
 import hashlib
+import re
 import sqlite3
 import tempfile
 import unittest
@@ -50,6 +51,9 @@ from dancing_log.watcher_playback_materializer import (
 from dancing_log.vrcx_importer import import_vrcx_database
 from dancing_log.wanna_catalog import sync_wanna_catalog, upsert_catalog
 from tests.playback_record_helpers import insert_playback_record
+
+
+ISO_UTC_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
 
 
 def favorite_map(db_path: Path | str) -> dict[tuple[str, str], int]:
@@ -113,6 +117,33 @@ class SQLiteRuntimeTest(unittest.TestCase):
             self.assertIn("source_fingerprint", playback_columns)
             self.assertIn("counts_in_history", playback_columns)
 
+    def test_runtime_metadata_timestamps_are_iso8601(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "app.sqlite3")
+            with connect_db(db_path) as conn:
+                track_id = ensure_dance_track(
+                    conn,
+                    WANNA_SYSTEM_KEY,
+                    "3114",
+                    {"title": "Song"},
+                )
+                row = conn.execute(
+                    """
+                    SELECT
+                        ds.created_at AS system_created_at,
+                        dt.created_at AS track_created_at,
+                        dt.updated_at AS track_updated_at
+                    FROM dance_tracks dt
+                    JOIN dance_systems ds ON ds.id = dt.system_id
+                    WHERE dt.id = ?
+                    """,
+                    (track_id,),
+                ).fetchone()
+
+            self.assertRegex(row["system_created_at"], ISO_UTC_RE)
+            self.assertRegex(row["track_created_at"], ISO_UTC_RE)
+            self.assertRegex(row["track_updated_at"], ISO_UTC_RE)
+
     def test_live_playback_upsert_is_idempotent_and_session_scoped(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "app.sqlite3"
@@ -155,6 +186,48 @@ class SQLiteRuntimeTest(unittest.TestCase):
             current = load_current_live_playback_event(db_path)
             self.assertEqual(current["event"]["video_name"], "Updated Title")
             self.assertFalse(current["observed_mid_play"])
+
+    def test_live_playback_event_timestamps_are_iso8601(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "app.sqlite3"
+            event = {
+                "event_key": "wannadance:3114#1",
+                "canonical_key": "wannadance:3114",
+                "first_seen_at": "2026.05.17 15:30:00",
+                "last_seen_at": "2026.05.17 15:30:12",
+                "actual_play_at": "2026.05.17 15:30:10",
+                "observed_mid_play": False,
+                "video_url": "https://api.udon.dance/Api/Songs/play?id=3114",
+                "dance_system_key": WANNA_SYSTEM_KEY,
+                "dance_external_id": "3114",
+                "video_name": "First Title",
+                "signal_count": 1,
+                "parser_names": ["usharp_delayed_video_ready"],
+                "raw_event_types": ["actual-play"],
+            }
+
+            with connect_db(db_path) as conn:
+                upsert_live_playback_event(conn, event, session_id="session-one")
+                live_key = make_live_playback_event_key("session-one", event["event_key"])
+                mark_live_playback_event_completed(
+                    conn,
+                    live_key,
+                    completed_at="2026.05.17 15:30:12",
+                    played_seconds=2,
+                    required_played_seconds=2,
+                    reason="test_complete",
+                )
+                conn.commit()
+                row = conn.execute("SELECT * FROM live_playback_events").fetchone()
+
+            row_event = json.loads(row["event_json"])
+            self.assertEqual(row["first_seen_at"], "2026-05-17T07:30:00Z")
+            self.assertEqual(row["actual_play_at"], "2026-05-17T07:30:10Z")
+            self.assertEqual(row["completed_at"], "2026-05-17T07:30:12Z")
+            self.assertRegex(row["created_at"], ISO_UTC_RE)
+            self.assertRegex(row["last_updated_at"], ISO_UTC_RE)
+            self.assertEqual(row_event["actual_play_at"], "2026-05-17T07:30:10Z")
+            self.assertEqual(row_event["source_time_text"]["actual_play_at"], "2026.05.17 15:30:10")
 
     def test_live_playback_upsert_preserves_existing_requester_user_id(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -245,6 +318,8 @@ class SQLiteRuntimeTest(unittest.TestCase):
             self.assertEqual(len(dance_rows), 0)
             self.assertEqual(len(playback_rows), 1)
             self.assertEqual(playback_rows[0]["source_type"], "player")
+            self.assertEqual(playback_rows[0]["played_at"], "2026-05-17T07:30:10Z")
+            self.assertEqual(playback_rows[0]["original_played_at"], "2026.05.17 15:30:10")
             self.assertEqual(playback_rows[0]["requester_display_name"], "Alice")
             self.assertEqual(playback_rows[0]["requester_user_id"], "usr_alice")
             self.assertEqual(live_row["requester_user_id"], "usr_alice")
@@ -390,6 +465,140 @@ class SQLiteRuntimeTest(unittest.TestCase):
             self.assertEqual(changed.changed, 1)
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["source_type"], "queued_self")
+
+    def test_playback_record_writer_normalizes_timestamps_to_iso8601(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "app.sqlite3"
+            with connect_db(db_path) as conn:
+                track_id = ensure_dance_track(conn, WANNA_SYSTEM_KEY, "5038")
+                upsert_playback_record(
+                    conn,
+                    PlaybackRecordWrite(
+                        played_at="2026.05.17 15:30:10",
+                        original_played_at="2026.05.17 15:30:10",
+                        dance_track_id=track_id,
+                        dance_system_key=WANNA_SYSTEM_KEY,
+                        dance_external_id="5038",
+                        source_kind="live_watcher",
+                        source_table="watcher_playback_events",
+                        source_row_id=0,
+                        source_event_key="watcher-event",
+                        status_reason="observed_completion_threshold",
+                        source_priority=30,
+                        confidence=1.0,
+                        event_source="vrc_log_live",
+                        source_type="player",
+                    ),
+                )
+                row = conn.execute("SELECT * FROM playback_records").fetchone()
+
+            self.assertEqual(row["played_at"], "2026-05-17T07:30:10Z")
+            self.assertEqual(row["original_played_at"], "2026.05.17 15:30:10")
+            self.assertRegex(row["imported_at"], ISO_UTC_RE)
+
+    def test_manual_log_source_identity_uses_raw_source_time(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "app.sqlite3"
+            raw_played_at = "2026.05.17 15:30:10"
+
+            add_dance_event(
+                system_key=WANNA_SYSTEM_KEY,
+                external_id="5038",
+                source="other",
+                played_at=raw_played_at,
+                event_source="manual",
+                path=db_path,
+            )
+
+            with connect_db(db_path) as conn:
+                row = conn.execute(
+                    """
+                    SELECT source_event_key, played_at, original_played_at
+                    FROM playback_records
+                    """
+                ).fetchone()
+
+            expected_key = hashlib.sha256(
+                "\x1f".join(
+                    [
+                        "manual",
+                        raw_played_at,
+                        f"{WANNA_SYSTEM_KEY}:5038",
+                        "other",
+                        "",
+                    ]
+                ).encode("utf-8")
+            ).hexdigest()
+            self.assertEqual(row["source_event_key"], expected_key)
+            self.assertEqual(row["played_at"], "2026-05-17T07:30:10Z")
+            self.assertEqual(row["original_played_at"], raw_played_at)
+
+    def test_connect_db_does_not_repair_existing_timestamps_implicitly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "app.sqlite3"
+            with connect_db(db_path) as conn:
+                track_id = ensure_dance_track(conn, WANNA_SYSTEM_KEY, "5038")
+                result = upsert_playback_record(
+                    conn,
+                    PlaybackRecordWrite(
+                        played_at="2026-05-17T07:30:10Z",
+                        original_played_at="2026.05.17 15:30:10",
+                        dance_track_id=track_id,
+                        dance_system_key=WANNA_SYSTEM_KEY,
+                        dance_external_id="5038",
+                        source_kind="live_watcher",
+                        source_table="watcher_playback_events",
+                        source_row_id=0,
+                        source_event_key="watcher-event",
+                        status_reason="observed_completion_threshold",
+                        source_priority=30,
+                        confidence=1.0,
+                        event_source="vrc_log_live",
+                        source_type="player",
+                    ),
+                )
+                conn.execute(
+                    """
+                    UPDATE playback_records
+                    SET played_at = ?, imported_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        "2026.05.17 15:30:10",
+                        "2026-06-24 03:11:07",
+                        result.playback_record_id,
+                    ),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO live_playback_events (
+                        event_key,
+                        session_id,
+                        playback_event_key,
+                        actual_play_at,
+                        created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "live-event",
+                        "session-one",
+                        "wannadance:5038#1",
+                        "2026.05.17 15:30:10",
+                        "2026-06-24 03:11:07",
+                    ),
+                )
+                conn.commit()
+
+            with connect_db(db_path) as conn:
+                record = conn.execute("SELECT * FROM playback_records").fetchone()
+                live = conn.execute("SELECT * FROM live_playback_events").fetchone()
+
+            self.assertEqual(record["played_at"], "2026.05.17 15:30:10")
+            self.assertEqual(record["original_played_at"], "2026.05.17 15:30:10")
+            self.assertEqual(record["imported_at"], "2026-06-24 03:11:07")
+            self.assertEqual(live["actual_play_at"], "2026.05.17 15:30:10")
+            self.assertEqual(live["created_at"], "2026-06-24 03:11:07")
 
     def test_wanna_catalog_writes_tracks_specific_fields_and_music_links(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1070,6 +1279,54 @@ class SQLiteRuntimeTest(unittest.TestCase):
             self.assertEqual(source["source_table"], "dance_events")
             self.assertEqual(source["source_row_id"], legacy_event_id)
 
+    def test_vrcx_import_normalizes_canonical_time_and_preserves_source_time(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            vrcx_path = root / "VRCX.sqlite3"
+            app_path = root / "app.sqlite3"
+            raw_created_at = "2026.05.17 15:30:10"
+            video_url = "https://api.udon.dance/Api/Songs/play?id=3114"
+            with closing(sqlite3.connect(vrcx_path)) as conn:
+                conn.execute(
+                    """
+                    CREATE TABLE gamelog_video_play (
+                        created_at TEXT,
+                        video_url TEXT,
+                        video_name TEXT,
+                        video_id TEXT,
+                        location TEXT,
+                        display_name TEXT,
+                        user_id TEXT
+                    )
+                    """
+                )
+                conn.execute(
+                    "INSERT INTO gamelog_video_play VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        raw_created_at,
+                        video_url,
+                        "Song Name",
+                        "",
+                        "wrld_1",
+                        "Alice",
+                        "usr_alice",
+                    ),
+                )
+                conn.commit()
+
+            stats = import_vrcx_database(vrcx_path, app_db_path=app_path)
+
+            with connect_db(app_path) as conn:
+                staging = conn.execute("SELECT * FROM vrcx_import_events").fetchone()
+                record = conn.execute("SELECT * FROM playback_records").fetchone()
+                provenance = json.loads(record["provenance_json"])
+
+            self.assertEqual(stats.playback_records_changed, 1)
+            self.assertEqual(staging["created_at"], "2026-05-17T07:30:10Z")
+            self.assertEqual(record["played_at"], "2026-05-17T07:30:10Z")
+            self.assertEqual(record["original_played_at"], raw_created_at)
+            self.assertEqual(provenance["source_created_at"], raw_created_at)
+
     def test_vrcx_import_preserves_queued_self_source_type_on_reimport(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1167,6 +1424,41 @@ class SQLiteRuntimeTest(unittest.TestCase):
             with connect_db(db_path) as conn:
                 source = conn.execute("SELECT source_type FROM playback_records").fetchone()[0]
             self.assertEqual(source, "queued_self")
+
+    def test_queued_self_matches_iso_playback_by_configured_local_date(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "app.sqlite3"
+            manifest_dir = root / "queued_self"
+            manifest_dir.mkdir()
+            add_dance_event(
+                system_key=WANNA_SYSTEM_KEY,
+                external_id="5038",
+                source="other",
+                played_at="2026.05.18 00:22:59",
+                event_source="manual",
+                path=db_path,
+            )
+            (manifest_dir / "playlist.md").write_text(
+                "# 2026-05-18\n5038 Good Time\n",
+                encoding="utf-8",
+            )
+
+            stats = sync_queued_self_manifests(
+                app_db_path=db_path,
+                manifest_dir=manifest_dir,
+                system_key=WANNA_SYSTEM_KEY,
+            )
+
+            with connect_db(db_path) as conn:
+                row = conn.execute(
+                    "SELECT played_at, original_played_at, source_type FROM playback_records"
+                ).fetchone()
+
+            self.assertEqual(stats.existing_records_updated, 1)
+            self.assertEqual(row["played_at"], "2026-05-17T16:22:59Z")
+            self.assertEqual(row["original_played_at"], "2026.05.18 00:22:59")
+            self.assertEqual(row["source_type"], "queued_self")
 
     def test_archive_existing_data_keeps_config_and_manifest_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import csv
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import json
 from pathlib import Path
 import re
 
+from dancing_log.time_utils import now_utc_iso
 from dancing_log.vrc_log_utils import (
     clean_display_name as _clean_display_name,
     extract_timestamp as _extract_timestamp,
@@ -975,4 +976,4 @@ def _find_key(value, keys: set[str]):
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return now_utc_iso()

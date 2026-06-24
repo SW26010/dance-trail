@@ -785,7 +785,7 @@ class VrcLogWatcherTest(unittest.TestCase):
                 live_row = conn.execute("SELECT * FROM live_playback_events").fetchone()
             self.assertEqual(live_row["dance_external_id"], "3823")
             self.assertEqual(live_row["video_name"], "Synced Title")
-            self.assertEqual(live_row["actual_play_at"], "2026.05.17 15:30:02")
+            self.assertEqual(live_row["actual_play_at"], "2026-05-17T07:30:02Z")
             self.assertEqual(live_row["completion_status"], "interrupted")
             self.assertEqual(live_row["completion_reason"], "watcher_stopped")
             self.assertEqual(live_row["observed_mid_play"], 0)
@@ -878,7 +878,7 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertEqual(by_id["5723"]["completion_reason"], "superseded_before_completion")
             self.assertEqual(by_id["8619"]["completion_status"], "interrupted")
             self.assertEqual(by_id["8619"]["completion_reason"], "watcher_stopped")
-            self.assertEqual(by_id["8619"]["actual_play_at"], "2026.05.18 00:22:59")
+            self.assertEqual(by_id["8619"]["actual_play_at"], "2026-05-17T16:22:59Z")
 
     def test_replay_vrc_log_files_replays_multiple_logs_in_name_order(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1040,7 +1040,7 @@ class VrcLogWatcherTest(unittest.TestCase):
                 live_row = conn.execute(
                     "SELECT * FROM live_playback_events WHERE dance_external_id = '2836'"
                 ).fetchone()
-            self.assertEqual(live_row["actual_play_at"], "2026.05.17 15:23:35")
+            self.assertEqual(live_row["actual_play_at"], "2026-05-17T07:23:35Z")
             self.assertEqual(live_row["duration_seconds"], 155.0)
             self.assertEqual(live_row["duration_source"], "wanna_video_duration")
             self.assertEqual(live_row["source_type"], "random")
@@ -1180,7 +1180,7 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertEqual(event_count, 0)
             self.assertEqual(playback_count, 0)
             self.assertEqual(row["dance_external_id"], "3114")
-            self.assertEqual(row["actual_play_at"], "2026.05.17 15:30:10")
+            self.assertEqual(row["actual_play_at"], "2026-05-17T07:30:10Z")
             self.assertEqual(row["completion_status"], "interrupted")
             self.assertEqual(row["completion_reason"], "watcher_stopped")
 
@@ -1277,7 +1277,7 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertEqual(rows[1]["playback_event_key"], "wannadance:2838#2")
             self.assertEqual(rows[1]["completion_status"], "interrupted")
             self.assertEqual(rows[1]["completion_reason"], "watcher_stopped")
-            self.assertEqual(rows[1]["actual_play_at"], "2026.05.17 15:30:12")
+            self.assertEqual(rows[1]["actual_play_at"], "2026-05-17T07:30:12Z")
 
     def test_watcher_marks_cut_song_needs_attention(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -203,6 +203,8 @@ PRIMARY KEY(dance_track_id, music_track_id)
 
 记录普通 Timeline、复查和 Insights 使用的 Local Playback Evidence。这张表是一次性
 legacy cleanup 之后的 v0 读模型 contract。
+canonical 时间字段使用带 `Z` 后缀的 ISO 8601 UTC 值。
+`original_played_at` 这类 raw provenance 字段保留标准化前的来源文本。
 
 | 字段 | 类型 | 含义 |
 |---|---|---|
@@ -270,8 +272,8 @@ Local Playback Evidence。如果某条 playback record 有一个 active decision
 | `decision_reason` | TEXT NOT NULL DEFAULT `''` | 人工决定原因 |
 | `note` | TEXT NOT NULL DEFAULT `''` | 可选 review 备注 |
 | `active` | INTEGER NOT NULL DEFAULT 1 | 这个 overlay 当前是否生效 |
-| `decided_at` | TEXT NOT NULL DEFAULT `datetime('now')` | 初次决定时间 |
-| `updated_at` | TEXT NOT NULL DEFAULT `datetime('now')` | 最后更新时间 |
+| `decided_at` | TEXT NOT NULL DEFAULT `strftime('%Y-%m-%dT%H:%M:%SZ','now')` | ISO 8601 UTC 格式的初次决定时间 |
+| `updated_at` | TEXT NOT NULL DEFAULT `strftime('%Y-%m-%dT%H:%M:%SZ','now')` | ISO 8601 UTC 格式的最后更新时间 |
 
 约束：
 
@@ -338,6 +340,8 @@ deprecated experimental 运行时表，用于 legacy live watcher 取证。正�
 这里额外镜像 folded state 方便诊断。
 
 字段形状贴近取证用的 `playback_events.jsonl`，包括：
+时间字段使用带 `Z` 后缀的 ISO 8601 UTC 值；来源不是 canonical 格式时，原始来源
+时间文本保留在 `event_json.source_time_text`。
 
 - `event_key` 和 `canonical_key`
 - `first_seen_at`、`request_at`、`resolved_at`、`video_loaded_at`、

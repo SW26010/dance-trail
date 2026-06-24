@@ -10,6 +10,7 @@ import sqlite3
 from typing import Any
 
 from dancing_log.playback_evidence import PLAYBACK_STATUS_ACCEPTED
+from dancing_log.time_utils import normalize_timestamp, now_utc_iso
 
 
 RUNTIME_BATCH_ID = "runtime-playback-writer-v1"
@@ -52,11 +53,12 @@ _WRITE_COLUMNS = (
     "catalog_status",
     "catalog_attention",
     "provenance_json",
+    "imported_at",
 )
 _NOOP_COMPARE_COLUMNS = tuple(
     column
     for column in _WRITE_COLUMNS
-    if column not in {"cleanup_batch_id", "source_root_path", "provenance_json"}
+    if column not in {"cleanup_batch_id", "source_root_path", "provenance_json", "imported_at"}
 )
 
 
@@ -175,9 +177,10 @@ def _record_values(
     fingerprint: str,
     batch_id: str,
 ) -> dict[str, object]:
+    played_at = normalize_timestamp(record.played_at)
     return {
         "cleanup_batch_id": batch_id,
-        "played_at": record.played_at,
+        "played_at": played_at,
         "original_played_at": record.original_played_at,
         "dance_track_id": record.dance_track_id,
         "dance_system_key": record.dance_system_key.strip().lower(),
@@ -207,6 +210,7 @@ def _record_values(
         "catalog_status": record.catalog_status,
         "catalog_attention": int(record.catalog_attention),
         "provenance_json": json.dumps(record.provenance or {}, ensure_ascii=False, sort_keys=True),
+        "imported_at": now_utc_iso(),
     }
 
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from dancing_log.time_utils import SQLITE_UTC_NOW
 
 EFFECTIVE_PLAYBACK_ACCEPTED = "accepted"
 EFFECTIVE_PLAYBACK_EXCLUDED = "excluded"
@@ -27,7 +28,7 @@ _VALID_EFFECTIVE_STATUSES = {
 def init_manual_playback_decision_schema(conn: sqlite3.Connection) -> None:
     """Create the reversible Manual Playback Decision overlay schema."""
     conn.executescript(
-        """
+        f"""
         CREATE TABLE IF NOT EXISTS manual_playback_decisions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             playback_record_id INTEGER NOT NULL,
@@ -37,8 +38,8 @@ def init_manual_playback_decision_schema(conn: sqlite3.Connection) -> None:
             decision_reason TEXT NOT NULL DEFAULT '',
             note TEXT NOT NULL DEFAULT '',
             active INTEGER NOT NULL DEFAULT 1,
-            decided_at TEXT NOT NULL DEFAULT (datetime('now')),
-            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            decided_at TEXT NOT NULL DEFAULT ({SQLITE_UTC_NOW}),
+            updated_at TEXT NOT NULL DEFAULT ({SQLITE_UTC_NOW}),
             FOREIGN KEY(playback_record_id) REFERENCES playback_records(id)
         );
 
@@ -63,23 +64,25 @@ def set_manual_playback_decision(
     normalized_status = _validate_effective_status(decision_status)
     record_id = int(playback_record_id)
     conn.execute(
-        """
+        f"""
         UPDATE manual_playback_decisions
-        SET active = 0, updated_at = datetime('now')
+        SET active = 0, updated_at = {SQLITE_UTC_NOW}
         WHERE playback_record_id = ? AND active = 1
         """,
         (record_id,),
     )
     conn.execute(
-        """
+        f"""
         INSERT INTO manual_playback_decisions (
             playback_record_id,
             decision_status,
             decision_reason,
             note,
-            active
+            active,
+            decided_at,
+            updated_at
         )
-        VALUES (?, ?, ?, ?, 1)
+        VALUES (?, ?, ?, ?, 1, {SQLITE_UTC_NOW}, {SQLITE_UTC_NOW})
         """,
         (record_id, normalized_status, reason, note),
     )
@@ -91,9 +94,9 @@ def clear_manual_playback_decision(
 ) -> None:
     """Remove the active overlay so evidence rules decide again."""
     conn.execute(
-        """
+        f"""
         UPDATE manual_playback_decisions
-        SET active = 0, updated_at = datetime('now')
+        SET active = 0, updated_at = {SQLITE_UTC_NOW}
         WHERE playback_record_id = ? AND active = 1
         """,
         (int(playback_record_id),),

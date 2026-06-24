@@ -18,6 +18,7 @@ from dancing_log.storage import (
     ensure_music_track,
     link_dance_track_to_music,
 )
+from dancing_log.time_utils import format_utc_iso
 
 
 API_URL = "https://x.kiva.moe/api/v2/wanna/songs"
@@ -341,7 +342,7 @@ def _metadata_sort_key(path: Path) -> tuple[int, str]:
 
 
 def _mtime_iso(path: Path) -> str:
-    return datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).astimezone().isoformat()
+    return format_utc_iso(datetime.fromtimestamp(path.stat().st_mtime, timezone.utc))
 
 
 def _to_int(value: object, default: int | None = None) -> int | None:

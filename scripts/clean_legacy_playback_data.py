@@ -871,9 +871,10 @@ def upsert_playback_record(
             completion_reason,
             catalog_status,
             catalog_attention,
-            provenance_json
+            provenance_json,
+            imported_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(source_fingerprint) DO UPDATE SET
             cleanup_batch_id = excluded.cleanup_batch_id,
             played_at = excluded.played_at,
@@ -938,6 +939,7 @@ def upsert_playback_record(
             candidate.catalog_status,
             candidate.catalog_attention,
             json.dumps(candidate.provenance or {}, ensure_ascii=False, sort_keys=True),
+            utc_now_text(),
         ),
     )
 

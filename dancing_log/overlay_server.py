@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from queue import Empty, Full, Queue
@@ -12,6 +11,7 @@ import threading
 from urllib.parse import urlparse
 
 from dancing_log.overlay_view_model import build_overlay_view_model
+from dancing_log.time_utils import now_utc_iso
 
 
 OVERLAY_HOST = "127.0.0.1"
@@ -255,7 +255,7 @@ def _is_current_event(event: dict, *, cleared_sequence: int) -> bool:
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return now_utc_iso()
 
 
 _OVERLAY_HTML = """<!doctype html>

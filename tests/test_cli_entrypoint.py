@@ -154,6 +154,42 @@ class CliEntrypointTests(unittest.TestCase):
                 "18:09:09 4062. Mood (Extreme) - 24kGoldn & Iann Dior | Just Dance 2022",
             )
 
+    def test_log_command_normalizes_time_and_preserves_raw_source_time(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "app.sqlite3"
+            with connect_db(db_path) as conn:
+                ensure_dance_track(conn, WANNA_SYSTEM_KEY, "5038")
+                conn.commit()
+
+            original_argv = sys.argv
+            sys.argv = [
+                "main.py",
+                "log",
+                "--system",
+                WANNA_SYSTEM_KEY,
+                "--app-db",
+                str(db_path),
+                "--source",
+                "other",
+                "--time",
+                "2026.05.17 15:30:10",
+                "5038",
+            ]
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    cli.main()
+            finally:
+                sys.argv = original_argv
+
+            with connect_db(db_path) as conn:
+                row = conn.execute(
+                    "SELECT played_at, original_played_at FROM playback_records"
+                ).fetchone()
+
+            self.assertEqual(row["played_at"], "2026-05-17T07:30:10Z")
+            self.assertEqual(row["original_played_at"], "2026.05.17 15:30:10")
+
     def test_watch_vrc_log_dispatches_through_live_app_session_runtime(self):
         calls = {}
 

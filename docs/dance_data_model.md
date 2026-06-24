@@ -215,6 +215,8 @@ PRIMARY KEY(dance_track_id, music_track_id)
 
 Stores Local Playback Evidence for normal Timeline, review, and Insights reads.
 This table is the v0 read contract after the one-time legacy cleanup.
+Canonical timestamp columns store ISO 8601 UTC values with a `Z` suffix.
+Raw provenance fields such as `original_played_at` preserve the source text before normalization.
 
 | Column | Type | Meaning |
 |---|---|---|
@@ -287,8 +289,8 @@ overrides the default acceptance result projected from `playback_records`.
 | `decision_reason` | TEXT NOT NULL DEFAULT `''` | Reason for the manual decision |
 | `note` | TEXT NOT NULL DEFAULT `''` | Optional review note |
 | `active` | INTEGER NOT NULL DEFAULT 1 | Whether this overlay currently applies |
-| `decided_at` | TEXT NOT NULL DEFAULT `datetime('now')` | Original decision timestamp |
-| `updated_at` | TEXT NOT NULL DEFAULT `datetime('now')` | Last update timestamp |
+| `decided_at` | TEXT NOT NULL DEFAULT `strftime('%Y-%m-%dT%H:%M:%SZ','now')` | Original decision timestamp in ISO 8601 UTC |
+| `updated_at` | TEXT NOT NULL DEFAULT `strftime('%Y-%m-%dT%H:%M:%SZ','now')` | Last update timestamp in ISO 8601 UTC |
 
 Constraint:
 
@@ -359,6 +361,9 @@ to `playback_records`; `--live-db` additionally mirrors folded state here for
 diagnosis.
 
 Columns mirror the forensic `playback_events.jsonl` shape, including:
+Timestamp columns store ISO 8601 UTC values with a `Z` suffix; raw source
+timestamp text is preserved inside `event_json.source_time_text` when the
+source used a non-canonical timestamp format.
 
 - `event_key` and `canonical_key`
 - `first_seen_at`, `request_at`, `resolved_at`, `video_loaded_at`,

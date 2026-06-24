@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 import json
 import os
@@ -12,6 +12,7 @@ import threading
 import time
 
 from dancing_log.app_paths import AppPaths
+from dancing_log.time_utils import now_utc_iso
 from dancing_log.live_playback_folding import (
     PREVIEW_SUPPRESSION_SECONDS,
     RETRY_MERGE_SECONDS,
@@ -835,4 +836,4 @@ def _live_session_id(session_dir: Path, started_at: str) -> str:
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return now_utc_iso()

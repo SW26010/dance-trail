@@ -12,6 +12,7 @@ from dancing_log.storage import (
     load_dance_log as load_dance_events_from_db,
     load_dance_tracks as load_dance_tracks_from_db,
 )
+from dancing_log.time_utils import VRCHAT_LOCAL_TZ, normalize_timestamp, now_utc_iso, parse_timestamp
 
 
 SOURCE_QUEUED_SELF = "queued_self"
@@ -76,7 +77,8 @@ def add_dance_record(
 ) -> str:
     """Add one dance event for a system-specific dance track."""
     if timestamp is None:
-        timestamp = datetime.now(timezone.utc).astimezone().isoformat()
+        timestamp = now_utc_iso()
+    normalized_timestamp = normalize_timestamp(timestamp)
 
     actual_source = source
     if auto_detect and source == SOURCE_SELF:
@@ -84,7 +86,7 @@ def add_dance_record(
         tracks = load_dance_tracks(db_path)
         if existing_track and tracks:
             records = load_dance_log(db_path)
-            today = datetime.fromisoformat(timestamp).date()
+            today = parse_timestamp(normalized_timestamp).astimezone(VRCHAT_LOCAL_TZ).date()
             playlist_ids = get_daily_playlist_track_ids(
                 tracks,
                 records,

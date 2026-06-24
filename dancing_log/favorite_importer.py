@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 
 from dancing_log.storage import connect_db
+from dancing_log.time_utils import SQLITE_UTC_NOW
 
 
 WANNA_FAVORITE_PREFIX = "WannaFavorite:"
@@ -80,10 +81,10 @@ def import_favorites_file(
         if not dry_run:
             if imported_ids:
                 conn.executemany(
-                    """
+                    f"""
                     UPDATE dance_tracks
                     SET favorite = 1,
-                        updated_at = datetime('now')
+                        updated_at = {SQLITE_UTC_NOW}
                     WHERE system_id = ? AND external_id = ? AND favorite != 1
                     """,
                     [(int(system["id"]), external_id) for external_id in imported_ids],
@@ -91,10 +92,10 @@ def import_favorites_file(
             if not additive:
                 if imported_ids:
                     conn.execute(
-                        """
+                        f"""
                         UPDATE dance_tracks
                         SET favorite = 0,
-                            updated_at = datetime('now')
+                            updated_at = {SQLITE_UTC_NOW}
                         WHERE system_id = ?
                           AND favorite != 0
                           AND external_id NOT IN (
@@ -105,10 +106,10 @@ def import_favorites_file(
                     )
                 else:
                     conn.execute(
-                        """
+                        f"""
                         UPDATE dance_tracks
                         SET favorite = 0,
-                            updated_at = datetime('now')
+                            updated_at = {SQLITE_UTC_NOW}
                         WHERE system_id = ?
                           AND favorite != 0
                         """,

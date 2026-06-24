@@ -15,6 +15,7 @@ from dancing_log.vrcx_importer import SOURCE_TYPE_PRECEDENCE_SQL
 
 SOURCE_QUEUED_SELF = "queued_self"
 EVENT_SOURCE = "queued_self_manifest"
+LOCAL_PLAYED_DATE_OFFSET_SQL = "'+8 hours'"
 
 DATE_RE = re.compile(r"^\s*#*\s*(\d{4}-\d{2}-\d{2})\s*$")
 BARE_DOTTED_TRACK_REF_RE = re.compile(
@@ -228,7 +229,7 @@ def _promote_existing_record(conn: sqlite3.Connection, entry: QueuedSelfEntry) -
                 JOIN dance_systems ds ON ds.id = dt.system_id
                 WHERE ds.key = ? AND dt.external_id = ?
             )
-            AND substr(played_at, 1, 10) = ?
+            AND """ + _played_at_local_date_sql("played_at") + """ = ?
             AND playback_status = 'accepted'
             AND counts_in_history = 1
             AND (
@@ -263,7 +264,7 @@ def _matching_existing_record_count(
             pr.event_source != ?
             AND ds.key = ?
             AND dt.external_id = ?
-            AND substr(pr.played_at, 1, 10) = ?
+            AND """ + _played_at_local_date_sql("pr.played_at") + """ = ?
             AND pr.playback_status = 'accepted'
             AND pr.counts_in_history = 1
         """,
@@ -284,3 +285,12 @@ def _normalize_system_key(system_key: str | None) -> str | None:
     if not normalized:
         raise ValueError("system key must not be empty")
     return normalized
+
+
+def _played_at_local_date_sql(column: str) -> str:
+    return (
+        "CASE "
+        f"WHEN {column} LIKE '____.__.__ %' THEN replace(substr({column}, 1, 10), '.', '-') "
+        f"ELSE date(replace({column}, 'Z', '+00:00'), {LOCAL_PLAYED_DATE_OFFSET_SQL}) "
+        "END"
+    )

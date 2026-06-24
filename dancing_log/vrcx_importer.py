@@ -23,6 +23,7 @@ from dancing_log.playback_record_writer import (
     source_fingerprint,
     upsert_playback_record,
 )
+from dancing_log.time_utils import SQLITE_UTC_NOW, normalize_timestamp
 
 
 SOURCE_SELF = "self"
@@ -266,6 +267,8 @@ def import_vrcx_database(
             if not _is_supported(parsed):
                 skipped_unsupported += 1
                 continue
+            raw_created_at = row["created_at"]
+            created_at = normalize_timestamp(raw_created_at)
 
             source, confidence = infer_source(
                 row["display_name"],
@@ -287,7 +290,7 @@ def import_vrcx_database(
                 )
 
             staging_cursor = app_conn.execute(
-                """
+                f"""
                 INSERT INTO vrcx_import_events (
                     vrcx_rowid,
                     created_at,
@@ -302,9 +305,10 @@ def import_vrcx_database(
                     parsed_dance_track_id,
                     inferred_source,
                     confidence,
-                    event_key
+                    event_key,
+                    imported_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, {SQLITE_UTC_NOW})
                 ON CONFLICT(event_key) DO UPDATE SET
                     parsed_system_id = excluded.parsed_system_id,
                     parsed_external_id = excluded.parsed_external_id,
@@ -322,7 +326,7 @@ def import_vrcx_database(
                 """,
                 (
                     row["vrcx_rowid"],
-                    row["created_at"],
+                    created_at,
                     row["video_url"],
                     row["video_name"],
                     row["video_id"],
@@ -362,7 +366,7 @@ def import_vrcx_database(
                 app_conn,
                 PlaybackRecordWrite(
                     played_at=staging_row["created_at"],
-                    original_played_at=staging_row["created_at"],
+                    original_played_at=raw_created_at,
                     dance_track_id=staging_row["parsed_dance_track_id"],
                     dance_system_key=parsed.system_key,
                     dance_external_id=staging_row["parsed_external_id"],
@@ -385,6 +389,7 @@ def import_vrcx_database(
                     location=staging_row["location"],
                     provenance={
                         "vrcx_db_path": str(vrcx_path.resolve()),
+                        "source_created_at": raw_created_at,
                         "vrcx_import_event": {
                             key: staging_row[key]
                             for key in staging_row.keys()
