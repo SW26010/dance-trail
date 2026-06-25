@@ -1,7 +1,7 @@
 # Dance Data Model
 
 Date: 2026-05-17
-Updated: 2026-06-22
+Updated: 2026-06-25
 
 This document describes the current SQLite runtime model for `dancing-log`.
 The project no longer uses the legacy `songs` table or
@@ -9,6 +9,11 @@ The project no longer uses the legacy `songs` table or
 After the legacy cleanup recorded in ADR 0004, `playback_records` is the
 Local Playback Evidence v0 read contract for normal Timeline and Insights
 queries.
+
+The target design for the next `playback_records` schema is
+`docs/playback_records_schema_redesign.zh-CN.md`. This document remains the
+current/v0 runtime model description and must not be treated as the field
+contract for the new schema migration.
 
 ## Current Scope
 

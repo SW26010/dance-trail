@@ -1,12 +1,16 @@
 # 跳舞数据模型
 
 日期：2026-05-17
-更新：2026-06-22
+更新：2026-06-25
 
 本文描述 `dancing-log` 当前的 SQLite 运行时模型。项目已经不再使用旧的
 `songs` 表，也不再使用 `dance_events.song_id`。
 ADR 0004 记录的一次性 legacy cleanup 之后，`playback_records` 是普通
 Timeline 和 Insights 查询使用的 Local Playback Evidence v0 读模型 contract。
+
+下一版 `playback_records` schema 的目标设计以
+`docs/playback_records_schema_redesign.zh-CN.md` 为准。本文保留当前/v0
+运行时模型说明，不能作为新 schema 迁移目标的字段 contract。
 
 英文对应文档：`docs/dance_data_model.md`
 

@@ -160,9 +160,13 @@ _Avoid_: live playback record, overlay state, accepted playback record, actual-p
 The watcher action that resolves a pending Watcher-Derived Playback Record into its default acceptance result after enough lifecycle or playback evidence is available. Settlement may accept a record, mark it attention-needed, exclude it, or leave it pending when the observation is still active or the watcher ended before settlement.
 _Avoid_: raw event parsing, manual decision, playback record creation
 
+**Playback Observation**:
+The locally observed playback lifecycle state for a playback record, such as an active observation, completed observation, interruption, watcher stop, video shutdown, or observed end boundary. Playback Observation can inform the Default Acceptance Result, but it is not the request source, not the evidence identity, and not a manual decision.
+_Avoid_: request source, acceptance result, raw watcher payload, manual decision
+
 **Request Source Type**:
-The request/playback-source classification stored on a playback record, such as queued_self, recommend, self, other, random, or unknown. Request Source Type is stored today in `source_type`; it is not evidence strength and does not decide whether the record is effectively accepted, excluded, or needs attention.
-_Avoid_: requester identity, evidence source priority, acceptance status, review status
+The normalized request/playback-source classification stored on a playback record, such as queued_self, recommend, self, other, random, or unknown. Request Source Type is stored today in legacy `source_type`, with `request_type` as the clearer long-term field name. It is not evidence strength, not a confidence score, and does not decide whether the record is effectively accepted, excluded, or needs attention. Coarse watcher-side labels such as player are legacy parser evidence, not canonical Request Source Type values.
+_Avoid_: requester identity, evidence source priority, confidence score, acceptance status, review status, raw watcher label
 
 **Accepted Playback Record**:
 A playback record included in normal history and Insights under the trust-by-default policy. A record may be accepted because it comes from a supported source, was automatically settled, or was manually confirmed; manual confirmation is not required for ordinary inclusion.
@@ -173,8 +177,8 @@ A playback record whose evidence is reviewable but not yet settled into accepted
 _Avoid_: needs attention, excluded, accepted, raw live state, graceful final state, read-time repair
 
 **Default Acceptance Result**:
-The accepted, pending, excluded, or attention-needed result inferred from playback evidence and Evidence Source Priority before any active manual decision is applied. Restoring the default result means removing the manual decision overlay and letting the evidence rules decide again.
-_Avoid_: stored truth, permanent user state, raw parser status
+The accepted, pending, excluded, or attention-needed result inferred from playback evidence and Evidence Source Priority before any active manual decision is applied. It is one default evidence-derived outcome, not a combination of a status field plus a separate history-counting flag. Restoring the default result means removing the manual decision overlay and letting the evidence rules decide again.
+_Avoid_: stored truth, permanent user state, raw parser status, history-counting flag
 
 **Manual Playback Decision**:
 A reversible user-authored decision about whether a playback record should be accepted, excluded, or reviewed. Manual Playback Decision is strongest while active, but it does not erase playback evidence or permanently replace the Default Acceptance Result. Pending is not a Manual Playback Decision because active observation state is inferred from evidence rather than chosen by the user.
@@ -192,9 +196,13 @@ _Avoid_: required confirmation, acceptance status, parser status, pending playba
 The product rule that supported playback evidence is accepted unless stronger evidence or explicit user judgment excludes it. This policy keeps day-to-day use lightweight: the user handles exceptions instead of confirming every dance.
 _Avoid_: manual-only history, review-everything workflow, raw import
 
+**Evidence Source**:
+The stable adapter family that produced a Local Playback Evidence record, such as VRCX history, VRChat log replay, live VRChat log observation, or manual log entry. Evidence Source identifies the evidence family, not a source table, source row, import operation, script version, or raw payload location.
+_Avoid_: request source type, source table, source row id, import batch, script version
+
 **Evidence Source Priority**:
-The evidence-strength precedence used when overlapping playback records disagree. Evidence Source Priority is stored today in `source_priority`. Active Manual Playback Decision is strongest, automatic acceptance or promotion is stronger than ordinary playback evidence, and ordinary watcher evidence is preferred over VRCX history when review or analysis must choose one representative record. Higher-priority evidence can negate lower-priority overlapping records; without that stronger negation, ordinary records remain accepted under the trust-by-default policy.
-_Avoid_: request source type, filesystem order, newest-row-wins
+The evidence-strength precedence used when overlapping playback records disagree. Evidence Source Priority is a strategy result derived from evidence source, default acceptance, and active manual decisions; it should not be treated as a separate source fact. Active Manual Playback Decision is strongest, automatic acceptance is stronger than ordinary playback evidence, and ordinary watcher evidence is preferred over VRCX history when review or analysis must choose one representative record. Higher-priority evidence can negate lower-priority overlapping records; without that stronger negation, ordinary records remain accepted under the trust-by-default policy.
+_Avoid_: request source type, filesystem order, newest-row-wins, stored source fact
 
 **Automatic Acceptance**:
 A system-derived acceptance decision for a playback record, based on supported source semantics or conservative settlement rules. Automatic Acceptance is not limited to an elapsed-time threshold; future rules may use additional conservative signals. Automatic Acceptance lets normal records count without manual confirmation, but it is weaker than an active Manual Playback Decision or Manual Record Update.
@@ -221,8 +229,16 @@ Playback evidence as it exists inside a source database or app root before a Pla
 _Avoid_: target history, local evidence, copied truth
 
 **Local Playback Evidence**:
-Playback evidence owned by the current app root after parsing, importing, or merging. Local Playback Evidence uses one canonical local evidence root for Timeline and Insights, even when it is derived from Source Playback Evidence or older local history roots.
-_Avoid_: source row copy, foreign table, external database state
+Playback evidence owned by the current app root after parsing, importing, or merging. Local Playback Evidence is normalized enough for Timeline, Insights, and review to query directly, even when it is derived from Source Playback Evidence or older local history roots. Source-side coordinates, raw payloads, and legacy source details explain provenance, but they are not the local evidence identity.
+_Avoid_: source row copy, raw source event, foreign table, external database state
+
+**Local Evidence Identity**:
+The stable identity used by local writers, imports, replays, and merges to decide whether incoming playback evidence represents the same Local Playback Evidence already owned by the current app root. It is separate from the database row id used for local references and from source-side origin identity used for provenance.
+_Avoid_: database row id, source row id, origin coordinate, display label
+
+**Playback Record Origin**:
+The source-side coordinate, raw payload, and audit detail attached to a Local Playback Evidence record. Playback Record Origin explains where the local evidence came from and how it was ingested; it is not the timeline record, not the local evidence identity, and not a user decision.
+_Avoid_: playback record, request source type, local evidence identity, manual decision
 
 **Legacy Playback Root**:
 An older local playback-history root kept only to read or migrate existing records into Local Playback Evidence. It is not the long-term canonical root for new playback capture, review, merge, or Insights.
