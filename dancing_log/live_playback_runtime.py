@@ -113,9 +113,9 @@ class SQLiteWatcherPlaybackStore:
         record = self._pending_record(event, event_key=event_key)
         if record is None:
             return 0
-        from dancing_log.playback_record_writer import upsert_playback_record
+        from dancing_log.playback_record_writer import upsert_evidence_record
 
-        return upsert_playback_record(self.conn, record).changed
+        return upsert_evidence_record(self.conn, record).changed
 
     def upsert_current_state(self, event: dict, *, session_id: str | None, event_key: str) -> int:
         completion_status = event.get("completion_status")
@@ -136,9 +136,9 @@ class SQLiteWatcherPlaybackStore:
             record = self._pending_record(event, event_key=event_key)
         if record is None:
             return 0
-        from dancing_log.playback_record_writer import upsert_playback_record
+        from dancing_log.playback_record_writer import upsert_evidence_record
 
-        return upsert_playback_record(self.conn, record).changed
+        return upsert_evidence_record(self.conn, record).changed
 
     def mark_completed(
         self,
@@ -164,9 +164,9 @@ class SQLiteWatcherPlaybackStore:
         record = self._accepted_record(update, event_key=event_key, reason=reason)
         if record is None:
             return False
-        from dancing_log.playback_record_writer import upsert_playback_record
+        from dancing_log.playback_record_writer import upsert_evidence_record
 
-        return upsert_playback_record(self.conn, record).changed > 0
+        return upsert_evidence_record(self.conn, record).changed > 0
 
     def mark_interrupted(
         self,
@@ -196,9 +196,9 @@ class SQLiteWatcherPlaybackStore:
         record = self._attention_record(update, event_key=event_key, reason=reason)
         if record is None:
             return False
-        from dancing_log.playback_record_writer import upsert_playback_record
+        from dancing_log.playback_record_writer import upsert_evidence_record
 
-        return upsert_playback_record(self.conn, record).changed > 0
+        return upsert_evidence_record(self.conn, record).changed > 0
 
     def commit(self) -> None:
         self.conn.commit()

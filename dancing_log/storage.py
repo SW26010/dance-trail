@@ -16,17 +16,20 @@ import unicodedata
 from dancing_log.app_paths import AppPaths
 from dancing_log.live_playback_settlement import is_live_playback_promotable
 from dancing_log.playback_evidence import (
-    PLAYBACK_STATUS_NEEDS_ATTENTION,
-    PLAYBACK_STATUS_PENDING,
+    PLAYBACK_STATUS_ACCEPTED,
     init_playback_records_schema,
     read_accepted_playback_history,
 )
 from dancing_log.playback_projection import init_manual_playback_decision_schema
+from dancing_log.playback_record_maintenance import mark_watcher_pending_interrupted
 from dancing_log.playback_record_writer import (
     PROJECT_SOURCE_ROOT_KEY,
+    PROJECT_SOURCE_ROOT_PATH,
+    PlaybackRecordOriginWrite,
     PlaybackRecordWrite,
-    source_fingerprint,
-    upsert_playback_record,
+    origin_key,
+    playback_evidence_key,
+    upsert_evidence_record,
 )
 from dancing_log.time_utils import (
     SQLITE_UTC_NOW,
@@ -484,39 +487,57 @@ def add_dance_event(
         system_external = f"{normalized_system_key}:{external_id_text}"
         base_key = _event_key(event_source, raw_played_at, system_external, source, note)
         event_key = _unique_event_key(conn, base_key)
-        upsert_playback_record(
+        upsert_evidence_record(
             conn,
             PlaybackRecordWrite(
+                evidence_key=playback_evidence_key(
+                    PROJECT_SOURCE_ROOT_KEY,
+                    "manual_log",
+                    0,
+                    event_key,
+                ),
+                evidence_source="manual_log",
                 played_at=normalized_played_at,
-                original_played_at=raw_played_at,
                 dance_track_id=dance_track_id,
                 dance_system_key=normalized_system_key,
                 dance_external_id=external_id_text,
-                source_kind="manual_log",
-                source_table="manual_log",
-                source_row_id=0,
-                source_event_key=event_key,
-                status_reason=event_source,
-                source_priority=40,
-                confidence=confidence,
-                event_source=event_source,
-                source_type=source,
+                request_type=source,
+                default_acceptance_status=PLAYBACK_STATUS_ACCEPTED,
                 video_url=video_url,
                 video_name=video_name,
                 requester_display_name=requester_display_name,
                 requester_user_id=requester_user_id,
-                location=location,
-                provenance={
-                    "manual_log": {
-                        "event_key": event_key,
-                        "played_at": normalized_played_at,
-                        "source_played_at": raw_played_at,
-                        "system_key": normalized_system_key,
-                        "external_id": external_id_text,
-                        "source": source,
-                        "note": note,
-                    }
-                },
+                origins=(
+                    PlaybackRecordOriginWrite(
+                        origin_key=origin_key(
+                            PROJECT_SOURCE_ROOT_KEY,
+                            "manual_log",
+                            0,
+                            event_key,
+                        ),
+                        origin_source="manual_log",
+                        origin_root_key=PROJECT_SOURCE_ROOT_KEY,
+                        origin_root_path=PROJECT_SOURCE_ROOT_PATH,
+                        origin_table="manual_log",
+                        origin_row_id=0,
+                        origin_event_key=event_key,
+                        origin_json={
+                            "original_played_at": raw_played_at,
+                            "manual_log": {
+                                "event_key": event_key,
+                                "played_at": normalized_played_at,
+                                "source_played_at": raw_played_at,
+                                "system_key": normalized_system_key,
+                                "external_id": external_id_text,
+                                "source": source,
+                                "note": note,
+                                "confidence": confidence,
+                                "location": location,
+                                "event_source": event_source,
+                            },
+                        },
+                    ),
+                ),
             ),
         )
         conn.commit()
@@ -765,31 +786,55 @@ def promote_live_playback_event(
     )
     display_name = row["source_display_name"] or row["display_name"]
     original_played_at = _live_source_time_text(row, "actual_play_at") or row["actual_play_at"]
-    write_result = upsert_playback_record(
+    write_result = upsert_evidence_record(
         conn,
         PlaybackRecordWrite(
+            evidence_key=playback_evidence_key(
+                PROJECT_SOURCE_ROOT_KEY,
+                "live_playback_events",
+                int(row["id"]),
+                event_key,
+            ),
+            evidence_source="vrc_log_live",
             played_at=row["actual_play_at"],
-            original_played_at=original_played_at,
             dance_track_id=dance_track_id,
             dance_system_key=row["dance_system_key"],
             dance_external_id=row["dance_external_id"],
-            source_kind="live_watcher",
-            source_table="live_playback_events",
-            source_row_id=int(row["id"]),
-            source_event_key=event_key,
-            status_reason=row["completion_reason"] or "observed_completion_threshold",
-            source_priority=30,
-            confidence=1.0,
-            event_source="vrc_log_live",
-            source_type=row["source_type"],
-            source_display_name=display_name,
+            request_type=row["source_type"],
+            default_acceptance_status=PLAYBACK_STATUS_ACCEPTED,
             video_url=row["video_url"] or row["resolved_url"] or row["routed_url"],
             video_name=row["video_name"],
             requester_display_name=display_name,
             requester_user_id=row["requester_user_id"],
-            completion_status=row["completion_status"],
-            completion_reason=row["completion_reason"],
-            provenance={"live_playback_event": dict(row)},
+            observation_status=row["completion_status"],
+            observation_reason=row["completion_reason"],
+            observed_end_at=row["completed_at"] or row["interrupted_at"],
+            origins=(
+                PlaybackRecordOriginWrite(
+                    origin_key=origin_key(
+                        PROJECT_SOURCE_ROOT_KEY,
+                        "live_playback_events",
+                        int(row["id"]),
+                        event_key,
+                    ),
+                    origin_source="vrchat_log",
+                    origin_root_key=PROJECT_SOURCE_ROOT_KEY,
+                    origin_root_path=PROJECT_SOURCE_ROOT_PATH,
+                    origin_table="live_playback_events",
+                    origin_row_id=int(row["id"]),
+                    origin_event_key=event_key,
+                    origin_json={
+                        "original_played_at": original_played_at,
+                        "source_display_name": display_name,
+                        "legacy_status_reason": row["completion_reason"]
+                        or "observed_completion_threshold",
+                        "legacy_source_priority": 30,
+                        "legacy_confidence": 1.0,
+                        "legacy_catalog_status": "existing",
+                        "live_playback_event": dict(row),
+                    },
+                ),
+            ),
         ),
     )
     conn.execute(
@@ -805,39 +850,13 @@ def promote_live_playback_event(
 
 def repair_stale_watcher_pending_records(conn: sqlite3.Connection) -> int:
     """Convert stale watcher pending records left by an ungraceful exit."""
-    cursor = conn.execute(
-        f"""
-        UPDATE playback_records
-        SET
-            default_acceptance_status = ?,
-            observation_status = 'interrupted',
-            observation_reason = ?,
-            updated_at = {SQLITE_UTC_NOW}
-        WHERE id IN (
-            SELECT pr.id
-            FROM playback_records pr
-            JOIN playback_record_origins pro
-                ON pro.playback_record_id = pr.id
-            WHERE pr.evidence_source = ?
-                AND pro.origin_table = ?
-                AND pr.default_acceptance_status = ?
-                AND (
-                    pr.observation_status = 'pending'
-                    OR pr.observation_reason = ?
-                    OR pr.observation_reason IS NULL
-                )
-        )
-        """,
-        (
-            PLAYBACK_STATUS_NEEDS_ATTENTION,
-            WATCHER_INTERRUPTED_UNEXPECTEDLY_REASON,
-            WATCHER_PLAYBACK_EVENT_SOURCE,
-            WATCHER_PLAYBACK_SOURCE_TABLE,
-            PLAYBACK_STATUS_PENDING,
-            WATCHER_PENDING_REASON,
-        ),
+    return mark_watcher_pending_interrupted(
+        conn,
+        evidence_source=WATCHER_PLAYBACK_EVENT_SOURCE,
+        origin_table=WATCHER_PLAYBACK_SOURCE_TABLE,
+        pending_reason=WATCHER_PENDING_REASON,
+        interrupted_reason=WATCHER_INTERRUPTED_UNEXPECTEDLY_REASON,
     )
-    return int(cursor.rowcount or 0)
 
 
 def mark_live_playback_event_completed(
@@ -1120,7 +1139,7 @@ def _unique_event_key(conn: sqlite3.Connection, base_key: str) -> str:
             FROM playback_records
             WHERE evidence_key = ?
             """,
-            (source_fingerprint(PROJECT_SOURCE_ROOT_KEY, "manual_log", 0, event_key),),
+            (playback_evidence_key(PROJECT_SOURCE_ROOT_KEY, "manual_log", 0, event_key),),
         ).fetchone()
     ):
         event_key = _event_key(base_key, suffix)

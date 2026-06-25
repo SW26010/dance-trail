@@ -329,35 +329,63 @@ def summarize_db(db_path: Path) -> dict[str, int]:
     with connect_db(db_path) as conn:
         rows = conn.execute(
             """
-            SELECT requester_user_id, playback_status, provenance_json
-            FROM playback_records
-            WHERE source_table = ?
+            SELECT
+                pr.id,
+                pr.requester_user_id,
+                pr.default_acceptance_status,
+                pro.origin_json
+            FROM playback_records pr
+            JOIN playback_record_origins pro
+                ON pro.playback_record_id = pr.id
+            WHERE pr.evidence_source = ?
+                AND pro.origin_table = ?
+            ORDER BY pr.id, pro.id
             """,
-            (WATCHER_SOURCE_TABLE,),
+            ("vrc_log_live", WATCHER_SOURCE_TABLE),
         ).fetchall()
-    id_preservation_failures = 0
+
+    records_by_id: dict[int, sqlite3.Row] = {}
+    origin_user_ids_by_record_id: dict[int, set[str]] = {}
     for row in rows:
-        provenance_user_id = requester_user_id_from_provenance(row)
-        if provenance_user_id and not row["requester_user_id"]:
+        record_id = int(row["id"])
+        records_by_id.setdefault(record_id, row)
+        origin_user_id = requester_user_id_from_origin_json(row["origin_json"])
+        if origin_user_id:
+            origin_user_ids_by_record_id.setdefault(record_id, set()).add(origin_user_id)
+
+    id_preservation_failures = 0
+    for record_id, row in records_by_id.items():
+        main_user_id = normalized_user_id(row["requester_user_id"])
+        origin_user_ids = origin_user_ids_by_record_id.get(record_id, set())
+        if origin_user_ids and main_user_id not in origin_user_ids:
             id_preservation_failures += 1
     return {
-        "records": len(rows),
-        "records_with_id": sum(1 for row in rows if row["requester_user_id"]),
-        "pending_records": sum(1 for row in rows if row["playback_status"] == "pending"),
+        "records": len(records_by_id),
+        "records_with_id": sum(1 for row in records_by_id.values() if row["requester_user_id"]),
+        "pending_records": sum(
+            1
+            for row in records_by_id.values()
+            if row["default_acceptance_status"] == "pending"
+        ),
         "id_preservation_failures": id_preservation_failures,
     }
 
 
-def requester_user_id_from_provenance(row: sqlite3.Row) -> str | None:
+def requester_user_id_from_origin_json(origin_json: object) -> str | None:
     try:
-        provenance = json.loads(row["provenance_json"] or "{}")
+        origin = json.loads(str(origin_json or "{}"))
     except json.JSONDecodeError:
         return None
-    event = provenance.get("watcher_playback_event")
+    event = origin.get("watcher_playback_event")
     if not isinstance(event, dict):
         return None
     value = str(event.get("requester_user_id") or "").strip()
     return value or None
+
+
+def normalized_user_id(value: object) -> str | None:
+    text = str(value or "").strip()
+    return text or None
 
 
 def invariants(window: WindowSpec, replay: RunSummary, tail: RunSummary) -> list[str]:

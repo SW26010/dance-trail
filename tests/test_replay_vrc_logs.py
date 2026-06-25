@@ -1,7 +1,7 @@
 import sqlite3
 import unittest
 
-from scripts.replay_vrc_logs import _matches_manual_row
+from scripts.replay_vrc_logs import _decode_playback_record_row, _index_rows, _matches_manual_row
 
 
 class ReplayVrcLogsTest(unittest.TestCase):
@@ -38,6 +38,28 @@ class ReplayVrcLogsTest(unittest.TestCase):
                 status="accepted",
             )
         )
+
+    def test_playback_record_diff_key_keeps_multiple_origins(self):
+        rows = [
+            _decode_playback_record_row(
+                {
+                    "evidence_key": "same-record",
+                    "origin_key": "origin-a",
+                    "origin_json": "{}",
+                }
+            ),
+            _decode_playback_record_row(
+                {
+                    "evidence_key": "same-record",
+                    "origin_key": "origin-b",
+                    "origin_json": "{}",
+                }
+            ),
+        ]
+
+        indexed = _index_rows(rows, "evidence_origin_key")
+
+        self.assertEqual(len(indexed), 2)
 
 
 if __name__ == "__main__":

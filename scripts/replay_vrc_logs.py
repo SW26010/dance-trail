@@ -89,32 +89,28 @@ LIVE_PLAYBACK_COLUMNS = (
     "required_played_seconds",
 )
 PLAYBACK_RECORD_COLUMNS = (
-    "source_fingerprint",
+    "evidence_key",
+    "evidence_source",
     "played_at",
-    "original_played_at",
     "dance_system_key",
     "dance_external_id",
-    "source_kind",
-    "source_table",
-    "source_event_key",
-    "playback_status",
-    "counts_in_history",
-    "status_reason",
-    "source_priority",
-    "confidence",
-    "event_source",
-    "source_type",
-    "source_display_name",
+    "request_type",
     "video_url",
     "video_name",
     "requester_display_name",
     "requester_user_id",
-    "location",
-    "completion_status",
-    "completion_reason",
-    "catalog_status",
-    "catalog_attention",
-    "provenance_json",
+    "default_acceptance_status",
+    "observation_status",
+    "observation_reason",
+    "observed_end_at",
+    "origin_key",
+    "origin_source",
+    "origin_root_key",
+    "origin_root_path",
+    "origin_table",
+    "origin_row_id",
+    "origin_event_key",
+    "origin_json",
 )
 MANUAL_GT_DATE = (2026, 5, 17)
 MANUAL_MATCH_TOLERANCE_SECONDS = 90
@@ -137,6 +133,7 @@ def main() -> None:
     compare.add_argument("--pattern", default="output_log_*.txt", help="Log glob pattern")
     compare.add_argument("--manual-gt", default=None, help="Manual ground-truth text file")
     compare.add_argument("--vrcx-db", default=None, help="Optional VRCX.sqlite3 read-only comparison source")
+    compare.add_argument("--app-db", default=None, help="Optional app DB for read-only replay-content comparison")
 
     args = parser.parse_args()
     if args.command == "baseline":
@@ -225,6 +222,11 @@ def run_compare(args) -> None:
         report.extend(_manual_gt_section(Path(args.manual_gt), output / "live.sqlite3"))
     if args.vrcx_db:
         report.extend(_vrcx_section(Path(args.vrcx_db), args.manual_gt))
+    if args.app_db:
+        app_db_section, app_db_failed = _app_db_section(Path(args.app_db), output / "live.sqlite3")
+        report.extend(app_db_section)
+        if app_db_failed:
+            failed_sections.append("app-db")
 
     (output / "diff_report.md").write_text("\n".join(report) + "\n", encoding="utf-8")
     print(
@@ -389,7 +391,7 @@ def _playback_records_diff_section(baseline: Path, output: Path) -> tuple[list[s
         baseline=baseline,
         output=output,
         rows_reader=_read_playback_record_rows,
-        key_field="source_fingerprint",
+        key_field="evidence_origin_key",
     )
 
 
@@ -461,25 +463,41 @@ def _read_live_playback_rows(db_path: Path) -> list[dict]:
 
 
 def _read_playback_record_rows(db_path: Path) -> list[dict]:
-    columns = ", ".join(PLAYBACK_RECORD_COLUMNS)
+    columns = ", ".join(
+        (
+            *(f"pr.{column}" for column in PLAYBACK_RECORD_COLUMNS if not column.startswith("origin_")),
+            "pro.origin_key",
+            "pro.origin_source",
+            "pro.origin_root_key",
+            "pro.origin_root_path",
+            "pro.origin_table",
+            "pro.origin_row_id",
+            "pro.origin_event_key",
+            "pro.origin_json",
+        )
+    )
     with closing(sqlite3.connect(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             f"""
             SELECT {columns}
-            FROM playback_records
-            WHERE source_kind = 'live_watcher'
-            ORDER BY source_fingerprint
+            FROM playback_records pr
+            JOIN playback_record_origins pro
+                ON pro.playback_record_id = pr.id
+            WHERE pr.evidence_source = 'vrc_log_live'
+                AND pro.origin_table = 'watcher_playback_events'
+            ORDER BY pr.evidence_key, pro.origin_key
             """
         ).fetchall()
     return [_decode_playback_record_row(dict(row)) for row in rows]
 
 
 def _decode_playback_record_row(row: dict) -> dict:
-    value = row.get("provenance_json")
+    row["evidence_origin_key"] = f"{row.get('evidence_key') or ''}\x1f{row.get('origin_key') or ''}"
+    value = row.get("origin_json")
     if isinstance(value, str):
         try:
-            row["provenance_json"] = json.loads(value)
+            row["origin_json"] = json.loads(value)
         except json.JSONDecodeError:
             pass
     return row
@@ -514,11 +532,20 @@ def _manual_gt_section(manual_gt: Path, db_path: Path) -> list[str]:
         playback_records = conn.execute(
             """
             SELECT played_at, dance_system_key, dance_external_id,
-                   playback_status, counts_in_history, status_reason,
-                   completion_status, completion_reason
-            FROM playback_records
-            WHERE source_kind = 'live_watcher'
-            ORDER BY played_at
+                   default_acceptance_status AS playback_status,
+                   CASE
+                       WHEN default_acceptance_status = 'accepted' THEN 1
+                       ELSE 0
+                   END AS counts_in_history,
+                   observation_reason AS status_reason,
+                   observation_status AS completion_status,
+                   observation_reason AS completion_reason
+            FROM playback_records pr
+            JOIN playback_record_origins pro
+                ON pro.playback_record_id = pr.id
+            WHERE pr.evidence_source = 'vrc_log_live'
+                AND pro.origin_table = 'watcher_playback_events'
+            ORDER BY pr.played_at
             """
         ).fetchall()
 
@@ -583,6 +610,191 @@ def _manual_gt_section(manual_gt: Path, db_path: Path) -> list[str]:
         lines.append("- unexpected: " + ", ".join(f"{row['time']} {row['external_id']}" for row in unexpected))
     lines.append("")
     return lines
+
+
+def _app_db_section(app_db: Path, replay_db: Path) -> tuple[list[str], bool]:
+    if not app_db.exists():
+        return ["## App DB", "", f"- missing app DB: {app_db}", ""], True
+    if not replay_db.exists():
+        return ["## App DB", "", f"- replay DB missing: {replay_db}", ""], True
+
+    try:
+        with closing(_connect_read_only(app_db)) as app_conn, closing(
+            _connect_read_only(replay_db)
+        ) as replay_conn:
+            app_summary = _playback_db_summary(app_conn)
+            replay_summary = _playback_db_summary(replay_conn)
+            replay_rows = _read_playback_identity_rows(
+                replay_conn,
+                evidence_source="vrc_log_live",
+                origin_table="watcher_playback_events",
+            )
+            app_replay_rows = _read_playback_identity_rows(
+                app_conn,
+                evidence_source="vrc_log_replay",
+                origin_table=None,
+            )
+            app_live_rows = _read_playback_identity_rows(
+                app_conn,
+                evidence_source="vrc_log_live",
+                origin_table="watcher_playback_events",
+            )
+    except sqlite3.Error as exc:
+        return ["## App DB", "", f"- app DB read failed: {exc}", ""], True
+
+    replay_compare = _playback_identity_compare(replay_rows, app_replay_rows)
+    live_compare = _playback_identity_compare(replay_rows, app_live_rows)
+    failed = app_summary["quick_check"] != "ok" or replay_summary["quick_check"] != "ok"
+    if (
+        replay_compare["common"] == len(replay_rows)
+        and replay_compare["existing_rows"] == len(replay_rows)
+        and (
+            replay_compare["missing"]
+            or replay_compare["extra"]
+            or replay_compare["status_mismatches"]
+            or replay_compare["requester_regressions"]
+        )
+    ):
+        failed = True
+
+    lines = [
+        "## App DB",
+        "",
+        f"- app DB: {app_db}",
+        f"- app quick_check: {app_summary['quick_check']}",
+        f"- app playback_records/origins: {app_summary['records']}/{app_summary['origins']}",
+        f"- app records without origin: {app_summary['records_without_origin']}",
+        f"- replay quick_check: {replay_summary['quick_check']}",
+        f"- replay playback_records/origins: {replay_summary['records']}/{replay_summary['origins']}",
+        f"- replay records without origin: {replay_summary['records_without_origin']}",
+        (
+            "- compare replay output to existing vrc_log_replay: "
+            + _playback_compare_summary(replay_compare)
+        ),
+        (
+            "- compare replay output to existing vrc_log_live watcher origins: "
+            + _playback_compare_summary(live_compare)
+        ),
+    ]
+    for label, compare in (
+        ("vrc_log_replay missing samples", replay_compare),
+        ("vrc_log_live missing samples", live_compare),
+    ):
+        if compare["missing_samples"]:
+            lines.append(f"- {label}: {_identity_sample_summary(compare['missing_samples'])}")
+    lines.append("")
+    return lines, failed
+
+
+def _connect_read_only(path: Path) -> sqlite3.Connection:
+    conn = sqlite3.connect(f"file:{path.resolve().as_posix()}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _playback_db_summary(conn: sqlite3.Connection) -> dict[str, object]:
+    return {
+        "quick_check": conn.execute("PRAGMA quick_check").fetchone()[0],
+        "records": conn.execute("SELECT COUNT(*) FROM playback_records").fetchone()[0],
+        "origins": conn.execute("SELECT COUNT(*) FROM playback_record_origins").fetchone()[0],
+        "records_without_origin": conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM playback_records pr
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM playback_record_origins pro
+                WHERE pro.playback_record_id = pr.id
+            )
+            """
+        ).fetchone()[0],
+    }
+
+
+def _read_playback_identity_rows(
+    conn: sqlite3.Connection,
+    *,
+    evidence_source: str,
+    origin_table: str | None,
+) -> list[dict]:
+    where = ["pr.evidence_source = ?"]
+    params: list[object] = [evidence_source]
+    if origin_table is not None:
+        where.append("pro.origin_table = ?")
+        params.append(origin_table)
+    rows = conn.execute(
+        f"""
+        SELECT
+            pr.played_at,
+            pr.dance_system_key,
+            pr.dance_external_id,
+            pr.default_acceptance_status,
+            pr.observation_status,
+            pr.requester_user_id
+        FROM playback_records pr
+        JOIN playback_record_origins pro
+            ON pro.playback_record_id = pr.id
+        WHERE {" AND ".join(where)}
+        ORDER BY pr.played_at, pr.dance_system_key, pr.dance_external_id
+        """,
+        params,
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _playback_identity_compare(
+    replay_rows: list[dict],
+    existing_rows: list[dict],
+) -> dict[str, object]:
+    replay_by_key = {_playback_identity_key(row): row for row in replay_rows}
+    existing_by_key = {_playback_identity_key(row): row for row in existing_rows}
+    replay_keys = set(replay_by_key)
+    existing_keys = set(existing_by_key)
+    common = replay_keys & existing_keys
+    missing = sorted(replay_keys - existing_keys)
+    extra = sorted(existing_keys - replay_keys)
+    status_mismatches = 0
+    requester_regressions = 0
+    for key in common:
+        replay = replay_by_key[key]
+        existing = existing_by_key[key]
+        if (
+            replay["default_acceptance_status"],
+            replay["observation_status"],
+        ) != (
+            existing["default_acceptance_status"],
+            existing["observation_status"],
+        ):
+            status_mismatches += 1
+        if replay["requester_user_id"] and not existing["requester_user_id"]:
+            requester_regressions += 1
+    return {
+        "replay_rows": len(replay_rows),
+        "existing_rows": len(existing_rows),
+        "common": len(common),
+        "missing": len(missing),
+        "extra": len(extra),
+        "status_mismatches": status_mismatches,
+        "requester_regressions": requester_regressions,
+        "missing_samples": missing[:5],
+    }
+
+
+def _playback_identity_key(row: dict) -> tuple[object, object, object]:
+    return (row["dance_system_key"], row["dance_external_id"], row["played_at"])
+
+
+def _playback_compare_summary(compare: dict[str, object]) -> str:
+    return (
+        f"replay={compare['replay_rows']} existing={compare['existing_rows']} "
+        f"common={compare['common']} missing={compare['missing']} extra={compare['extra']} "
+        f"status_mismatches={compare['status_mismatches']} "
+        f"requester_regressions={compare['requester_regressions']}"
+    )
+
+
+def _identity_sample_summary(samples: list[tuple[object, object, object]]) -> str:
+    return ", ".join(f"{system}:{external}@{played_at}" for system, external, played_at in samples)
 
 
 def _vrcx_section(vrcx_db: Path, manual_gt: str | None) -> list[str]:

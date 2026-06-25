@@ -25,8 +25,12 @@ from dancing_log.playback_projection import (
 from dancing_log.playback_evidence import read_timeline_playback_rows
 from dancing_log.playback_record_writer import (
     PROJECT_SOURCE_ROOT_KEY,
+    PROJECT_SOURCE_ROOT_PATH,
+    PlaybackRecordOriginWrite,
     PlaybackRecordWrite,
-    upsert_playback_record,
+    origin_key,
+    playback_evidence_key,
+    upsert_evidence_record,
 )
 from dancing_log.rebuild import archive_existing_data
 from dancing_log.storage import (
@@ -54,6 +58,73 @@ from tests.playback_record_helpers import insert_playback_record
 
 
 ISO_UTC_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
+
+
+def make_test_playback_record(
+    *,
+    played_at: str,
+    original_played_at: str,
+    dance_track_id: int | None,
+    dance_system_key: str,
+    dance_external_id: str,
+    evidence_source: str,
+    source_table: str,
+    source_row_id: int,
+    source_event_key: str,
+    request_type: str | None,
+    default_acceptance_status: str = "accepted",
+    requester_display_name: str | None = None,
+    requester_user_id: str | None = None,
+    observation_status: str | None = None,
+    observation_reason: str | None = None,
+    observed_end_at: str | None = None,
+    video_url: str | None = None,
+    video_name: str | None = None,
+    origin_source: str | None = None,
+    origin_json: dict | None = None,
+) -> PlaybackRecordWrite:
+    payload = {"original_played_at": original_played_at}
+    if origin_json:
+        payload.update(origin_json)
+    return PlaybackRecordWrite(
+        evidence_key=playback_evidence_key(
+            PROJECT_SOURCE_ROOT_KEY,
+            source_table,
+            source_row_id,
+            source_event_key,
+        ),
+        evidence_source=evidence_source,
+        played_at=played_at,
+        dance_track_id=dance_track_id,
+        dance_system_key=dance_system_key,
+        dance_external_id=dance_external_id,
+        request_type=request_type,
+        default_acceptance_status=default_acceptance_status,
+        requester_display_name=requester_display_name,
+        requester_user_id=requester_user_id,
+        observation_status=observation_status,
+        observation_reason=observation_reason,
+        observed_end_at=observed_end_at,
+        video_url=video_url,
+        video_name=video_name,
+        origins=(
+            PlaybackRecordOriginWrite(
+                origin_key=origin_key(
+                    PROJECT_SOURCE_ROOT_KEY,
+                    source_table,
+                    source_row_id,
+                    source_event_key,
+                ),
+                origin_source=origin_source or evidence_source,
+                origin_root_key=PROJECT_SOURCE_ROOT_KEY,
+                origin_root_path=PROJECT_SOURCE_ROOT_PATH,
+                origin_table=source_table,
+                origin_row_id=source_row_id,
+                origin_event_key=source_event_key,
+                origin_json=payload,
+            ),
+        ),
+    )
 
 
 def favorite_map(db_path: Path | str) -> dict[tuple[str, str], int]:
@@ -389,25 +460,22 @@ class SQLiteRuntimeTest(unittest.TestCase):
                     "5038",
                     {"title": "Existing Live Evidence"},
                 )
-                existing = upsert_playback_record(
+                existing = upsert_evidence_record(
                     conn,
-                    PlaybackRecordWrite(
+                    make_test_playback_record(
                         played_at=event["actual_play_at"],
                         original_played_at=event["actual_play_at"],
                         dance_track_id=track_id,
                         dance_system_key=WANNA_SYSTEM_KEY,
                         dance_external_id="5038",
-                        source_kind="live_watcher",
+                        evidence_source="vrc_log_live",
                         source_table="live_playback_events",
                         source_row_id=live_row_id,
                         source_event_key=live_key,
-                        status_reason="observed_completion_threshold",
-                        source_priority=30,
-                        confidence=1.0,
-                        event_source="vrc_log_live",
-                        source_type="player",
-                        completion_status="completed",
-                        completion_reason="observed_completion_threshold",
+                        request_type="player",
+                        observation_status="completed",
+                        observation_reason="observed_completion_threshold",
+                        origin_source="vrchat_log",
                     ),
                 )
                 self.assertTrue(
@@ -438,33 +506,29 @@ class SQLiteRuntimeTest(unittest.TestCase):
             db_path = Path(tmp) / "app.sqlite3"
             with connect_db(db_path) as conn:
                 track_id = ensure_dance_track(conn, WANNA_SYSTEM_KEY, "5038")
-                record = PlaybackRecordWrite(
+                record = make_test_playback_record(
                     played_at="2026-04-17T20:30:00+08:00",
                     original_played_at="2026-04-17T20:30:00+08:00",
                     dance_track_id=track_id,
                     dance_system_key=WANNA_SYSTEM_KEY,
                     dance_external_id="5038",
-                    source_kind="manual_log",
+                    evidence_source="manual_log",
                     source_table="manual_log",
                     source_row_id=0,
                     source_event_key="manual-event",
-                    status_reason="manual",
-                    source_priority=40,
-                    confidence=1.0,
-                    event_source="manual",
-                    source_type="self",
-                    provenance={"manual_log": {"note": "first"}},
+                    request_type="self",
+                    origin_source="manual_log",
+                    origin_json={"manual_log": {"note": "first"}},
                 )
 
-                inserted = upsert_playback_record(conn, record)
-                unchanged = upsert_playback_record(conn, record)
-                changed = upsert_playback_record(
+                inserted = upsert_evidence_record(conn, record)
+                unchanged = upsert_evidence_record(conn, record)
+                changed = upsert_evidence_record(
                     conn,
                     PlaybackRecordWrite(
                         **{
                             **record.__dict__,
-                            "source_type": "queued_self",
-                            "provenance": {"manual_log": {"note": "first"}},
+                            "request_type": "queued_self",
                         }
                     ),
                 )
@@ -481,23 +545,20 @@ class SQLiteRuntimeTest(unittest.TestCase):
             db_path = Path(tmp) / "app.sqlite3"
             with connect_db(db_path) as conn:
                 track_id = ensure_dance_track(conn, WANNA_SYSTEM_KEY, "5038")
-                upsert_playback_record(
+                upsert_evidence_record(
                     conn,
-                    PlaybackRecordWrite(
+                    make_test_playback_record(
                         played_at="2026.05.17 15:30:10",
                         original_played_at="2026.05.17 15:30:10",
                         dance_track_id=track_id,
                         dance_system_key=WANNA_SYSTEM_KEY,
                         dance_external_id="5038",
-                        source_kind="live_watcher",
+                        evidence_source="vrc_log_live",
                         source_table="watcher_playback_events",
                         source_row_id=0,
                         source_event_key="watcher-event",
-                        status_reason="observed_completion_threshold",
-                        source_priority=30,
-                        confidence=1.0,
-                        event_source="vrc_log_live",
-                        source_type="player",
+                        request_type="player",
+                        origin_source="vrchat_log",
                     ),
                 )
                 row = conn.execute("SELECT * FROM playback_records").fetchone()
@@ -559,23 +620,20 @@ class SQLiteRuntimeTest(unittest.TestCase):
             db_path = Path(tmp) / "app.sqlite3"
             with connect_db(db_path) as conn:
                 track_id = ensure_dance_track(conn, WANNA_SYSTEM_KEY, "5038")
-                result = upsert_playback_record(
+                result = upsert_evidence_record(
                     conn,
-                    PlaybackRecordWrite(
+                    make_test_playback_record(
                         played_at="2026-05-17T07:30:10Z",
                         original_played_at="2026.05.17 15:30:10",
                         dance_track_id=track_id,
                         dance_system_key=WANNA_SYSTEM_KEY,
                         dance_external_id="5038",
-                        source_kind="live_watcher",
+                        evidence_source="vrc_log_live",
                         source_table="watcher_playback_events",
                         source_row_id=0,
                         source_event_key="watcher-event",
-                        status_reason="observed_completion_threshold",
-                        source_priority=30,
-                        confidence=1.0,
-                        event_source="vrc_log_live",
-                        source_type="player",
+                        request_type="player",
+                        origin_source="vrchat_log",
                     ),
                 )
                 conn.execute(
@@ -1265,29 +1323,29 @@ class SQLiteRuntimeTest(unittest.TestCase):
                     (created_at, track_id, event_key, video_url, "Song Name", "wrld_1"),
                 )
                 legacy_event_id = int(legacy_cursor.lastrowid)
-                existing = upsert_playback_record(
+                existing = upsert_evidence_record(
                     conn,
-                    PlaybackRecordWrite(
+                    make_test_playback_record(
                         played_at=created_at,
                         original_played_at=created_at,
                         dance_track_id=track_id,
                         dance_system_key=WANNA_SYSTEM_KEY,
                         dance_external_id="3114",
-                        source_kind="vrcx_history",
+                        evidence_source="vrcx_history",
                         source_table="dance_events",
                         source_row_id=legacy_event_id,
                         source_event_key=event_key,
-                        status_reason="vrcx_import",
-                        source_priority=10,
-                        confidence=0.7,
-                        event_source="vrcx",
-                        source_type="random",
-                        source_display_name="",
+                        request_type="random",
                         video_url=video_url,
                         video_name="Song Name",
                         requester_display_name="",
                         requester_user_id="",
-                        location="wrld_1",
+                        origin_source="vrcx_database",
+                        origin_json={
+                            "vrcx_location": "wrld_1",
+                            "legacy_confidence": 0.7,
+                            "legacy_status_reason": "vrcx_import",
+                        },
                     ),
                 )
                 conn.commit()
@@ -1357,7 +1415,7 @@ class SQLiteRuntimeTest(unittest.TestCase):
             self.assertEqual(origin_json["original_played_at"], raw_created_at)
             self.assertEqual(origin_json["source_created_at"], raw_created_at)
 
-    def test_vrcx_import_preserves_queued_self_source_type_on_reimport(self):
+    def test_vrcx_import_keeps_request_type_while_queued_self_deferred(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             vrcx_path = root / "VRCX.sqlite3"
@@ -1408,10 +1466,20 @@ class SQLiteRuntimeTest(unittest.TestCase):
                 row = conn.execute(
                     "SELECT request_type FROM playback_records"
                 ).fetchone()
+                origins = conn.execute(
+                    """
+                    SELECT origin_source, origin_table, origin_json
+                    FROM playback_record_origins
+                    ORDER BY origin_source, origin_table
+                    """
+                ).fetchall()
 
-            self.assertEqual(queued_stats.existing_records_updated, 1)
+            self.assertEqual(queued_stats.matched_entries, 1)
+            self.assertEqual(queued_stats.existing_records_updated, 0)
             self.assertEqual(reimport_stats.playback_records_changed, 0)
-            self.assertEqual(row["request_type"], "queued_self")
+            self.assertEqual(row["request_type"], "random")
+            origin_sources = {origin["origin_source"] for origin in origins}
+            self.assertEqual(origin_sources, {"vrcx_database"})
 
     def test_queued_self_uses_cli_system_for_bare_track_refs(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1450,9 +1518,10 @@ class SQLiteRuntimeTest(unittest.TestCase):
             self.assertEqual(stats.entries_without_track_ref, 0)
             self.assertEqual(stats.matched_entries, 1)
             self.assertEqual(stats.unmatched_entries, 1)
+            self.assertEqual(stats.existing_records_updated, 0)
             with connect_db(db_path) as conn:
                 source = conn.execute("SELECT request_type FROM playback_records").fetchone()[0]
-            self.assertEqual(source, "queued_self")
+            self.assertEqual(source, "other")
 
     def test_queued_self_matches_iso_playback_by_configured_local_date(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1482,18 +1551,26 @@ class SQLiteRuntimeTest(unittest.TestCase):
             with connect_db(db_path) as conn:
                 row = conn.execute(
                     """
-                    SELECT pr.played_at, pr.request_type, pro.origin_json
-                    FROM playback_records pr
-                    JOIN playback_record_origins pro
-                        ON pro.playback_record_id = pr.id
+                    SELECT played_at, request_type
+                    FROM playback_records
                     """
                 ).fetchone()
+                origins = conn.execute(
+                    """
+                    SELECT origin_source, origin_json
+                    FROM playback_record_origins
+                    ORDER BY origin_source
+                    """
+                ).fetchall()
 
-            self.assertEqual(stats.existing_records_updated, 1)
-            origin_json = json.loads(row["origin_json"])
+            self.assertEqual(stats.matched_entries, 1)
+            self.assertEqual(stats.existing_records_updated, 0)
             self.assertEqual(row["played_at"], "2026-05-17T16:22:59Z")
-            self.assertEqual(origin_json["original_played_at"], "2026.05.18 00:22:59")
-            self.assertEqual(row["request_type"], "queued_self")
+            self.assertEqual(row["request_type"], "other")
+            origins_by_source = {origin["origin_source"]: origin for origin in origins}
+            manual_json = json.loads(origins_by_source["manual_log"]["origin_json"])
+            self.assertEqual(set(origins_by_source), {"manual_log"})
+            self.assertEqual(manual_json["original_played_at"], "2026.05.18 00:22:59")
 
     def test_archive_existing_data_keeps_config_and_manifest_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1524,25 +1601,24 @@ class SQLiteRuntimeTest(unittest.TestCase):
                     dance_track_id=track_id,
                     dance_system_key=WANNA_SYSTEM_KEY,
                     dance_external_id="3114",
-                    source_kind="live_watcher",
+                    evidence_source="vrc_log_live",
                     source_table=WATCHER_PLAYBACK_SOURCE_TABLE,
                     source_row_id=0,
                     source_event_key="watcher-event-key",
-                    status_reason=WATCHER_PENDING_REASON,
-                    source_priority=30,
-                    confidence=1.0,
-                    event_source="vrc_log_live",
-                    source_type="player",
-                    source_display_name="Alice",
+                    request_type="player",
+                    default_acceptance_status="pending",
+                    observation_status="pending",
+                    observation_reason=WATCHER_PENDING_REASON,
                     requester_display_name="Alice",
+                    origin_source="vrchat_log",
                 )
-                upsert_playback_record(
+                upsert_evidence_record(
                     conn,
-                    PlaybackRecordWrite(
+                    make_test_playback_record(
                         **base,
                         video_name="Original Title",
                         requester_user_id="usr_alice",
-                        provenance={
+                        origin_json={
                             "watcher_playback_event": {
                                 "event_key": "watcher-event-key",
                                 "video_name": "Original Title",
@@ -1552,13 +1628,13 @@ class SQLiteRuntimeTest(unittest.TestCase):
                         },
                     ),
                 )
-                upsert_playback_record(
+                upsert_evidence_record(
                     conn,
-                    PlaybackRecordWrite(
+                    make_test_playback_record(
                         **base,
                         video_name="Updated Title",
                         requester_user_id="usr_bob",
-                        provenance={
+                        origin_json={
                             "watcher_playback_event": {
                                 "event_key": "watcher-event-key",
                                 "video_name": "Updated Title",
@@ -1568,13 +1644,13 @@ class SQLiteRuntimeTest(unittest.TestCase):
                         },
                     ),
                 )
-                upsert_playback_record(
+                upsert_evidence_record(
                     conn,
-                    PlaybackRecordWrite(
+                    make_test_playback_record(
                         **base,
                         video_name="Final Title",
                         requester_user_id=None,
-                        provenance={
+                        origin_json={
                             "watcher_playback_event": {
                                 "event_key": "watcher-event-key",
                                 "video_name": "Final Title",

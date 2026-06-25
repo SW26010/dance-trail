@@ -10,8 +10,6 @@ import sqlite3
 
 from dancing_log.app_paths import QUEUED_SELF_DIR
 from dancing_log.storage import connect_db
-from dancing_log.time_utils import SQLITE_UTC_NOW
-from dancing_log.vrcx_importer import SOURCE_TYPE_PRECEDENCE_SQL
 
 
 SOURCE_QUEUED_SELF = "queued_self"
@@ -196,7 +194,8 @@ def sync_queued_self_manifests(
                 continue
 
             matched_entries += 1
-            existing_updates += _promote_existing_record(conn, entry)
+            # Request-type promotion is intentionally deferred; keep manifest
+            # matching active so the future seam can reuse this boundary.
 
         conn.commit()
 
@@ -210,39 +209,6 @@ def sync_queued_self_manifests(
         existing_records_updated=existing_updates,
         stale_manifest_records_deleted=deleted,
     )
-
-
-def _promote_existing_record(conn: sqlite3.Connection, entry: QueuedSelfEntry) -> int:
-    cursor = conn.execute(
-        """
-        UPDATE playback_records
-        SET
-            request_type = ?,
-            updated_at = """ + SQLITE_UTC_NOW + """
-        WHERE
-            dance_track_id IN (
-                SELECT dt.id
-                FROM dance_tracks dt
-                JOIN dance_systems ds ON ds.id = dt.system_id
-                WHERE ds.key = ? AND dt.external_id = ?
-            )
-            AND """ + _played_at_local_date_sql("played_at") + """ = ?
-            AND default_acceptance_status = 'accepted'
-            AND (
-                request_type IS NULL
-                OR """ + SOURCE_TYPE_PRECEDENCE_SQL.format(column="request_type") + """
-                < """ + SOURCE_TYPE_PRECEDENCE_SQL.format(column="?") + """
-            )
-        """,
-        (
-            SOURCE_QUEUED_SELF,
-            entry.system_key,
-            entry.external_id,
-            entry.played_date.isoformat(),
-            SOURCE_QUEUED_SELF,
-        ),
-    )
-    return cursor.rowcount
 
 
 def _matching_existing_record_count(

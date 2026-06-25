@@ -1,6 +1,7 @@
 import unittest
 
 from dancing_log.watcher_playback_materializer import (
+    WATCHER_PLAYBACK_EVENT_SOURCE,
     WATCHER_PLAYBACK_SOURCE_TABLE,
     watcher_playback_record,
 )
@@ -20,16 +21,22 @@ class WatcherPlaybackMaterializerModuleTest(unittest.TestCase):
             source_event_key="watcher-event-key",
             dance_track_id=1,
             playback_status="accepted",
-            counts_in_history=1,
             status_reason="observed_completion_threshold",
             completion_status="completed",
             completion_reason="observed_completion_threshold",
         )
 
         self.assertIsNotNone(record)
-        self.assertEqual(record.source_table, WATCHER_PLAYBACK_SOURCE_TABLE)
+        self.assertEqual(record.evidence_source, WATCHER_PLAYBACK_EVENT_SOURCE)
         self.assertEqual(record.requester_display_name, "Alice")
         self.assertEqual(record.requester_user_id, "usr_alice")
+        origin = record.origins[0]
+        self.assertEqual(origin.origin_source, "vrchat_log")
+        self.assertEqual(origin.origin_table, WATCHER_PLAYBACK_SOURCE_TABLE)
+        self.assertEqual(
+            origin.origin_json["watcher_playback_event"]["requester_user_id"],
+            "usr_alice",
+        )
 
 
 if __name__ == "__main__":

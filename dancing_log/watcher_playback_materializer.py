@@ -11,7 +11,14 @@ from dancing_log.playback_evidence import (
     PLAYBACK_STATUS_NEEDS_ATTENTION,
     PLAYBACK_STATUS_PENDING,
 )
-from dancing_log.playback_record_writer import PlaybackRecordWrite
+from dancing_log.playback_record_writer import (
+    PROJECT_SOURCE_ROOT_KEY,
+    PROJECT_SOURCE_ROOT_PATH,
+    PlaybackRecordOriginWrite,
+    PlaybackRecordWrite,
+    origin_key,
+    playback_evidence_key,
+)
 
 
 WATCHER_PLAYBACK_SOURCE_TABLE = "watcher_playback_events"
@@ -52,7 +59,6 @@ def pending_watcher_playback_record(
         source_event_key=source_event_key,
         dance_track_id=dance_track_id,
         playback_status=PLAYBACK_STATUS_PENDING,
-        counts_in_history=0,
         status_reason=WATCHER_PENDING_REASON,
         completion_status="pending",
         completion_reason=None,
@@ -72,7 +78,6 @@ def accepted_watcher_playback_record(
         source_event_key=source_event_key,
         dance_track_id=dance_track_id,
         playback_status=PLAYBACK_STATUS_ACCEPTED,
-        counts_in_history=1,
         status_reason=reason,
         completion_status="completed",
         completion_reason=reason,
@@ -92,7 +97,6 @@ def attention_watcher_playback_record(
         source_event_key=source_event_key,
         dance_track_id=dance_track_id,
         playback_status=PLAYBACK_STATUS_NEEDS_ATTENTION,
-        counts_in_history=0,
         status_reason=reason,
         completion_status="interrupted",
         completion_reason=reason,
@@ -105,7 +109,6 @@ def watcher_playback_record(
     source_event_key: str,
     dance_track_id: int | None,
     playback_status: str,
-    counts_in_history: int,
     status_reason: str,
     completion_status: str | None,
     completion_reason: str | None,
@@ -122,31 +125,51 @@ def watcher_playback_record(
 
     display_name = event.get("source_display_name") or event.get("display_name")
     return PlaybackRecordWrite(
+        evidence_key=playback_evidence_key(
+            PROJECT_SOURCE_ROOT_KEY,
+            WATCHER_PLAYBACK_SOURCE_TABLE,
+            0,
+            source_event_key,
+        ),
+        evidence_source=WATCHER_PLAYBACK_EVENT_SOURCE,
         played_at=played_at,
-        original_played_at=played_at,
         dance_track_id=dance_track_id,
         dance_system_key=system_key,
         dance_external_id=external_id,
-        source_kind=WATCHER_PLAYBACK_SOURCE_KIND,
-        source_table=WATCHER_PLAYBACK_SOURCE_TABLE,
-        source_row_id=0,
-        source_event_key=source_event_key,
-        playback_status=playback_status,
-        counts_in_history=counts_in_history,
-        status_reason=status_reason,
-        source_priority=WATCHER_SOURCE_PRIORITY,
-        confidence=1.0,
-        event_source=WATCHER_PLAYBACK_EVENT_SOURCE,
-        source_type=event.get("source_type"),
-        source_display_name=display_name,
-        video_url=event.get("video_url") or event.get("resolved_url") or event.get("routed_url"),
-        video_name=event.get("video_name"),
+        request_type=event.get("source_type"),
+        default_acceptance_status=playback_status,
         requester_display_name=display_name,
         requester_user_id=event.get("requester_user_id"),
-        completion_status=completion_status,
-        completion_reason=completion_reason,
+        observation_status=completion_status,
+        observation_reason=completion_reason,
         observed_end_at=event.get("completed_at") or event.get("interrupted_at"),
-        provenance={"watcher_playback_event": dict(event)},
+        video_url=event.get("video_url") or event.get("resolved_url") or event.get("routed_url"),
+        video_name=event.get("video_name"),
+        origins=(
+            PlaybackRecordOriginWrite(
+                origin_key=origin_key(
+                    PROJECT_SOURCE_ROOT_KEY,
+                    WATCHER_PLAYBACK_SOURCE_TABLE,
+                    0,
+                    source_event_key,
+                ),
+                origin_source="vrchat_log",
+                origin_root_key=PROJECT_SOURCE_ROOT_KEY,
+                origin_root_path=PROJECT_SOURCE_ROOT_PATH,
+                origin_table=WATCHER_PLAYBACK_SOURCE_TABLE,
+                origin_row_id=0,
+                origin_event_key=source_event_key,
+                origin_json={
+                    "original_played_at": played_at,
+                    "source_display_name": display_name,
+                    "legacy_status_reason": status_reason,
+                    "legacy_source_priority": WATCHER_SOURCE_PRIORITY,
+                    "legacy_confidence": 1.0,
+                    "legacy_catalog_status": "existing",
+                    "watcher_playback_event": dict(event),
+                },
+            ),
+        ),
     )
 
 
