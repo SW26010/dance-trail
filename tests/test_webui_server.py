@@ -842,7 +842,7 @@ class WebUiServerTest(unittest.TestCase):
             )
             self.assertEqual(
                 insights["attention_counts"],
-                {"needs_attention": 1, "catalog_attention": 1},
+                {"needs_attention": 1, "catalog_attention": 0},
             )
             recommendation_counts = {
                 row["external_id"]: row["_dance_count"]

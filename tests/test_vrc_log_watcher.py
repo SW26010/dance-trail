@@ -989,12 +989,11 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertEqual(event_count, 0)
             self.assertEqual(playback_count, 2)
             self.assertEqual(live_count, 0)
-            self.assertEqual(accepted_row["playback_status"], "accepted")
-            self.assertEqual(accepted_row["counts_in_history"], 1)
-            self.assertEqual(accepted_row["completion_status"], "completed")
-            self.assertEqual(accepted_row["status_reason"], "observed_completion_threshold")
-            self.assertEqual(attention_row["playback_status"], "needs_attention")
-            self.assertEqual(attention_row["status_reason"], "watcher_stopped")
+            self.assertEqual(accepted_row["default_acceptance_status"], "accepted")
+            self.assertEqual(accepted_row["observation_status"], "completed")
+            self.assertEqual(accepted_row["observation_reason"], "observed_completion_threshold")
+            self.assertEqual(attention_row["default_acceptance_status"], "needs_attention")
+            self.assertEqual(attention_row["observation_reason"], "watcher_stopped")
 
     def test_watcher_uses_wanna_play_video_duration_for_live_overlay_state(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1093,9 +1092,9 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertEqual(event_count, 0)
             self.assertEqual(playback_count, 2)
             self.assertEqual(live_count, 0)
-            self.assertEqual(accepted_row["playback_status"], "accepted")
-            self.assertEqual(accepted_row["completion_status"], "completed")
-            self.assertEqual(accepted_row["completion_reason"], "observed_completion_threshold")
+            self.assertEqual(accepted_row["default_acceptance_status"], "accepted")
+            self.assertEqual(accepted_row["observation_status"], "completed")
+            self.assertEqual(accepted_row["observation_reason"], "observed_completion_threshold")
 
     def test_watcher_does_not_promote_wanna_room_leave_before_metadata_duration(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1137,10 +1136,9 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertEqual(event_count, 0)
             self.assertEqual(playback_count, 1)
             self.assertEqual(live_count, 0)
-            self.assertEqual(playback_row["playback_status"], "needs_attention")
-            self.assertEqual(playback_row["counts_in_history"], 0)
-            self.assertEqual(playback_row["completion_status"], "interrupted")
-            self.assertEqual(playback_row["completion_reason"], "room_left")
+            self.assertEqual(playback_row["default_acceptance_status"], "needs_attention")
+            self.assertEqual(playback_row["observation_status"], "interrupted")
+            self.assertEqual(playback_row["observation_reason"], "room_left")
 
     def test_watcher_live_db_updates_without_playback_records_when_experimental_only(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1220,9 +1218,9 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertEqual(event_count, 0)
             self.assertEqual(playback_count, 1)
             self.assertEqual(live_count, 0)
-            self.assertEqual(playback_row["playback_status"], "needs_attention")
-            self.assertEqual(playback_row["completion_status"], "interrupted")
-            self.assertEqual(playback_row["completion_reason"], "watcher_stopped")
+            self.assertEqual(playback_row["default_acceptance_status"], "needs_attention")
+            self.assertEqual(playback_row["observation_status"], "interrupted")
+            self.assertEqual(playback_row["observation_reason"], "watcher_stopped")
 
     def test_watcher_starts_new_occurrence_after_room_left_for_same_song(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1314,8 +1312,8 @@ class VrcLogWatcherTest(unittest.TestCase):
                 playback_count = conn.execute("SELECT count(*) FROM playback_records").fetchone()[0]
                 rows = conn.execute(
                     """
-                    SELECT dance_external_id, playback_status, counts_in_history,
-                           completion_status, completion_reason
+                    SELECT dance_external_id, default_acceptance_status,
+                           observation_status, observation_reason
                     FROM playback_records
                     ORDER BY dance_external_id
                     """
@@ -1325,13 +1323,12 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertEqual(playback_count, 2)
             self.assertEqual(live_count, 0)
             by_id = {row["dance_external_id"]: row for row in rows}
-            self.assertEqual(by_id["3114"]["playback_status"], "needs_attention")
-            self.assertEqual(by_id["3114"]["counts_in_history"], 0)
-            self.assertEqual(by_id["3114"]["completion_status"], "interrupted")
-            self.assertEqual(by_id["3114"]["completion_reason"], "superseded_before_completion")
-            self.assertEqual(by_id["5038"]["playback_status"], "needs_attention")
-            self.assertEqual(by_id["5038"]["completion_status"], "interrupted")
-            self.assertEqual(by_id["5038"]["completion_reason"], "watcher_stopped")
+            self.assertEqual(by_id["3114"]["default_acceptance_status"], "needs_attention")
+            self.assertEqual(by_id["3114"]["observation_status"], "interrupted")
+            self.assertEqual(by_id["3114"]["observation_reason"], "superseded_before_completion")
+            self.assertEqual(by_id["5038"]["default_acceptance_status"], "needs_attention")
+            self.assertEqual(by_id["5038"]["observation_status"], "interrupted")
+            self.assertEqual(by_id["5038"]["observation_reason"], "watcher_stopped")
 
     def test_watcher_marks_mid_play_needs_attention_on_graceful_stop(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1367,10 +1364,9 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertEqual(event_count, 0)
             self.assertEqual(playback_count, 1)
             self.assertEqual(live_count, 0)
-            self.assertEqual(playback_row["playback_status"], "needs_attention")
-            self.assertEqual(playback_row["counts_in_history"], 0)
-            self.assertEqual(playback_row["completion_status"], "interrupted")
-            self.assertEqual(playback_row["completion_reason"], "observed_mid_play")
+            self.assertEqual(playback_row["default_acceptance_status"], "needs_attention")
+            self.assertEqual(playback_row["observation_status"], "interrupted")
+            self.assertEqual(playback_row["observation_reason"], "observed_mid_play")
 
     def test_watcher_enriches_requester_user_id_from_active_room_mapping(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1534,7 +1530,7 @@ class VrcLogWatcherTest(unittest.TestCase):
             with connect_db(db_path) as conn:
                 row = conn.execute("SELECT * FROM playback_records").fetchone()
             self.assertEqual(row["requester_user_id"], "usr_alice")
-            self.assertEqual(row["completion_status"], "interrupted")
+            self.assertEqual(row["observation_status"], "interrupted")
 
 
 if __name__ == "__main__":

@@ -141,18 +141,7 @@ def effective_playback_status_sql(conn: sqlite3.Connection) -> str:
 
 def default_playback_status_sql() -> str:
     """Return SQL for the evidence-derived state before manual overlay."""
-    return f"""
-            CASE
-                WHEN pr.playback_status = '{EFFECTIVE_PLAYBACK_ACCEPTED}'
-                    AND pr.counts_in_history = 1
-                    THEN '{EFFECTIVE_PLAYBACK_ACCEPTED}'
-                WHEN pr.playback_status = '{EFFECTIVE_PLAYBACK_NEEDS_ATTENTION}'
-                    THEN '{EFFECTIVE_PLAYBACK_NEEDS_ATTENTION}'
-                WHEN pr.playback_status = '{EFFECTIVE_PLAYBACK_PENDING}'
-                    THEN '{EFFECTIVE_PLAYBACK_PENDING}'
-                ELSE '{EFFECTIVE_PLAYBACK_EXCLUDED}'
-            END
-        """
+    return "pr.default_acceptance_status"
 
 
 def manual_decision_status_sql(conn: sqlite3.Connection) -> str:

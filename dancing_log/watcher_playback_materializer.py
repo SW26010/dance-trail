@@ -145,6 +145,7 @@ def watcher_playback_record(
         requester_user_id=event.get("requester_user_id"),
         completion_status=completion_status,
         completion_reason=completion_reason,
+        observed_end_at=event.get("completed_at") or event.get("interrupted_at"),
         provenance={"watcher_playback_event": dict(event)},
     )
 

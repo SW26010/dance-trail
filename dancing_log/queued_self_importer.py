@@ -10,11 +10,11 @@ import sqlite3
 
 from dancing_log.app_paths import QUEUED_SELF_DIR
 from dancing_log.storage import connect_db
+from dancing_log.time_utils import SQLITE_UTC_NOW
 from dancing_log.vrcx_importer import SOURCE_TYPE_PRECEDENCE_SQL
 
 
 SOURCE_QUEUED_SELF = "queued_self"
-EVENT_SOURCE = "queued_self_manifest"
 LOCAL_PLAYED_DATE_OFFSET_SQL = "'+8 hours'"
 
 DATE_RE = re.compile(r"^\s*#*\s*(\d{4}-\d{2}-\d{2})\s*$")
@@ -179,10 +179,7 @@ def sync_queued_self_manifests(
     entries = load_queued_self_entries(root, default_system_key=system_key)
 
     with connect_db(app_db_path) as conn:
-        deleted = conn.execute(
-            "DELETE FROM playback_records WHERE event_source = ?",
-            (EVENT_SOURCE,),
-        ).rowcount
+        deleted = 0
 
         matched_entries = 0
         unmatched_entries = 0
@@ -220,8 +217,8 @@ def _promote_existing_record(conn: sqlite3.Connection, entry: QueuedSelfEntry) -
         """
         UPDATE playback_records
         SET
-            source_type = ?,
-            confidence = 1.0
+            request_type = ?,
+            updated_at = """ + SQLITE_UTC_NOW + """
         WHERE
             dance_track_id IN (
                 SELECT dt.id
@@ -230,12 +227,11 @@ def _promote_existing_record(conn: sqlite3.Connection, entry: QueuedSelfEntry) -
                 WHERE ds.key = ? AND dt.external_id = ?
             )
             AND """ + _played_at_local_date_sql("played_at") + """ = ?
-            AND playback_status = 'accepted'
-            AND counts_in_history = 1
+            AND default_acceptance_status = 'accepted'
             AND (
-                """ + SOURCE_TYPE_PRECEDENCE_SQL.format(column="source_type") + """
+                request_type IS NULL
+                OR """ + SOURCE_TYPE_PRECEDENCE_SQL.format(column="request_type") + """
                 < """ + SOURCE_TYPE_PRECEDENCE_SQL.format(column="?") + """
-                OR (source_type = ? AND confidence < 1.0)
             )
         """,
         (
@@ -243,7 +239,6 @@ def _promote_existing_record(conn: sqlite3.Connection, entry: QueuedSelfEntry) -
             entry.system_key,
             entry.external_id,
             entry.played_date.isoformat(),
-            SOURCE_QUEUED_SELF,
             SOURCE_QUEUED_SELF,
         ),
     )
@@ -261,15 +256,12 @@ def _matching_existing_record_count(
         JOIN dance_tracks dt ON dt.id = pr.dance_track_id
         JOIN dance_systems ds ON ds.id = dt.system_id
         WHERE
-            pr.event_source != ?
-            AND ds.key = ?
+            ds.key = ?
             AND dt.external_id = ?
             AND """ + _played_at_local_date_sql("pr.played_at") + """ = ?
-            AND pr.playback_status = 'accepted'
-            AND pr.counts_in_history = 1
+            AND pr.default_acceptance_status = 'accepted'
         """,
         (
-            EVENT_SOURCE,
             entry.system_key,
             entry.external_id,
             entry.played_date.isoformat(),

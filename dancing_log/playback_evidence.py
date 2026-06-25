@@ -1,9 +1,8 @@
 """Local Playback Evidence read model.
 
-`playback_records` is the v0 user-facing playback history root after the
-legacy cleanup. Legacy tables may still exist for compatibility and diagnosis,
-but ordinary Timeline, Insights, day, and recommendation reads should come
-through this module.
+`playback_records` is the normalized Local Playback Evidence root. Legacy
+tables may still exist for compatibility and diagnosis, but ordinary Timeline,
+Insights, day, and recommendation reads should come through this module.
 """
 
 from __future__ import annotations
@@ -26,60 +25,56 @@ PLAYBACK_STATUS_ACCEPTED = EFFECTIVE_PLAYBACK_ACCEPTED
 PLAYBACK_STATUS_NEEDS_ATTENTION = EFFECTIVE_PLAYBACK_NEEDS_ATTENTION
 PLAYBACK_STATUS_PENDING = EFFECTIVE_PLAYBACK_PENDING
 LIVE_PLAYBACK_SOURCE_TABLE = "live_playback_events"
-LIVE_WATCHER_SOURCE_KIND = "live_watcher"
 
 
 def init_playback_records_schema(conn: sqlite3.Connection) -> None:
-    """Create the Local Playback Evidence v0 schema."""
+    """Create the Local Playback Evidence v1 schema."""
     conn.executescript(
         f"""
         CREATE TABLE IF NOT EXISTS playback_records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cleanup_batch_id TEXT NOT NULL,
+            evidence_key TEXT NOT NULL UNIQUE,
+            evidence_source TEXT NOT NULL,
             played_at TEXT NOT NULL,
-            original_played_at TEXT NOT NULL,
             dance_track_id INTEGER,
             dance_system_key TEXT NOT NULL,
             dance_external_id TEXT NOT NULL,
-            source_kind TEXT NOT NULL,
-            source_root_key TEXT NOT NULL,
-            source_root_path TEXT NOT NULL,
-            source_table TEXT NOT NULL,
-            source_row_id INTEGER NOT NULL,
-            source_event_key TEXT,
-            source_fingerprint TEXT NOT NULL UNIQUE,
-            playback_status TEXT NOT NULL,
-            counts_in_history INTEGER NOT NULL DEFAULT 0,
-            status_reason TEXT NOT NULL,
-            source_priority INTEGER NOT NULL DEFAULT 0,
-            confidence REAL,
-            event_source TEXT,
-            source_type TEXT,
-            source_display_name TEXT,
-            video_url TEXT,
-            video_name TEXT,
+            request_type TEXT,
             requester_display_name TEXT,
             requester_user_id TEXT,
-            location TEXT,
-            completion_status TEXT,
-            completion_reason TEXT,
-            catalog_status TEXT NOT NULL DEFAULT 'existing',
-            catalog_attention INTEGER NOT NULL DEFAULT 0,
-            provenance_json TEXT NOT NULL,
-            imported_at TEXT NOT NULL DEFAULT ({SQLITE_UTC_NOW}),
+            default_acceptance_status TEXT NOT NULL,
+            observation_status TEXT,
+            observation_reason TEXT,
+            observed_end_at TEXT,
+            video_url TEXT,
+            video_name TEXT,
+            created_at TEXT NOT NULL DEFAULT ({SQLITE_UTC_NOW}),
+            updated_at TEXT NOT NULL DEFAULT ({SQLITE_UTC_NOW}),
             FOREIGN KEY(dance_track_id) REFERENCES dance_tracks(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS playback_record_origins (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            playback_record_id INTEGER NOT NULL,
+            origin_key TEXT NOT NULL UNIQUE,
+            origin_source TEXT NOT NULL,
+            origin_root_key TEXT,
+            origin_root_path TEXT,
+            origin_table TEXT,
+            origin_row_id INTEGER,
+            origin_event_key TEXT,
+            ingest_run_id TEXT,
+            origin_json TEXT NOT NULL DEFAULT '{{}}',
+            created_at TEXT NOT NULL DEFAULT ({SQLITE_UTC_NOW}),
+            FOREIGN KEY(playback_record_id) REFERENCES playback_records(id) ON DELETE CASCADE
         );
 
         CREATE INDEX IF NOT EXISTS idx_playback_records_played_at
             ON playback_records(played_at);
-        CREATE INDEX IF NOT EXISTS idx_playback_records_track
-            ON playback_records(dance_track_id);
         CREATE INDEX IF NOT EXISTS idx_playback_records_identity
             ON playback_records(dance_system_key, dance_external_id);
-        CREATE INDEX IF NOT EXISTS idx_playback_records_status
-            ON playback_records(playback_status, counts_in_history);
-        CREATE INDEX IF NOT EXISTS idx_playback_records_source
-            ON playback_records(source_kind, source_root_key);
+        CREATE INDEX IF NOT EXISTS idx_playback_records_acceptance
+            ON playback_records(default_acceptance_status);
         """
     )
 
@@ -113,7 +108,7 @@ def count_playback_records(conn: sqlite3.Connection) -> dict[str, int]:
             ), 0) AS needs_attention,
             COALESCE(SUM(
                 CASE
-                    WHEN pr.catalog_attention = 1
+                    WHEN pr.dance_track_id IS NULL
                         AND {effective_status} != '{EFFECTIVE_PLAYBACK_EXCLUDED}'
                         THEN 1
                     ELSE 0
@@ -215,8 +210,8 @@ def _read_projected_playback_rows(
         where.append(f"{effective_playback_status_sql(conn)} = ?")
         params.append(effective_status)
     if source == "live":
-        where.append("pr.source_kind = ?")
-        params.append(LIVE_WATCHER_SOURCE_KIND)
+        where.append("pr.evidence_source = ?")
+        params.append("vrc_log_live")
     where_sql = " AND ".join(where) if where else "1 = 1"
     rows = [
         dict(row)
@@ -234,13 +229,13 @@ def _read_projected_playback_rows(
                 dt.dancer,
                 dt.group_name,
                 dt.major,
-                pr.source_type,
-                pr.source_display_name,
+                pr.request_type AS source_type,
+                pr.requester_display_name AS source_display_name,
                 pr.requester_display_name,
                 pr.requester_user_id,
-                pr.playback_status,
-                pr.status_reason,
-                pr.catalog_attention,
+                pr.default_acceptance_status AS playback_status,
+                pr.observation_reason AS status_reason,
+                CASE WHEN pr.dance_track_id IS NULL THEN 1 ELSE 0 END AS catalog_attention,
                 {playback_projection_select_sql(conn)}
             FROM playback_records pr
             {projection_join}
@@ -327,9 +322,8 @@ def read_top_tracks(conn: sqlite3.Connection, *, limit: int = 10) -> list[dict]:
 def _source_label_sql() -> str:
     return """
             COALESCE(
-                NULLIF(pr.source_type, ''),
-                NULLIF(pr.event_source, ''),
-                NULLIF(pr.source_kind, ''),
+                NULLIF(pr.request_type, ''),
+                NULLIF(pr.evidence_source, ''),
                 'unknown'
             )
         """

@@ -1,5 +1,6 @@
 import contextlib
 import io
+import json
 import sys
 import tempfile
 import unittest
@@ -184,11 +185,19 @@ class CliEntrypointTests(unittest.TestCase):
 
             with connect_db(db_path) as conn:
                 row = conn.execute(
-                    "SELECT played_at, original_played_at FROM playback_records"
+                    """
+                    SELECT pr.played_at, pro.origin_json
+                    FROM playback_records pr
+                    JOIN playback_record_origins pro
+                        ON pro.playback_record_id = pr.id
+                    """
                 ).fetchone()
 
             self.assertEqual(row["played_at"], "2026-05-17T07:30:10Z")
-            self.assertEqual(row["original_played_at"], "2026.05.17 15:30:10")
+            self.assertEqual(
+                json.loads(row["origin_json"])["original_played_at"],
+                "2026.05.17 15:30:10",
+            )
 
     def test_watch_vrc_log_dispatches_through_live_app_session_runtime(self):
         calls = {}

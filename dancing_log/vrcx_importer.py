@@ -430,35 +430,27 @@ def _playback_source_type_for_vrcx_write(
     )
     existing = conn.execute(
         """
-        SELECT source_type, confidence
+        SELECT request_type
         FROM playback_records
-        WHERE source_fingerprint = ?
+        WHERE evidence_key = ?
         """,
         (fingerprint,),
     ).fetchone()
     if existing is None:
         return incoming_source_type, incoming_confidence
 
-    existing_type = existing["source_type"]
-    existing_confidence = existing["confidence"]
+    existing_type = existing["request_type"]
     existing_rank = _source_type_precedence(existing_type)
     incoming_rank = _source_type_precedence(incoming_source_type)
     if existing_rank > incoming_rank:
-        return existing_type, existing_confidence
-    if (
-        existing_rank == incoming_rank
-        and _confidence_value(existing_confidence) > _confidence_value(incoming_confidence)
-    ):
-        return existing_type, existing_confidence
+        return existing_type, incoming_confidence
+    if existing_rank == incoming_rank and existing_type:
+        return existing_type, incoming_confidence
     return incoming_source_type, incoming_confidence
 
 
 def _source_type_precedence(source_type: str | None) -> int:
     return SOURCE_TYPE_PRECEDENCE.get((source_type or "").strip(), 0)
-
-
-def _confidence_value(confidence: float | None) -> float:
-    return float(confidence) if confidence is not None else -1.0
 
 
 def _vrcx_playback_source_identity(
@@ -469,12 +461,20 @@ def _vrcx_playback_source_identity(
 ) -> dict[str, object]:
     existing = conn.execute(
         """
-        SELECT source_root_key, source_root_path, source_table, source_row_id, source_event_key
-        FROM playback_records
-        WHERE source_kind = 'vrcx_history' AND source_event_key = ?
+        SELECT
+            pro.origin_root_key AS source_root_key,
+            pro.origin_root_path AS source_root_path,
+            pro.origin_table AS source_table,
+            pro.origin_row_id AS source_row_id,
+            pro.origin_event_key AS source_event_key
+        FROM playback_records pr
+        JOIN playback_record_origins pro
+            ON pro.playback_record_id = pr.id
+        WHERE pr.evidence_source = 'vrcx_history'
+            AND pro.origin_event_key = ?
         ORDER BY
-            CASE source_table WHEN 'dance_events' THEN 0 ELSE 1 END,
-            id
+            CASE pro.origin_table WHEN 'dance_events' THEN 0 ELSE 1 END,
+            pr.id
         LIMIT 1
         """,
         (event_key,),

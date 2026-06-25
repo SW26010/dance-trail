@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import json
 import sqlite3
+
+from dancing_log.playback_record_writer import PlaybackRecordWrite, upsert_playback_record
 
 
 def insert_playback_record(
@@ -24,7 +25,10 @@ def insert_playback_record(
 ) -> int:
     if source_row_id is None:
         row = conn.execute(
-            "SELECT COALESCE(MAX(source_row_id), 0) + 1 AS next_id FROM playback_records"
+            """
+            SELECT COALESCE(MAX(origin_row_id), 0) + 1 AS next_id
+            FROM playback_record_origins
+            """
         ).fetchone()
         source_row_id = int(row["next_id"])
     track = conn.execute(
@@ -39,83 +43,33 @@ def insert_playback_record(
     if track is None:
         raise AssertionError(f"missing dance_track row {track_id}")
 
-    fingerprint = (
-        f"test:{source_kind}:{source_table}:{source_row_id}:"
-        f"{track['system_key']}:{track['external_id']}:{played_at}"
-    )
-    conn.execute(
-        """
-        INSERT INTO playback_records (
-            cleanup_batch_id,
-            played_at,
-            original_played_at,
-            dance_track_id,
-            dance_system_key,
-            dance_external_id,
-            source_kind,
-            source_root_key,
-            source_root_path,
-            source_table,
-            source_row_id,
-            source_event_key,
-            source_fingerprint,
-            playback_status,
-            counts_in_history,
-            status_reason,
-            source_priority,
-            confidence,
-            event_source,
-            source_type,
-            source_display_name,
-            video_url,
-            video_name,
-            requester_display_name,
-            requester_user_id,
-            location,
-            completion_status,
-            completion_reason,
-            catalog_status,
-            catalog_attention,
-            provenance_json
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            "test-batch",
-            played_at,
-            played_at,
-            track_id,
-            track["system_key"],
-            track["external_id"],
-            source_kind,
-            "test-root",
-            "test-root",
-            source_table,
-            source_row_id,
-            f"test-event-{source_row_id}",
-            fingerprint,
-            playback_status,
-            counts_in_history,
-            status_reason,
-            10,
-            1.0,
-            "test",
-            source_type,
-            source_display_name,
-            None,
-            video_name,
-            requester_display_name,
-            requester_user_id,
-            None,
-            "completed" if playback_status == "accepted" else None,
-            status_reason,
-            "existing",
-            catalog_attention,
-            json.dumps({"test": True}),
+    result = upsert_playback_record(
+        conn,
+        PlaybackRecordWrite(
+            played_at=played_at,
+            original_played_at=played_at,
+            dance_track_id=track_id,
+            dance_system_key=track["system_key"],
+            dance_external_id=track["external_id"],
+            source_kind=source_kind,
+            source_table=source_table,
+            source_row_id=source_row_id,
+            source_event_key=f"test-event-{source_row_id}",
+            status_reason=status_reason,
+            source_priority=10,
+            confidence=1.0,
+            event_source="test",
+            source_type=source_type,
+            source_display_name=source_display_name,
+            video_name=video_name,
+            requester_display_name=requester_display_name,
+            requester_user_id=requester_user_id,
+            completion_status="completed" if playback_status == "accepted" else None,
+            completion_reason=status_reason,
+            playback_status=playback_status,
+            counts_in_history=counts_in_history,
+            catalog_attention=catalog_attention,
+            provenance={"test": True},
         ),
     )
-    row = conn.execute(
-        "SELECT id FROM playback_records WHERE source_fingerprint = ?",
-        (fingerprint,),
-    ).fetchone()
-    return int(row["id"])
+    return result.playback_record_id

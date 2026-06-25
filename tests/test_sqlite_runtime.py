@@ -109,13 +109,16 @@ class SQLiteRuntimeTest(unittest.TestCase):
             self.assertIn("music_tracks", tables)
             self.assertIn("dance_track_music_links", tables)
             self.assertIn("playback_records", tables)
+            self.assertIn("playback_record_origins", tables)
             self.assertIn("manual_playback_decisions", tables)
             self.assertIn("live_playback_events", tables)
             self.assertNotIn("songs", tables)
             self.assertIn("dance_track_id", dance_event_columns)
             self.assertNotIn("song_id", dance_event_columns)
-            self.assertIn("source_fingerprint", playback_columns)
-            self.assertIn("counts_in_history", playback_columns)
+            self.assertIn("evidence_key", playback_columns)
+            self.assertIn("default_acceptance_status", playback_columns)
+            self.assertNotIn("source_fingerprint", playback_columns)
+            self.assertNotIn("counts_in_history", playback_columns)
 
     def test_runtime_metadata_timestamps_are_iso8601(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -312,14 +315,18 @@ class SQLiteRuntimeTest(unittest.TestCase):
                 conn.commit()
                 dance_rows = conn.execute("SELECT * FROM dance_events").fetchall()
                 playback_rows = conn.execute("SELECT * FROM playback_records").fetchall()
+                origin_row = conn.execute(
+                    "SELECT * FROM playback_record_origins"
+                ).fetchone()
                 live_row = conn.execute("SELECT * FROM live_playback_events").fetchone()
 
             self.assertEqual(first_id, second_id)
             self.assertEqual(len(dance_rows), 0)
             self.assertEqual(len(playback_rows), 1)
-            self.assertEqual(playback_rows[0]["source_type"], "player")
+            self.assertEqual(playback_rows[0]["request_type"], "player")
             self.assertEqual(playback_rows[0]["played_at"], "2026-05-17T07:30:10Z")
-            self.assertEqual(playback_rows[0]["original_played_at"], "2026.05.17 15:30:10")
+            origin_json = json.loads(origin_row["origin_json"])
+            self.assertEqual(origin_json["original_played_at"], "2026.05.17 15:30:10")
             self.assertEqual(playback_rows[0]["requester_display_name"], "Alice")
             self.assertEqual(playback_rows[0]["requester_user_id"], "usr_alice")
             self.assertEqual(live_row["requester_user_id"], "usr_alice")
@@ -415,12 +422,15 @@ class SQLiteRuntimeTest(unittest.TestCase):
                 )
                 promoted_id = promote_live_playback_event(conn, live_key)
                 playback_rows = conn.execute("SELECT * FROM playback_records").fetchall()
+                origin_row = conn.execute(
+                    "SELECT * FROM playback_record_origins"
+                ).fetchone()
                 live_row = conn.execute("SELECT * FROM live_playback_events").fetchone()
 
             self.assertEqual(promoted_id, existing.playback_record_id)
             self.assertEqual(len(playback_rows), 1)
-            self.assertEqual(playback_rows[0]["source_root_key"], PROJECT_SOURCE_ROOT_KEY)
-            self.assertEqual(playback_rows[0]["source_table"], "live_playback_events")
+            self.assertEqual(origin_row["origin_root_key"], PROJECT_SOURCE_ROOT_KEY)
+            self.assertEqual(origin_row["origin_table"], "live_playback_events")
             self.assertEqual(live_row["promoted_playback_record_id"], existing.playback_record_id)
 
     def test_playback_record_writer_reports_noop_as_unchanged(self):
@@ -464,7 +474,7 @@ class SQLiteRuntimeTest(unittest.TestCase):
             self.assertEqual(unchanged.changed, 0)
             self.assertEqual(changed.changed, 1)
             self.assertEqual(len(rows), 1)
-            self.assertEqual(rows[0]["source_type"], "queued_self")
+            self.assertEqual(rows[0]["request_type"], "queued_self")
 
     def test_playback_record_writer_normalizes_timestamps_to_iso8601(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -491,10 +501,15 @@ class SQLiteRuntimeTest(unittest.TestCase):
                     ),
                 )
                 row = conn.execute("SELECT * FROM playback_records").fetchone()
+                origin = conn.execute(
+                    "SELECT * FROM playback_record_origins"
+                ).fetchone()
 
             self.assertEqual(row["played_at"], "2026-05-17T07:30:10Z")
-            self.assertEqual(row["original_played_at"], "2026.05.17 15:30:10")
-            self.assertRegex(row["imported_at"], ISO_UTC_RE)
+            origin_json = json.loads(origin["origin_json"])
+            self.assertEqual(origin_json["original_played_at"], "2026.05.17 15:30:10")
+            self.assertRegex(row["created_at"], ISO_UTC_RE)
+            self.assertRegex(row["updated_at"], ISO_UTC_RE)
 
     def test_manual_log_source_identity_uses_raw_source_time(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -513,8 +528,13 @@ class SQLiteRuntimeTest(unittest.TestCase):
             with connect_db(db_path) as conn:
                 row = conn.execute(
                     """
-                    SELECT source_event_key, played_at, original_played_at
-                    FROM playback_records
+                    SELECT
+                        pr.played_at,
+                        pro.origin_event_key,
+                        pro.origin_json
+                    FROM playback_records pr
+                    JOIN playback_record_origins pro
+                        ON pro.playback_record_id = pr.id
                     """
                 ).fetchone()
 
@@ -529,9 +549,10 @@ class SQLiteRuntimeTest(unittest.TestCase):
                     ]
                 ).encode("utf-8")
             ).hexdigest()
-            self.assertEqual(row["source_event_key"], expected_key)
+            origin_json = json.loads(row["origin_json"])
+            self.assertEqual(row["origin_event_key"], expected_key)
             self.assertEqual(row["played_at"], "2026-05-17T07:30:10Z")
-            self.assertEqual(row["original_played_at"], raw_played_at)
+            self.assertEqual(origin_json["original_played_at"], raw_played_at)
 
     def test_connect_db_does_not_repair_existing_timestamps_implicitly(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -560,7 +581,7 @@ class SQLiteRuntimeTest(unittest.TestCase):
                 conn.execute(
                     """
                     UPDATE playback_records
-                    SET played_at = ?, imported_at = ?
+                    SET played_at = ?, updated_at = ?
                     WHERE id = ?
                     """,
                     (
@@ -595,8 +616,7 @@ class SQLiteRuntimeTest(unittest.TestCase):
                 live = conn.execute("SELECT * FROM live_playback_events").fetchone()
 
             self.assertEqual(record["played_at"], "2026.05.17 15:30:10")
-            self.assertEqual(record["original_played_at"], "2026.05.17 15:30:10")
-            self.assertEqual(record["imported_at"], "2026-06-24 03:11:07")
+            self.assertEqual(record["updated_at"], "2026-06-24 03:11:07")
             self.assertEqual(live["actual_play_at"], "2026.05.17 15:30:10")
             self.assertEqual(live["created_at"], "2026-06-24 03:11:07")
 
@@ -694,16 +714,22 @@ class SQLiteRuntimeTest(unittest.TestCase):
             with connect_db(db_path) as conn:
                 row = conn.execute(
                     """
-                    SELECT pr.source_type, pr.provenance_json, ds.key AS system_key, dt.external_id
+                    SELECT
+                        pr.request_type,
+                        pro.origin_json,
+                        ds.key AS system_key,
+                        dt.external_id
                     FROM playback_records pr
+                    JOIN playback_record_origins pro
+                        ON pro.playback_record_id = pr.id
                     JOIN dance_tracks dt ON dt.id = pr.dance_track_id
                     JOIN dance_systems ds ON ds.id = dt.system_id
                     """
                 ).fetchone()
             self.assertEqual(row["system_key"], WANNA_SYSTEM_KEY)
             self.assertEqual(row["external_id"], "5038")
-            self.assertEqual(row["source_type"], SOURCE_RECOMMEND)
-            self.assertEqual(json.loads(row["provenance_json"])["manual_log"]["note"], "nice run")
+            self.assertEqual(row["request_type"], SOURCE_RECOMMEND)
+            self.assertEqual(json.loads(row["origin_json"])["manual_log"]["note"], "nice run")
 
     def test_recommendation_history_reads_playback_records_not_legacy_events(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -847,11 +873,9 @@ class SQLiteRuntimeTest(unittest.TestCase):
 
             self.assertEqual(changed, 1)
             self.assertEqual(second_changed, 0)
-            self.assertEqual(row["playback_status"], "needs_attention")
-            self.assertEqual(row["counts_in_history"], 0)
-            self.assertEqual(row["status_reason"], WATCHER_INTERRUPTED_UNEXPECTEDLY_REASON)
-            self.assertEqual(row["completion_status"], "interrupted")
-            self.assertEqual(row["completion_reason"], WATCHER_INTERRUPTED_UNEXPECTEDLY_REASON)
+            self.assertEqual(row["default_acceptance_status"], "needs_attention")
+            self.assertEqual(row["observation_status"], "interrupted")
+            self.assertEqual(row["observation_reason"], WATCHER_INTERRUPTED_UNEXPECTEDLY_REASON)
 
     def test_recommendation_uses_dance_track_ids_without_popularity(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1167,8 +1191,10 @@ class SQLiteRuntimeTest(unittest.TestCase):
                 event_count = conn.execute("SELECT count(*) FROM dance_events").fetchone()[0]
                 playback_count = conn.execute("SELECT count(*) FROM playback_records").fetchone()[0]
                 source_tables = {
-                    row["source_table"]
-                    for row in conn.execute("SELECT DISTINCT source_table FROM playback_records")
+                    row["origin_table"]
+                    for row in conn.execute(
+                        "SELECT DISTINCT origin_table FROM playback_record_origins"
+                    )
                 }
                 parsed = conn.execute(
                     """
@@ -1270,14 +1296,17 @@ class SQLiteRuntimeTest(unittest.TestCase):
 
             with connect_db(app_path) as conn:
                 rows = conn.execute("SELECT * FROM playback_records").fetchall()
+                origins = conn.execute("SELECT * FROM playback_record_origins").fetchall()
                 source = rows[0]
+                origin = origins[0]
 
             self.assertEqual(stats.playback_records_changed, 0)
             self.assertEqual(len(rows), 1)
+            self.assertEqual(len(origins), 1)
             self.assertEqual(source["id"], existing.playback_record_id)
-            self.assertEqual(source["source_root_key"], PROJECT_SOURCE_ROOT_KEY)
-            self.assertEqual(source["source_table"], "dance_events")
-            self.assertEqual(source["source_row_id"], legacy_event_id)
+            self.assertEqual(origin["origin_root_key"], PROJECT_SOURCE_ROOT_KEY)
+            self.assertEqual(origin["origin_table"], "dance_events")
+            self.assertEqual(origin["origin_row_id"], legacy_event_id)
 
     def test_vrcx_import_normalizes_canonical_time_and_preserves_source_time(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1319,13 +1348,14 @@ class SQLiteRuntimeTest(unittest.TestCase):
             with connect_db(app_path) as conn:
                 staging = conn.execute("SELECT * FROM vrcx_import_events").fetchone()
                 record = conn.execute("SELECT * FROM playback_records").fetchone()
-                provenance = json.loads(record["provenance_json"])
+                origin = conn.execute("SELECT * FROM playback_record_origins").fetchone()
+                origin_json = json.loads(origin["origin_json"])
 
             self.assertEqual(stats.playback_records_changed, 1)
             self.assertEqual(staging["created_at"], "2026-05-17T07:30:10Z")
             self.assertEqual(record["played_at"], "2026-05-17T07:30:10Z")
-            self.assertEqual(record["original_played_at"], raw_created_at)
-            self.assertEqual(provenance["source_created_at"], raw_created_at)
+            self.assertEqual(origin_json["original_played_at"], raw_created_at)
+            self.assertEqual(origin_json["source_created_at"], raw_created_at)
 
     def test_vrcx_import_preserves_queued_self_source_type_on_reimport(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1376,13 +1406,12 @@ class SQLiteRuntimeTest(unittest.TestCase):
 
             with connect_db(app_path) as conn:
                 row = conn.execute(
-                    "SELECT source_type, confidence FROM playback_records"
+                    "SELECT request_type FROM playback_records"
                 ).fetchone()
 
             self.assertEqual(queued_stats.existing_records_updated, 1)
             self.assertEqual(reimport_stats.playback_records_changed, 0)
-            self.assertEqual(row["source_type"], "queued_self")
-            self.assertEqual(row["confidence"], 1.0)
+            self.assertEqual(row["request_type"], "queued_self")
 
     def test_queued_self_uses_cli_system_for_bare_track_refs(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1422,7 +1451,7 @@ class SQLiteRuntimeTest(unittest.TestCase):
             self.assertEqual(stats.matched_entries, 1)
             self.assertEqual(stats.unmatched_entries, 1)
             with connect_db(db_path) as conn:
-                source = conn.execute("SELECT source_type FROM playback_records").fetchone()[0]
+                source = conn.execute("SELECT request_type FROM playback_records").fetchone()[0]
             self.assertEqual(source, "queued_self")
 
     def test_queued_self_matches_iso_playback_by_configured_local_date(self):
@@ -1452,13 +1481,19 @@ class SQLiteRuntimeTest(unittest.TestCase):
 
             with connect_db(db_path) as conn:
                 row = conn.execute(
-                    "SELECT played_at, original_played_at, source_type FROM playback_records"
+                    """
+                    SELECT pr.played_at, pr.request_type, pro.origin_json
+                    FROM playback_records pr
+                    JOIN playback_record_origins pro
+                        ON pro.playback_record_id = pr.id
+                    """
                 ).fetchone()
 
             self.assertEqual(stats.existing_records_updated, 1)
+            origin_json = json.loads(row["origin_json"])
             self.assertEqual(row["played_at"], "2026-05-17T16:22:59Z")
-            self.assertEqual(row["original_played_at"], "2026.05.18 00:22:59")
-            self.assertEqual(row["source_type"], "queued_self")
+            self.assertEqual(origin_json["original_played_at"], "2026.05.18 00:22:59")
+            self.assertEqual(row["request_type"], "queued_self")
 
     def test_archive_existing_data_keeps_config_and_manifest_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1551,9 +1586,10 @@ class SQLiteRuntimeTest(unittest.TestCase):
                 )
                 conn.commit()
                 row = conn.execute("SELECT * FROM playback_records").fetchone()
+                origin = conn.execute("SELECT * FROM playback_record_origins").fetchone()
 
-            provenance = json.loads(row["provenance_json"])
-            provenance_event = provenance["watcher_playback_event"]
+            origin_json = json.loads(origin["origin_json"])
+            provenance_event = origin_json["watcher_playback_event"]
             self.assertEqual(row["video_name"], "Final Title")
             self.assertEqual(row["requester_user_id"], "usr_alice")
             self.assertEqual(provenance_event["video_name"], "Final Title")

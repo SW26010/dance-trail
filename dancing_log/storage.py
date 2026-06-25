@@ -22,7 +22,12 @@ from dancing_log.playback_evidence import (
     read_accepted_playback_history,
 )
 from dancing_log.playback_projection import init_manual_playback_decision_schema
-from dancing_log.playback_record_writer import PlaybackRecordWrite, upsert_playback_record
+from dancing_log.playback_record_writer import (
+    PROJECT_SOURCE_ROOT_KEY,
+    PlaybackRecordWrite,
+    source_fingerprint,
+    upsert_playback_record,
+)
 from dancing_log.time_utils import (
     SQLITE_UTC_NOW,
     normalize_timestamp,
@@ -31,7 +36,7 @@ from dancing_log.time_utils import (
 from dancing_log.watcher_playback_materializer import (
     WATCHER_INTERRUPTED_UNEXPECTEDLY_REASON,
     WATCHER_PENDING_REASON,
-    WATCHER_PLAYBACK_SOURCE_KIND,
+    WATCHER_PLAYBACK_EVENT_SOURCE,
     WATCHER_PLAYBACK_SOURCE_TABLE,
 )
 
@@ -801,25 +806,32 @@ def promote_live_playback_event(
 def repair_stale_watcher_pending_records(conn: sqlite3.Connection) -> int:
     """Convert stale watcher pending records left by an ungraceful exit."""
     cursor = conn.execute(
-        """
+        f"""
         UPDATE playback_records
         SET
-            playback_status = ?,
-            counts_in_history = 0,
-            status_reason = ?,
-            completion_status = 'interrupted',
-            completion_reason = ?
-        WHERE source_kind = ?
-            AND source_table = ?
-            AND playback_status = ?
-            AND counts_in_history = 0
-            AND status_reason = ?
+            default_acceptance_status = ?,
+            observation_status = 'interrupted',
+            observation_reason = ?,
+            updated_at = {SQLITE_UTC_NOW}
+        WHERE id IN (
+            SELECT pr.id
+            FROM playback_records pr
+            JOIN playback_record_origins pro
+                ON pro.playback_record_id = pr.id
+            WHERE pr.evidence_source = ?
+                AND pro.origin_table = ?
+                AND pr.default_acceptance_status = ?
+                AND (
+                    pr.observation_status = 'pending'
+                    OR pr.observation_reason = ?
+                    OR pr.observation_reason IS NULL
+                )
+        )
         """,
         (
             PLAYBACK_STATUS_NEEDS_ATTENTION,
             WATCHER_INTERRUPTED_UNEXPECTEDLY_REASON,
-            WATCHER_INTERRUPTED_UNEXPECTEDLY_REASON,
-            WATCHER_PLAYBACK_SOURCE_KIND,
+            WATCHER_PLAYBACK_EVENT_SOURCE,
             WATCHER_PLAYBACK_SOURCE_TABLE,
             PLAYBACK_STATUS_PENDING,
             WATCHER_PENDING_REASON,
@@ -1106,9 +1118,9 @@ def _unique_event_key(conn: sqlite3.Connection, base_key: str) -> str:
             """
             SELECT 1
             FROM playback_records
-            WHERE source_table = 'manual_log' AND source_event_key = ?
+            WHERE evidence_key = ?
             """,
-            (event_key,),
+            (source_fingerprint(PROJECT_SOURCE_ROOT_KEY, "manual_log", 0, event_key),),
         ).fetchone()
     ):
         event_key = _event_key(base_key, suffix)
