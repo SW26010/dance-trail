@@ -24,13 +24,29 @@ _Avoid_: Web UI, control panel
 The Web UI product boundary for one user operating `dancing-log` on their own machine. It is not a shared service, remote dashboard, or multi-user web app.
 _Avoid_: hosted app, LAN dashboard, multi-user app
 
-**Dance List**:
-A planned or suggested set of dance items, such as a queued-self list, recommendation list, practice list, or stream list. It represents intention before playback, separate from the catalog of available dance tracks and the timeline of actual dance events.
+**Dance Plan**:
+A durable planned set of dance items the user intends to dance. A Dance Plan can remain active across local dates when unfinished items carry forward. It represents intention before playback, separate from the catalog of available dance tracks and the timeline of actual dance events.
 _Avoid_: catalog, timeline, history
 
+**Dance Plan Fulfillment**:
+The relationship between a Dance Plan item and an Accepted Playback Record that satisfied it. Fulfillment can promote the playback record's Request Source Type to planned, but it does not create playback evidence and does not replace requester identity.
+_Avoid_: playback evidence, requester identity, manual exclusion
+
+**Superseded Dance Plan Item**:
+A Dance Plan item whose planned intent has been taken over by a later same-target item, so it no longer carries forward or directly fulfills playback. It is different from a skipped item and should not silently recreate a fulfillment the user removed.
+_Avoid_: skipped item, fulfilled item, deleted playback record
+
+**Removed Dance Plan Item**:
+A Dance Plan item the user removed from the active plan while the system keeps enough history to explain or undo the removal. A removed item no longer carries forward, supersedes another item, or fulfills playback.
+_Avoid_: active planned item, skipped item, physical database deletion
+
+**Local Dance Day Boundary**:
+The user-configured time-of-day that separates one local dance day from the next for daily history, Dance Plan views, intended dates, and fulfillment matching. The default boundary is 00:00 local time, but the user may move it later, such as 01:00 or 03:00, so late-night dances still belong to the previous dance day.
+_Avoid_: timezone, playback timestamp, plan identity
+
 **Catalog**:
-The inventory of available dance content and the real music those entries represent. Catalog owns dance tracks, music tracks, local preference flags, and provider matching review, but not planned lists or historical playback.
-_Avoid_: dance list, timeline, data operations
+The inventory of available dance content and the real music those entries represent. Catalog owns dance tracks, music tracks, local preference flags, and provider matching review, but not dance plans or historical playback.
+_Avoid_: dance plan, timeline, data operations
 
 **Dance Track**:
 One playable dance version inside a dance system, such as a WannaDance, PyPyDance, or Dudu entry. It may represent a specific choreography, dancer, difficulty, player count, or system-local id.
@@ -45,7 +61,7 @@ The real song independent of dance system and choreography. Music-provider links
 _Avoid_: dance track, dance-system entry
 
 **Insights**:
-Derived views that summarize and explain accepted playback, catalog, and list data, such as frequency, trends, source distribution, and neglected favorites. Insights are analysis surfaces, not the source of historical truth; manually excluded playback records do not contribute to normal insight calculations.
+Derived views that summarize and explain accepted playback, catalog, and dance-plan data, such as frequency, trends, source distribution, and neglected favorites. Insights are analysis surfaces, not the source of historical truth; manually excluded playback records do not contribute to normal insight calculations.
 _Avoid_: timeline, raw history, catalog
 
 **Data Operations**:
@@ -53,8 +69,8 @@ Controlled workflows that change or rebuild local data in bulk, such as importin
 _Avoid_: settings, raw SQLite editor, ad hoc table editing
 
 **Settings**:
-The local environment and default preference surface for paths, database location, VRChat and VRCX sources, overlay defaults, and watcher defaults. Settings do not own catalog labels, dance lists, playback history, or analytics.
-_Avoid_: data operations, catalog management, list management
+The local environment and default preference surface for paths, database location, VRChat and VRCX sources, overlay defaults, and watcher defaults. Settings does not own catalog labels, dance plans, playback history, or analytics.
+_Avoid_: data operations, catalog management, dance plan management
 
 **Watcher Default**:
 A saved preference that affects how the VRChat log watcher should run when an app workflow starts it, such as whether watcher auto-start is desired. It is not an immediate start or stop command.
@@ -165,7 +181,7 @@ The locally observed playback lifecycle state for a playback record, such as an 
 _Avoid_: request source, acceptance result, raw watcher payload, manual decision
 
 **Request Source Type**:
-The normalized request/playback-source classification stored on a playback record, such as queued_self, recommend, self, other, random, or unknown. Request Source Type is stored today in legacy `source_type`, with `request_type` as the clearer long-term field name. It is not evidence strength, not a confidence score, and does not decide whether the record is effectively accepted, excluded, or needs attention. Coarse watcher-side labels such as player are legacy parser evidence, not canonical Request Source Type values.
+The normalized request/playback-source classification stored on a playback record, such as planned, recommend, self, other, random, or unknown. Request Source Type is stored today in legacy `source_type`, with `request_type` as the clearer long-term field name. It is not evidence strength, not a confidence score, and does not decide whether the record is effectively accepted, excluded, or needs attention. Coarse watcher-side labels such as player and old queued_self values are legacy parser or import evidence, not canonical Request Source Type values.
 _Avoid_: requester identity, evidence source priority, confidence score, acceptance status, review status, raw watcher label
 
 **Accepted Playback Record**:
