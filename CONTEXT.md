@@ -56,6 +56,14 @@ _Avoid_: song, music track
 A user preference attached to a dance track, such as favorite or want-to-learn. It describes preference for a playable dance version, not for the underlying music track.
 _Avoid_: music preference, playlist item
 
+**Recommendation Algorithm**:
+The changeable scoring or selection strategy that proposes dance tracks to the user. It may change without rewriting historical Request Source Type evidence; only an explicitly enabled or accepted result becomes a Recommendation List Snapshot.
+_Avoid_: recommendation evidence, request source type, dance plan
+
+**Recommendation List Snapshot**:
+A frozen list of recommended dance tracks explicitly enabled or accepted by the user for a Local Dance Day. It can be evidence for Request Source Type Inference only for same-day playback after the snapshot was frozen, and it is separate from the mutable Recommendation Algorithm, Dance Plan, and playback evidence.
+_Avoid_: algorithm result, preview, dance plan item, playback record
+
 **Music Track**:
 The real song independent of dance system and choreography. Music-provider links such as NetEase, QQ Music, Spotify, or popularity metrics belong to the music track level.
 _Avoid_: dance track, dance-system entry
@@ -183,6 +191,10 @@ _Avoid_: request source, acceptance result, raw watcher payload, manual decision
 **Request Source Type**:
 The normalized request/playback-source classification stored on a playback record, such as planned, recommend, self, other, random, or unknown. Request Source Type is stored today in legacy `source_type`, with `request_type` as the clearer long-term field name. It is not evidence strength, not a confidence score, and does not decide whether the record is effectively accepted, excluded, or needs attention. Coarse watcher-side labels such as player and old queued_self values are legacy parser or import evidence, not canonical Request Source Type values.
 _Avoid_: requester identity, evidence source priority, confidence score, acceptance status, review status, raw watcher label
+
+**Request Source Type Inference**:
+The independent, repeatable process that derives or repairs a playback record's Request Source Type from stable inputs such as Local Playback Evidence, Requester Identity, Self User Identity, Dance Plan Fulfillment, Recommendation List Snapshots, and active Manual Record Updates. It is not a watcher, importer, writer, or ordinary read-path responsibility, and it does not require realtime execution.
+_Avoid_: watcher enrichment, VRCX import, recommendation algorithm, acceptance settlement
 
 **Accepted Playback Record**:
 A playback record included in normal history and Insights under the trust-by-default policy. A record may be accepted because it comes from a supported source, was automatically settled, or was manually confirmed; manual confirmation is not required for ordinary inclusion.
