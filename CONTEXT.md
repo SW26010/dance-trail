@@ -145,8 +145,8 @@ A Self User Identity explicitly provided or corrected by the user when detection
 _Avoid_: detected source path, display name, generated default
 
 **Requester Identity**:
-The VRChat identity observed for the user who requested or triggered a playback record. It may include the event-time display name and a stable VRChat user id, and it is separate from Self User Identity.
-_Avoid_: self user identity, display-name preference, source classification
+The VRChat identity observed for the user who requested or triggered a playback record. It may include the event-time display name and a stable VRChat user id, and it is separate from Self User Identity. Random playback evidence is not Requester Identity and must not be represented by setting requester fields to blank, NULL, or "random".
+_Avoid_: self user identity, display-name preference, source classification, random source marker
 
 **Draft Configuration**:
 The unsaved Settings form state being edited by the user before it is written to the local app configuration file. Draft configuration can be validated and reset without changing the currently saved configuration.
@@ -180,6 +180,10 @@ _Avoid_: raw log line, database row
 A Playback Record created from live watcher evidence once the observation has a dance identity. It may represent playback observed from the start or playback discovered after it is already in progress. Its existence means the event is reviewable in Timeline; whether it counts in history is decided separately by acceptance policy.
 _Avoid_: live playback record, overlay state, accepted playback record, actual-play-only record
 
+**Manual Log Entry**:
+A user-created Local Playback Evidence record for a playback the user says happened, with user-supplied playback facts such as dance track and played time. It creates playback evidence; it is not a Manual Record Update, not a Dance Plan item, and not a direct Request Source Type edit. Request Source Type Inference still decides the record's Request Source Type from stable inputs after the manual evidence exists.
+_Avoid_: request source override, plan item, manual playback decision
+
 **Watcher Settlement**:
 The watcher action that resolves a pending Watcher-Derived Playback Record into its default acceptance result after enough lifecycle or playback evidence is available. Settlement may accept a record, mark it attention-needed, exclude it, or leave it pending when the observation is still active or the watcher ended before settlement.
 _Avoid_: raw event parsing, manual decision, playback record creation
@@ -189,7 +193,7 @@ The locally observed playback lifecycle state for a playback record, such as an 
 _Avoid_: request source, acceptance result, raw watcher payload, manual decision
 
 **Request Source Type**:
-The normalized request/playback-source classification stored on a playback record, such as planned, recommend, self, other, random, or unknown. Request Source Type is stored today in legacy `source_type`, with `request_type` as the clearer long-term field name. It is not evidence strength, not a confidence score, and does not decide whether the record is effectively accepted, excluded, or needs attention. Coarse watcher-side labels such as player and old queued_self values are legacy parser or import evidence, not canonical Request Source Type values.
+The normalized request/playback-source classification stored on a playback record, such as planned, recommend, self, other, random, or unknown. Request Source Type is stored today in legacy `source_type`, with `request_type` as the clearer long-term field name. It is not evidence strength, not a confidence score, and does not decide whether the record is effectively accepted, excluded, or needs attention. Self, other, and random are mutually exclusive sibling classifications rather than an ordered priority ladder. Coarse watcher-side labels such as player and old queued_self values are legacy parser or import evidence, not canonical Request Source Type values.
 _Avoid_: requester identity, evidence source priority, confidence score, acceptance status, review status, raw watcher label
 
 **Request Source Type Inference**:
@@ -245,7 +249,7 @@ A Review Attention case where overlapping playback records disagree on accepted 
 _Avoid_: parser conflict, source-order fill, duplicate row
 
 **User-Editable Playback Field**:
-A playback-record field where the user can make a durable judgment or correction, such as acceptance, exclusion, source classification, dance-track mapping, requester identity, or note. These fields may be overridden by Manual Record Update.
+A playback-record field where the user can make a durable judgment or correction, such as acceptance, exclusion, dance-track mapping, requester identity, or note. These fields may be overridden by Manual Record Update. Request Source Type is inferred from stable inputs rather than directly edited by the user in the first product shape.
 _Avoid_: parser evidence, raw log metadata, automatic inference
 
 **Playback Evidence Field**:
@@ -302,7 +306,7 @@ The user's durable attention or correction state for a playback record. Review S
 _Avoid_: deletion, raw parser status, completion status
 
 **Manual Record Update**:
-A user-authored correction to a playback record after import or review, such as source classification, dance-track mapping, requester identity, note, or other user-editable timeline fields. For overlapping records, manually updated fields are preferred over imported or parser-derived fields, while raw evidence remains preserved for audit.
+A user-authored correction to a playback record after import or review, such as dance-track mapping, requester identity, note, or other user-editable timeline fields. For overlapping records, manually updated fields are preferred over imported or parser-derived fields, while raw evidence remains preserved for audit. Acceptance and exclusion are Manual Playback Decisions, not direct Request Source Type edits.
 _Avoid_: parser backfill, automatic merge, raw evidence edit
 
 **Manual Merge Conflict**:

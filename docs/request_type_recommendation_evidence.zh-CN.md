@@ -47,6 +47,8 @@ snapshot item 应保存足够稳定的舞蹈身份。数据库内可以引用 `d
 
 当一条 playback record 是 effective accepted，并且它的 `dance_track_id` 能匹配同一 Local Dance Day 的 Recommendation List Snapshot item，且 `played_at` 晚于或等于 snapshot 的冻结时间时，Request Source Type Inference 可以把它推断为 `recommend`。
 
+当同一 Local Dance Day 内同一个 snapshot item / `dance_track_id` 对应多条 eligible effective accepted playback records 时，第一版只把当天最早的一条 record 推断为 `recommend`。后续同 track 播放不会因为同一个 Recommendation List Snapshot item 继续被标记为 `recommend`。
+
 如果当前数据库还没有推荐 snapshot 表，或表存在但当天没有 frozen snapshot，Request Source Type Inference 应继续运行，并把推荐证据视为空输入。此时它可以继续根据 Dance Plan Fulfillment、Requester Identity、Self User Identity、legacy/source evidence 和 Manual Record Updates 推断 `planned`、`self`、`other`、`random` 或 `unknown`，但不能凭当前算法即时结果推断 `recommend`。
 
 以下情况不能推断为 `recommend`：
@@ -55,11 +57,11 @@ snapshot item 应保存足够稳定的舞蹈身份。数据库内可以引用 `d
 - snapshot 是 playback 发生后才创建、接受或冻结的。
 - snapshot 属于另一个 Local Dance Day。
 - snapshot 内容没有保存，当前只能重新运行推荐算法得到相似结果。
-- 更强的来源已经适用，例如 Dance Plan Fulfillment 推断出的 `planned`，或 active Manual Record Update。
+- 更强的来源已经适用，例如 Dance Plan Fulfillment 推断出的 `planned`。
 
 重新运行推断时，必须读取 frozen snapshot，而不是重新计算当天推荐。这样 rebuild/repair 才是幂等的，算法更新也不会改写过去的 Request Source Type。
 
-第一版 snapshot 不做物理删除和事后编辑。关闭推荐功能只影响未来推荐，不改写旧 snapshot，也不触发旧 playback 的 `request_type` 重写。推荐误判应通过 Manual Record Update 覆盖，或由后续显式 repair/rebuild 重新投影。
+第一版 snapshot 不做物理删除和事后编辑。关闭推荐功能只影响未来推荐，不改写旧 snapshot，也不触发旧 playback 的 `request_type` 重写。推荐误判第一版不通过直接编辑 Request Source Type 处理；需要通过后续显式 repair/rebuild、修正输入事实，或未来另行设计的手动来源覆盖能力处理。
 
 ## 与其他模块的关系
 

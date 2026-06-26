@@ -8,7 +8,10 @@
 
 - 用户面对的 canonical term 使用“舞蹈计划”。“待跳清单”、“待跳舞清单”、“预排清单”只作为讨论词或说明词，不作为正式产品名。
 - `queued_self` 这个名字不适合作为用户面对的舞蹈计划概念。
-- 长期 `request_type` canonical value 使用 `planned`，表示这条已播放记录被识别为来自预先安排的舞蹈计划。`queued_self` 只作为 legacy alias 或旧数据兼容值。
+- 长期 `request_type` canonical value 使用 `planned`，表示这条已播放记录被识别为来自预先安排的舞蹈计划。`queued_self` 只作为 legacy input alias 或旧数据解释词，不进入新的正式产品表或 canonical `request_type` 投影。
+- Request Source Type Inference 的分层是 `planned > recommend > self/other/random > unknown > NULL`。`self`、`other`、`random` 是互斥同级分类，没有彼此之间的优先级；`NULL` 不是 canonical value，只表示尚未推断或不适用推断。
+- 第一版 Request Source Type Inference 可以暂不产出 canonical `random`；在各来源对 random 的定义和证据记录方式清晰前，随机相关输入先保留为可读证据或诊断材料，canonical 输出降级为 `unknown`。
+- `playback_records.request_type` 为空是预期内状态，因为它是推断输出，不是推断输入；现有 `request_type` 值不应影响新的全局 rebuild。
 - Catalog 页面里的歌曲旁边应该有一个加号，用来把该舞蹈条目加入舞蹈计划。
 - 舞蹈计划不应该继续用 txt/Markdown 文件作为长期存储，而应该规范化存到 SQLite 数据库内。
 - Plan item 应该和实际跳过的 accepted 播放内容对应；如果当前跳舞日没有对应上，item 可以继续保留到后续跳舞日。
@@ -153,6 +156,7 @@ Local Dance Day Boundary 是本地配置项，不是 `dance_plans` 或 `dance_pl
 - item fulfill 后，对应 playback record 的 `request_type` 应提升为 `planned`。这表示“这次播放完成了预先计划”，不要求 requester 必须是 self。
 - 未匹配的 item 不代表失败，也不应该制造 needs-attention playback record。
 - 未匹配 item 可以继续保留为 planned，这就是顺延；不需要每天复制成一条新 item。
+- 用户补录历史 plan item 时，系统推荐或帮助匹配 existing accepted playback records 的范围必须有界。第一版只在 item 的 `intended_local_date` 和用户明确指定的有限未来天数内寻找有效 records，不能让很早以前未 fulfilled 的历史 item 自动顺延并匹配到大量后续历史。
 - UI 应区分“当前日期预定”的 item 和“从以前顺延下来”的 item。这个区分应优先由 `intended_local_date` 与当前查看日期比较得出；`added_at` 只用于解释何时加入。
 - 未匹配 item 可以由用户从 plan 中移除；已匹配到 accepted playback 的 item 只能在警告后强行删除。
 - 如果未来确实需要复制式顺延，应保留来源关系，避免以后无法解释这个 item 是哪次加入计划的。
@@ -176,65 +180,104 @@ Removed item 默认从 active plan UI 中隐藏，不参与自然顺延、supers
 - 保留 playback record 本身和 requester identity。
 - 如果该 fulfilled item 曾经 supersede 旧 item，旧 item 不能接管这条 playback；它应随这次强删一起标记为 `removed`，而不是变成 `fulfilled`。
 
-如果用户先把 fulfilled playback record 变为 excluded，则系统应自动解除 fulfillment，并移除 plan 对该 record 的 `planned` 覆盖，`request_type` 变为空。这个路径不需要强删警告，因为用户的主要动作是把 playback record 排除出 accepted history。解除后系统需要询问原 plan item：
+如果用户先把 fulfilled playback record 变为 excluded，则系统应自动解除 fulfillment，并移除 plan 对该 record 的 `planned` 覆盖，`request_type` 变为空。这个路径不需要强删警告，因为用户的主要动作是把 playback record 排除出 accepted history。解除 fulfillment 后，原 plan item 的处置必须和这次 exclude 在同一个操作里完成，不能留下一个需要之后再处理的 pending plan action。UI / API 提交时应同时包含 `manual_decision = excluded` 和 `plan_item_action = carry_forward | remove`，后端在同一个 transaction 中应用 manual exclusion、解除 fulfillment、处理 plan item，并触发全局重算。
 
 - 继续留在 active plan 中自然顺延。
 - 从 plan 中移除。
 
-## 待讨论问题
+用户可以选择“默认顺延，以后不再反复询问”。启用该偏好后，后续 fulfilled planned record 被 excluded 时，系统默认使用 `carry_forward` 处置原 plan item；用户仍应能在需要时修改这个偏好或在明确操作中选择移除。
+
+如果用户随后把该 playback record 恢复默认，系统不恢复旧 fulfillment，而是按当前 Dance Plan 状态和 effective accepted records 重新全局对账。若原 plan item 仍 active 且匹配规则成立，它可以重新 fulfill；若原 plan item 已移除、已被其他 item supersede，或已匹配到别的 accepted record，则不会因为恢复默认而复活旧 fulfillment。
+
+## 已收敛与暂缓事项
 
 ### 1. `planned` 与旧 `queued_self` 的过渡策略
 
-未确定：实现上什么时候把 `queued_self` 从运行时 Request Source Type precedence 中替换为 `planned`，以及旧数据、旧测试、Web UI label 是否需要继续显示 `queued_self`。
+已决定：从数据库 Dance Plan 第一版实现开始，所有新的 canonical `request_type` 输出都只使用 `planned`，不再新写 `queued_self`。`queued_self` 不进入新的正式产品表，不作为 `request_type`、Dance Plan、Dance Plan Fulfillment 或推荐/推断表里的规范值。
 
-建议答案：长期只把 `planned` 作为 canonical Request Source Type；`queued_self` 只在旧 manifest 读取、旧 origin/provenance、旧数据解释和兼容 UI label 中出现。实现切换时，`REQUEST_TYPE_PRECEDENCE` 应加入 `planned` 作为最高值，并把 `queued_self` 保留为 legacy alias，而不是让两者成为并列产品值。
+`queued_self` 只允许作为 legacy input alias、旧 manifest 读取、旧数据解释、旧测试输入迁移和 raw/origin/provenance 审计材料出现。任何统一 inference / rebuild 输出都必须把旧 `queued_self` 语义规范化为 `planned`；Web UI 可以识别旧值用于兼容显示，但正式产品文案和新写入数据都应使用“舞蹈计划”/`planned`。
 
-还没算定的原因：当前代码和测试仍以 `queued_self` 为最高 precedence，`promote_request_type()` 又是 no-op；这属于过渡实现，没有决定具体切换时机。
+实现切换时，`REQUEST_TYPE_PRECEDENCE` 应加入 `planned` 作为最高值。`queued_self` 可以在输入 normalization 层被识别，但不能和 `planned` 成为并列产品值。
 
 ### 2. Request Source Type 推断策略的归属和输入
 
-未确定：解除 fulfillment、VRCX reimport、watcher 新证据、手动修正之后，谁负责重新推断 `request_type`，以及推断时允许读取哪些输入。
+已决定：Request Source Type Inference 是 canonical `request_type` 的唯一决策点。watcher、VRCX importer、PlaybackRecord writer、Dance Plan UI 和普通读路径都不直接决定最终 canonical `request_type`；它们只写入或维护稳定输入。迁移期 importer 可以保留防止较强 legacy `request_type` 被 reimport 降级的兼容保护，但这个保护不是长期策略入口。
 
-建议答案：把策略集中在 `playback_request_type.py` 附近，而不是分散到 writer、watcher、VRCX importer 或 plan UI。输入应是当前 Local Playback Evidence、origins/provenance、Self User Identity、Requester Identity、Dance Plan Fulfillment 和明确的 manual overlay；不要重新引入旧 `confidence` 或 `source_priority` 数字作为策略事实。
+推断策略集中在 `playback_request_type.py` 或相邻模块中。输入应是当前 Local Playback Evidence、origins/provenance、Self User Identity、Requester Identity、Dance Plan Fulfillment、Recommendation List Snapshots 和明确的 Manual Record Updates；不要重新引入旧 `confidence` 或 `source_priority` 数字作为策略事实。
 
-还没算定的原因：现有迁移文档已经说旧 `source_type` 不直接迁移到新 `request_type`，但还没有定义迁移后 rebuild/repair 的具体策略、运行入口和幂等边界。
+已决定：Request Source Type Inference 的分层是 `planned > recommend > self/other/random > unknown > NULL`。`planned` 与 `recommend` 是更强的解释性证据；`self`、`other`、`random` 是互斥同级分类，不能用优先级互相覆盖；`unknown` 表示推断已经运行但证据不足；`NULL` 表示尚未推断或不适用推断，不是 canonical Request Source Type。
+
+已决定：`self` / `other` / `random` 这一层由单一归一化判断产出，而不是三个规则按优先级抢结果。第一版优先用 Requester Identity 与 Self User Identity 判定 `self` 或 `other`。当前可以暂不实现 canonical `random` 推断；即使某些来源提供随机相关线索，在各来源对 random 的定义和证据记录方式清晰前，Request Source Type Inference 可以先输出 `unknown`，同时保留读取 random 证据或候选输入的可能。如果记录有 `requester_display_name` 但缺少 `requester_user_id`，不应推断为 `random`；它应该落到 `unknown`，并作为 requester identity 补全或诊断需要关注的数据。
+
+已决定：random 不是 requester identity。不能通过把 `requester_display_name` / `requester_user_id` 写成空值、`NULL` 或 `"random"` 来表达随机来源；random 必须作为独立的 playback/source evidence 被记录或解释。当前暴露出的主要问题不是 `playback_records.request_type` 为空，而是 watcher / playback-record origin 没有认真保留 VRC log 中可解析的 random 证据。
+
+已决定：VRCX 历史里的随机不能靠 blank requester 猜出来；不知道就是不知道。用户未来可以在 UI 上选择把未知来源降级显示为 random，但这只能是明确的展示偏好或用户判断，不能糊进原始证据，也不能擅自修改 imported evidence。
+
+random 证据现状与后续计划另见 `docs/request_type_random_evidence.zh-CN.md`。该文档记录 watcher / VRC log / VRCX 的证据问题，但不阻塞第一版 Request Source Type Inference。
+
+已决定：Request Source Type Inference 消费当前模型化后的稳定输入，不负责追溯这些输入的来源可靠性。即使历史上某些 `requester_user_id` 可能来自 video owner、parser fallback 或旧 watcher 语义，推断模块也不重新打开原始日志、不比较 provenance 可信度、不纠正 Requester Identity；这些问题若需要修正，应由 requester identity enrichment、数据修复或重导入流程处理。
+
+已决定：现有 `playback_records.request_type` 是推断输出或旧投影，不是 Request Source Type Inference 的输入。全局 rebuild / repair 不能因为已有 `request_type` 是 `random`、`player`、`queued_self`、`self` 或其他旧值就保留它；它必须只根据当前稳定输入重新推断。旧值只能用于兼容显示、迁移诊断或审计解释。
+
+已决定：当前 `dancing_log/playback_request_type.py` 不是按本语义设计的长期模块，可以在正式实现 Request Source Type Inference 时整体替换；不需要保留旧 `REQUEST_TYPE_PRECEDENCE`、旧 `queued_self` promotion seam 或历史数字优先级作为实现约束。
+
+已决定：Request Source Type Inference 第一版接受全局重算作为普通写操作后的稳定路径。Dance Plan Fulfillment、Manual Record Update、Recommendation List Snapshot、planned record exclusion 和恢复默认等强输入发生变化时，可以直接触发全局 Dance Plan Fulfillment reconciliation 和全局 `request_type` rebuild，以正确性和可验证性优先。VRCX importer、watcher 和 PlaybackRecord writer 不内嵌最终策略。另提供显式 repair/rebuild 命令，用于迁移后、策略更新后或用户怀疑数据漂移时批量重投影。普通 Timeline / Insights 读路径不做隐式修复，避免读页面时改变数据库。
+
+已决定：全局重算是 Dance Plan Fulfillment 和 Request Source Type Inference 的稳定正确性基准，而不仅是异常兜底。第一版需要记录全局重算的性能成本，包括触发入口、扫描范围、受影响记录数、运行耗时和数据规模；如果成本在真实数据库上可接受，就不急于引入局部优化。局部重算只能作为后续优化路径，不作为第一版正确性的唯一依据。实现顺序应先有可重复的全局 reconciliation / rebuild，再引入局部重算；局部重算必须通过测试证明与全局重算结果一致，并且在范围不明确、检测到冲突或验证失败时退回全局重算。
+
+局部重算的候选范围可以从受影响的 `dance_plan_id`、`dance_track_id`、相关 plan item 的 `intended_local_date`、相关 playback record 的 Local Dance Day、superseded 链和 fulfillment 链扩张出来。但这个范围定义属于可验证优化，不是领域事实。测试需要覆盖跨多天顺延、superseded 恢复、fulfilled item 强删、planned record exclude、恢复默认、同一 dance track 多次播放和导入来源重叠等场景。
 
 ### 3. `planned` 覆盖是否属于 evidence 字段还是用户/计划 overlay
 
-未确定：`planned` 是直接写入 `playback_records.request_type` 的当前投影，还是应该由 fulfillment 表/overlay 推导出来，再投影到读模型。
+已决定：`playback_records.request_type = planned` 只是当前投影；它的正式解释来源必须是 Dance Plan Fulfillment。换句话说，不能只有一条 playback record 被写成 `planned`，却没有可追溯的 plan item fulfillment 关系解释它为什么是 planned。
 
-建议答案：长期可以把 `request_type` 保留为当前投影字段，但 `planned` 的解释来源必须是 Dance Plan Fulfillment，而不是 playback evidence 本身。也就是说，写入 `planned` 时要保留可解释的 fulfillment 关系；解除 fulfillment 时重新推断默认 Request Source Type。
+第一版可以继续用 `dance_plan_items.fulfilled_by_playback_record_id` 表达 fulfillment，不急着拆独立的 `dance_plan_fulfillments` 表。若未来需要一条 playback record 同时 fulfill 多份 plan、fulfillment 自身需要审计字段、或需要保存更复杂的匹配解释，再考虑拆表。
 
-还没算定的原因：当前草案已经说 fulfilled item 会提升 playback record 的 `request_type`，但还没有决定是否需要额外记录“这个 request_type 是由 plan fulfillment 产生的”以支持审计、undo 和冲突解释。
+写入 `planned` 时必须保留 fulfillment 关系；解除 fulfillment 时，系统重新运行 Request Source Type Inference，恢复为未匹配 plan 时的默认分类。
 
 ### 4. 手动编辑 Request Source Type 与 plan fulfillment 的优先级
 
-未确定：用户在 Timeline 手动把一条 fulfilled playback record 的 Request Source Type 改成 `self`、`other` 或 `recommend` 时，是否应解除 fulfillment，还是只创建一个更强的 manual overlay。
+已决定：第一版不提供用户直接编辑 Request Source Type 的入口。用户在 Timeline 里主要处理 accepted / excluded / restore default 这类 review 决策；Request Source Type 由统一 inference 模块根据稳定输入投影出来，而不是由用户手动把某条 record 改成 `self`、`other`、`recommend` 或 `planned`。
 
-建议答案：手动编辑应先被建模为 Manual Record Update overlay，强于自动推断，但不必自动删除 fulfillment。UI 需要明确提示：这会让显示的 Request Source Type 不再来自计划；如果用户要取消计划对账，应执行“解除 fulfillment / 从计划中移除”的显式动作。
+用户未来可以手动新增一条 playback record，用来补录确实发生过但 watcher、VRCX 或导入没有捕获到的播放，但这个能力当前暂缓实现。该未来记录应作为 `manual_log` Local Playback Evidence 写入，而不是作为 Manual Record Update 覆盖已有记录。手动新增记录可以包含 dance track、played time、可选 requester/note 等播放事实，但不能直接携带 canonical `request_type`；写入后由统一 Request Source Type Inference 和 Dance Plan Fulfillment reconciliation 决定它最终显示为 `planned`、`self`、`other`、`recommend`、`random` 或 `unknown`。
 
-还没算定的原因：现有文档覆盖了 plan item 删除和 playback exclusion，但没有覆盖“保留 accepted + fulfillment，同时手动改 source type”的场景。
+如果用户认为 `planned` 不对，应通过 plan 行为处理：exclude fulfilled playback record、解除 fulfillment、移除或顺延 plan item。若用户认为 `self` / `other` 不对，第一版优先通过修正 Self User Identity、Requester Identity 或相关 evidence 输入来影响推断，而不是直接覆盖 Request Source Type。
+
+未来如果确实需要“手动来源覆盖”，必须作为新的产品能力重新讨论；它不应复用第一版 Manual Record Update 偷偷改 `request_type`，也不应自动破坏 Dance Plan Fulfillment。
 
 ### 5. Accepted playback 与 plan item 的自动匹配规则
 
-未确定：一个本地跳舞日内多个 accepted playback 和多个 plan item 匹配时，第一版是否只按 `dance_track_id` 匹配，还是还要考虑时间顺序、plan_order、requester、系统来源或手动确认。
+已决定：第一版 plan item 与 accepted playback record 的自动 fulfillment 主匹配键是 `dance_track_id`，匹配窗口是同一个 Local Dance Day。Requester、请求来源、evidence source、系统来源和手动确认都不参与主匹配。
 
-建议答案：第一版在“同一 plan、同一 intended local date、同一 dance_track 只能有一个 active planned item”的约束下，可以按 `dance_track_id + Local Dance Day` 自动匹配；如果未来允许重复计划同一支舞，再引入 `plan_order + played_at` 的顺序配对规则。
+在“同一 plan、同一 intended local date、同一 dance_track 只能有一个 active planned item”的约束下，常规场景可以按 `dance_track_id + Local Dance Day` 自动匹配。未来如果允许重复计划同一支舞，再引入 `plan_order + played_at` 的顺序配对规则。
 
-还没算定的原因：草案已经排除了第一版重复 planned item，但没有明确当播放记录重复、导入来源重叠或同一舞一天多次实际播放时的精确 tie-breaker。
+已决定：当同一 Local Dance Day 内同一个 `dance_track_id` 有多条 effective accepted playback records 时，Dance Plan fulfillment 只匹配当天最早的一条 eligible record。后续同 track 播放不会因为同一个 plan item 继续被标记为 `planned`。
+
+已决定：导入来源重叠、重复 evidence、同一次实际播放对应多条 playback records 的识别和处理，不属于 Dance Plan Fulfillment reconciliation 或 Request Source Type Inference 的职责。它们只消费 effective accepted projection 给出的候选 records，然后按 `dance_track_id + Local Dance Day + earliest played_at` 匹配。overlap / merge / duplicate resolution 属于 Playback Evidence Merge、acceptance/effective projection 或专门的数据修复流程。
 
 ### 6. 旧 `data/queued_self/` manifest 的产品入口何时移除
 
-未确定：第一版数据库 Dance Plan 上线后，现有 Lists 页面和 `sync_queued_self_manifests` 是立即隐藏/废弃，还是保留一个只读诊断或一次性参考入口。
+已决定：数据库 Dance Plan 上线后，旧 `data/queued_self/` manifest 入口不保留。用户没有依赖这个旧入口，因此不需要长期导入、自动迁移、只读诊断页或 CLI 兼容命令。
 
-建议答案：不要做长期导入或自动迁移；如果要保留，最多作为只读 legacy preview，提醒用户手动补录为历史 plan item。正常产品导航应转向数据库里的 Dance Plan，而不是继续强化 manifest 编辑流。
+现有 Lists 页面应转向数据库里的 Dance Plan，或在没有替代入口前移除旧 manifest 展示。`sync_queued_self_manifests` / `sync-queued-self` 可以随实现切换删除或隐藏，不再作为正式 workflow。需要保留的旧语义只存在于 legacy input normalization、旧数据解释和 raw/origin/provenance 审计材料中；正式 Dance Plan 表和 canonical `request_type` 不写 `queued_self`。
 
-还没算定的原因：文档已经决定旧 manifest 不迁移、不长期兼容导入，但现有 Web UI 仍有 Lists manifest 预览，尚未决定切换时的 UI 处置。
+用户如需恢复某条旧计划语义，应手动添加历史 Dance Plan item，而不是从旧 manifest 自动迁移。
 
 ### 7. `request_type = unknown`、`NULL` 和空值的语义
 
-未确定：长期 schema 中未能推断的 Request Source Type 应写成 `unknown`，还是保留 `NULL`；两者在 UI、Insights 和 rebuild 中是否有不同意义。
+已决定：`NULL` 和 `unknown` 必须区分。
 
-建议答案：区分两者：`NULL` 表示尚未运行或不适用 Request Source Type 推断，`unknown` 表示策略已运行但只能判断为未知来源。Insights 可以把两者合并展示为 unknown，但数据修复和迁移验证应保留差异。
+- `NULL` 表示 Request Source Type Inference 尚未运行、记录不适用推断，或迁移后等待 rebuild。
+- `unknown` 表示推断已经运行，但稳定输入不足以判定为 `planned`、`recommend`、`self`、`other` 或 `random`。
 
-还没算定的原因：现有文档同时提到恢复为 `unknown` 或空值，迁移计划又要求新 `request_type` 默认 `NULL`，需要统一长期语义。
+UI 可以把两者都显示成“未知”，但诊断、repair、测试和迁移校验必须保留差异。全局 rebuild 跑完后，对适用推断的 accepted records，不应继续留下 `NULL`；要么有具体 Request Source Type，要么是 `unknown`。
+
+`unknown` 是 debug 和数据修复需要重点关注的对象。它表示系统已经尝试解释来源但证据仍不够清楚，不应被当成无害的空值或普通默认值忽略。
+
+### 8. 手动新增 playback record
+
+暂缓：用户未来可以凭空插入一条新的 Manual Log Entry / `manual_log` Local Playback Evidence，用来补录确实发生过但 watcher、VRCX 或导入没有捕获到的播放。但这个能力不进入当前 Dance Plan 和 Request Source Type Inference 第一版实现范围。
+
+已决定的边界：未来手动新增 playback record 也不能直接携带 canonical `request_type`。它只写播放事实，之后由统一 Request Source Type Inference 和 Dance Plan Fulfillment reconciliation 决定最终分类。
+
+未讨论：手动新增 playback record 的默认 acceptance、UI 入口、去重规则、与现有 evidence 的 merge/overlap 规则。
