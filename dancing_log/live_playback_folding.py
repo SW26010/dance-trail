@@ -515,6 +515,8 @@ def _duration_values_differ(left, right) -> bool:
 def _duration_source_priority(source: str | None) -> int:
     return {
         "wanna_queue_json": 10,
+        "dudu_queue_json": 10,
+        "dudu_song_json": 20,
         "vrcx_payload": 20,
         "wanna_video_duration": 30,
     }.get(source or "", 0)

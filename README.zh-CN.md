@@ -159,8 +159,9 @@ uv run python main.py import-vrcx --dry-run
 uv run python main.py import-vrcx
 ```
 
-当前 importer 支持 WannaDance URL。PyPyDance、Dudu 和其他系统会被统计为
-unsupported，不会误判成 WannaDance。
+当前 importer 支持 WannaDance URL 和实测 PyPyDance URL；对实测 DuDu FitDance
+API/CDN/官网 URL 是实验性识别。其他系统会被统计为 unsupported，不会误判成
+WannaDance。
 
 ## 实时 VRChat 日志和 OBS Overlay
 
@@ -286,6 +287,7 @@ Web UI 只绑定到 `127.0.0.1`。第一版已实现 Settings-first 的完整配
 - `docs/app_directories.zh-CN.md`
 - `docs/portable_release.zh-CN.md`
 - `docs/wanna_catalog_sync.zh-CN.md`
+- `docs/dudu_catalog_sync.zh-CN.md`
 - `docs/vrcx_integration_notes.zh-CN.md`
 - `docs/music_api_research.zh-CN.md`
 

@@ -1,7 +1,7 @@
 # 跳舞数据模型
 
 日期：2026-05-17
-更新：2026-06-25
+更新：2026-06-30
 
 本文描述 `dancing-log` 当前的 SQLite 运行时模型。项目已经不再使用旧的
 `songs` 表，也不再使用 `dance_events.song_id`。
@@ -22,9 +22,10 @@ Timeline 和 Insights 查询使用的 Local Playback Evidence v0 读模型 contr
 - CSV/JSON 只是导入、导出或检查产物。
 - 重建时归档旧生成数据，不做原地迁移。
 - `config/dancing-log.local.json` 和 `data/queued_self/` 会作为本地输入保留。
-- WannaDance 是第一个真正实现的舞蹈系统。
-- PyPyDance URL 身份已能从实测日志中识别；Dudu、VRDancing 和其他系统暂不支持，
-  等看到真实元数据形状后再设计。
+- WannaDance 是第一个有目录同步实现的舞蹈系统。
+- PyPyDance URL 身份已能从实测日志中识别；DuDu FitDance 基于少量样本有
+  实验性支持，能从官网/API URL、VRChat 日志元数据和 VRCX URL 中识别为
+  `dudu`。Dudu 目录同步仍待实现，VRDancing 和其他系统暂不支持。
 - `music_tracks` 和 `dance_track_music_links` 已实现，当前用保守的标题/歌手匹配。
 - `playback_records` 是当前 accepted 历史、Review Attention、Timeline 和 Insights
   读取使用的 Local Playback Evidence 根。
@@ -60,7 +61,9 @@ Timeline 和 Insights 查询使用的 Local Playback Evidence v0 读模型 contr
 - `dudu`
 - `vrdancing`
 
-目前只有 `wannadance` 已实现。
+目前 `wannadance` 有目录同步实现。`pypydance` 支持 URL/playback identity；
+`dudu` 是实验性 playback identity 支持，能从 watcher/VRCX 生成播放证据，
+但暂未实现目录同步，不能宣称全量支持 DuDu FitDance。
 
 ### 舞蹈条目
 

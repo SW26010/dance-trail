@@ -1,6 +1,6 @@
 import unittest
 
-from dancing_log.storage import WANNA_SYSTEM_KEY
+from dancing_log.storage import DUDU_SYSTEM_KEY, WANNA_SYSTEM_KEY
 from dancing_log.vrcx_importer import parse_dance_url, parse_wanna_song_id
 
 
@@ -35,7 +35,7 @@ class DanceUrlParsingTest(unittest.TestCase):
         self.assertEqual(result.url_kind, "wanna_cdn")
         self.assertEqual(result.method, "cdn_file_path")
 
-    def test_parses_pypydance_urls_and_marks_other_systems_as_unsupported(self):
+    def test_parses_pypydance_and_dudu_urls(self):
         pypy = parse_dance_url("http://jd.pypy.moe/api/v1/videos/4051.mp4")
         self.assertEqual(pypy.system_key, "pypydance")
         self.assertEqual(pypy.external_id, "4051")
@@ -49,9 +49,22 @@ class DanceUrlParsingTest(unittest.TestCase):
         self.assertEqual(pypy.method, "api_query_id")
 
         dudu = parse_dance_url("https://api.dudufit.dance/api/v1/videos/1321?cdn=jpn")
-        self.assertIsNone(dudu.system_key)
+        self.assertEqual(dudu.system_key, DUDU_SYSTEM_KEY)
+        self.assertEqual(dudu.external_id, "1321")
         self.assertEqual(dudu.url_kind, "dudu")
-        self.assertEqual(dudu.method, "unsupported_system")
+        self.assertEqual(dudu.method, "api_video_path")
+
+        dudu_cdn = parse_dance_url(
+            "https://global-cdn.dudufit.dance/videos/2074-057e.mp4?etag=057e"
+        )
+        self.assertEqual(dudu_cdn.system_key, DUDU_SYSTEM_KEY)
+        self.assertEqual(dudu_cdn.external_id, "2074")
+        self.assertEqual(dudu_cdn.method, "cdn_file_path")
+
+        dudu_web = parse_dance_url("https://www.dudufit.dance/zh/videos/2074")
+        self.assertEqual(dudu_web.system_key, DUDU_SYSTEM_KEY)
+        self.assertEqual(dudu_web.external_id, "2074")
+        self.assertEqual(dudu_web.method, "web_video_path")
 
     def test_rejects_non_wanna_numeric_urls(self):
         self.assertIsNone(parse_wanna_song_id("https://v.dm5.vrchat.org.cn/play/4164"))

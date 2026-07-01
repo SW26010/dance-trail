@@ -5,7 +5,7 @@ import time
 import unittest
 from pathlib import Path
 
-from dancing_log.storage import WANNA_SYSTEM_KEY, connect_db
+from dancing_log.storage import DUDU_SYSTEM_KEY, WANNA_SYSTEM_KEY, connect_db
 from dancing_log.vrc_log_watcher import (
     parse_vrc_lifecycle_event,
     parse_vrc_log_line,
@@ -122,6 +122,75 @@ class VrcLogParserTest(unittest.TestCase):
         self.assertEqual(events[0].display_name, "Alice")
         self.assertEqual(events[0].duration_seconds, 254.0)
 
+    def test_parses_dudu_queue_current_song_and_play_signal(self):
+        queue_events = parse_vrc_log_line(
+            '2026.06.30 20:59:29 Debug - [20:59:29] : '
+            '[VideoQueueHandler.OnDeserialization] Queue data = '
+            '[{"title":"1321. THE FEELS (AIRSPARK REMIX) - TWICE ",'
+            '"playerName":"ExamplePlayerA","group":"Golfy Dance Fitness",'
+            '"duration":295,"songId":1321}]'
+        )
+        song_events = parse_vrc_log_line(
+            '2026.06.30 20:59:45 Debug - [20:59:45] : '
+            '[VideoQueueHandler.DeserializeVideoSongData] deserialize video data:  '
+            '{"ver":"1782753707","id":1321,"shuffle":false,'
+            '"info":"1321. THE FEELS (AIRSPARK REMIX) - TWICE ",'
+            '"user":"ExamplePlayerA","url":"https://api.dudufit.dance/api/v1/videos/1321",'
+            '"group":"Golfy Dance Fitness","dancer":"Golfy","artist":"TWICE",'
+            '"title":"THE FEELS (AIRSPARK REMIX)"}'
+        )
+        play_events = parse_vrc_log_line(
+            "2026.06.30 20:59:55 Debug - [20:59:55] : "
+            "[VideoQueueHandler.OnVideoPlay] VizVid callback: video playback started"
+        )
+        missing_user_events = parse_vrc_log_line(
+            '2026.06.30 21:58:24 Debug - [21:58:24] : '
+            '[VideoQueueHandler.OnDeserialization] Queue data = '
+            '[{"title":"2074. Permission to Dance - BTS ","duration":223,"songId":2074}]'
+        )
+
+        self.assertEqual(len(queue_events), 1)
+        self.assertEqual(queue_events[0].parser_name, "dudu_queue_info")
+        self.assertEqual(queue_events[0].duration_seconds, 295.0)
+        self.assertEqual(queue_events[0].duration_source, "dudu_queue_json")
+        self.assertEqual(queue_events[0].display_name, "ExamplePlayerA")
+        self.assertIsNone(queue_events[0].requester_user_id)
+        self.assertIsNone(queue_events[0].requester_user_id_source)
+        queue_record = queue_events[0].to_capture_record()
+        self.assertEqual(queue_record["dance_system_key"], DUDU_SYSTEM_KEY)
+        self.assertEqual(queue_record["dance_external_id"], "1321")
+        self.assertEqual(queue_record["video_name"], "THE FEELS (AIRSPARK REMIX) - TWICE")
+        self.assertIsNone(queue_record["requester_user_id"])
+
+        self.assertEqual(len(song_events), 1)
+        self.assertEqual(song_events[0].parser_name, "dudu_song_data")
+        self.assertEqual(song_events[0].display_name, "ExamplePlayerA")
+        self.assertIsNone(song_events[0].requester_user_id)
+        self.assertEqual(song_events[0].to_capture_record()["dance_system_key"], DUDU_SYSTEM_KEY)
+        self.assertEqual(song_events[0].to_capture_record()["dance_external_id"], "1321")
+
+        self.assertEqual(len(play_events), 1)
+        self.assertEqual(play_events[0].event_type, "actual-play")
+        self.assertEqual(play_events[0].parser_name, "dudu_on_video_play")
+        self.assertIsNone(missing_user_events[0].display_name)
+        self.assertIsNone(missing_user_events[0].requester_user_id)
+
+        zero_id_events = parse_vrc_log_line(
+            '2026.06.30 21:59:24 Debug - [21:59:24] : '
+            '[VideoQueueHandler.OnDeserialization] Queue data = '
+            '[{"title":"0. 感谢参加 DuDu FitDance 喵 - DuDu FitDance ",'
+            '"playerName":"ExamplePlayerA","duration":954,"songId":0}]'
+        )
+        self.assertEqual(zero_id_events[0].to_capture_record()["dance_external_id"], "0")
+        zero_song_events = parse_vrc_log_line(
+            '2026.06.30 21:59:25 Debug - [21:59:25] : '
+            '[VideoQueueHandler.DeserializeVideoSongData] deserialize video data:  '
+            '{"id":0,"shuffle":false,'
+            '"info":"0. 感谢参加 DuDu FitDance 喵 - DuDu FitDance ",'
+            '"user":"ExamplePlayerA","url":"https://api.dudufit.dance/api/v1/videos/0"}'
+        )
+        self.assertEqual(zero_song_events[0].to_capture_record()["dance_external_id"], "0")
+
     def test_parses_vrcx_video_play_payloads(self):
         pypy_events = parse_vrc_log_line(
             '2026.05.17 15:30:03 Log - [VRCX] VideoPlay(PyPyDance) '
@@ -139,6 +208,8 @@ class VrcLogParserTest(unittest.TestCase):
         self.assertEqual(json_events[0].world_parser, "PopcornPalace")
         self.assertEqual(json_events[0].display_name, "Dana")
         self.assertEqual(json_events[0].to_capture_record()["url_kind"], "dudu")
+        self.assertEqual(json_events[0].to_capture_record()["dance_system_key"], DUDU_SYSTEM_KEY)
+        self.assertEqual(json_events[0].to_capture_record()["dance_external_id"], "1321")
 
     def test_parses_vrcx_video_play_offset_duration_title_and_requester_marker(self):
         events = parse_vrc_log_line(
@@ -1181,6 +1252,59 @@ class VrcLogWatcherTest(unittest.TestCase):
             self.assertEqual(row["actual_play_at"], "2026-05-17T07:30:10Z")
             self.assertEqual(row["completion_status"], "interrupted")
             self.assertEqual(row["completion_reason"], "watcher_stopped")
+
+    def test_watcher_folds_dudu_current_song_and_play_signal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            db_path = root / "app.sqlite3"
+            (log_dir / "output_log_0001.txt").write_text(
+                '2026.06.30 20:59:29 Debug - [20:59:29] : '
+                '[VideoQueueHandler.OnDeserialization] Queue data = '
+                '[{"title":"1321. THE FEELS (AIRSPARK REMIX) - TWICE ",'
+                '"playerName":"ExamplePlayerA","group":"Golfy Dance Fitness",'
+                '"duration":295,"songId":1321}]\n'
+                '2026.06.30 20:59:45 Debug - [20:59:45] : '
+                '[VideoQueueHandler.DeserializeVideoSongData] deserialize video data:  '
+                '{"ver":"1782753707","id":1321,"shuffle":false,'
+                '"info":"1321. THE FEELS (AIRSPARK REMIX) - TWICE ",'
+                '"user":"ExamplePlayerA","url":"https://api.dudufit.dance/api/v1/videos/1321",'
+                '"group":"Golfy Dance Fitness","dancer":"Golfy","artist":"TWICE",'
+                '"title":"THE FEELS (AIRSPARK REMIX)"}\n'
+                "2026.06.30 20:59:45 Debug - [Video Playback] "
+                "Attempting to resolve URL 'https://api.dudufit.dance/api/v1/videos/1321?cdn=sha'\n"
+                "2026.06.30 20:59:47 Debug - [Video Playback] "
+                "URL 'https://api.dudufit.dance/api/v1/videos/1321?cdn=sha' resolved to "
+                "'https://api-ddfd.imkiva.com/videos/1321-abcdef.mp4?etag=abcdef'\n"
+                "2026.06.30 20:59:55 Debug - [20:59:55] : "
+                "[VideoQueueHandler.OnVideoPlay] VizVid callback: video playback started\n",
+                encoding="utf-8",
+            )
+
+            watch_vrc_logs(
+                log_dir=log_dir,
+                output_dir=root / "capture",
+                session_name="dudu-live-db",
+                app_db_path=db_path,
+                from_start=True,
+                live_db=True,
+                poll_seconds=0.01,
+                stop_after_idle_seconds=0.05,
+            )
+
+            with connect_db(db_path) as conn:
+                row = conn.execute("SELECT * FROM live_playback_events").fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["dance_system_key"], DUDU_SYSTEM_KEY)
+            self.assertEqual(row["dance_external_id"], "1321")
+            self.assertEqual(row["video_name"], "THE FEELS (AIRSPARK REMIX) - TWICE")
+            self.assertEqual(row["duration_seconds"], 295.0)
+            self.assertEqual(row["duration_source"], "dudu_queue_json")
+            self.assertEqual(row["actual_play_at"], "2026-06-30T12:59:55Z")
+            self.assertEqual(row["source_type"], "player")
+            self.assertEqual(row["source_display_name"], "ExamplePlayerA")
+            self.assertIsNone(row["requester_user_id"])
 
     def test_watcher_marks_incomplete_graceful_stop_needs_attention(self):
         with tempfile.TemporaryDirectory() as tmp:

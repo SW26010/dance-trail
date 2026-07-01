@@ -45,6 +45,8 @@ from dancing_log.watcher_playback_materializer import (
 
 WANNA_SYSTEM_KEY = "wannadance"
 WANNA_SYSTEM_NAME = "WannaDance"
+DUDU_SYSTEM_KEY = "dudu"
+DUDU_SYSTEM_NAME = "DuDu FitDance"
 
 LIVE_PLAYBACK_TIME_FIELDS = (
     "first_seen_at",
@@ -1030,8 +1032,11 @@ def normalize_music_text(value: str) -> str:
 
 
 def _system_display_name(system_key: str) -> str:
-    if system_key.strip().lower() == WANNA_SYSTEM_KEY:
+    normalized = system_key.strip().lower()
+    if normalized == WANNA_SYSTEM_KEY:
         return WANNA_SYSTEM_NAME
+    if normalized == DUDU_SYSTEM_KEY:
+        return DUDU_SYSTEM_NAME
     return system_key.strip()
 
 

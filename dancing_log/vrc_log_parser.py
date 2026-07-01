@@ -42,6 +42,8 @@ VIDEO_TOKENS = (
     "delayedvideoready",
     "onvideostart",
     "playing synced",
+    "videoqueuehandler",
+    "dudufit.dance",
 )
 LIFECYCLE_TOKENS = (
     "onleftroom",
@@ -131,6 +133,19 @@ WANNADANCE_PLAY_VIDEO_RE = re.compile(
     r"(?P<action>PlayQueueVideo|PlayRandomVideo):\s+"
     r".*?\buserData\s*=\s*(?P<payload>\{.*\})\s*,\s*"
     r"videoDuration\s*=\s*(?P<duration>[\d.]+)",
+    re.IGNORECASE,
+)
+DUDU_QUEUE_DATA_RE = re.compile(
+    r"\[VideoQueueHandler\.OnDeserialization\]\s+Queue data\s*=\s*(?P<payload>\[.*\])",
+    re.IGNORECASE,
+)
+DUDU_SONG_DATA_RE = re.compile(
+    r"\[VideoQueueHandler\.DeserializeVideoSongData\]\s+"
+    r"deserialize video data:\s*(?P<payload>\{.*\})",
+    re.IGNORECASE,
+)
+DUDU_ON_VIDEO_PLAY_RE = re.compile(
+    r"\[VideoQueueHandler\.OnVideoPlay\]\s+VizVid callback:\s+video playback started",
     re.IGNORECASE,
 )
 VRCX_VIDEO_PLAY_RE = re.compile(
@@ -394,6 +409,40 @@ def parse_vrc_log_line(line: str) -> list[ParsedVrcLogEvent]:
         if event is not None:
             events.append(event)
 
+    match = DUDU_QUEUE_DATA_RE.search(plain_line)
+    if match:
+        events.extend(
+            _events_from_dudu_queue_info(
+                timestamp=timestamp,
+                payload=match.group("payload"),
+                raw_line=line,
+            )
+        )
+
+    match = DUDU_SONG_DATA_RE.search(plain_line)
+    if match:
+        event = _event_from_dudu_song_data(
+            timestamp=timestamp,
+            payload=match.group("payload"),
+            raw_line=line,
+        )
+        if event is not None:
+            events.append(event)
+
+    match = DUDU_ON_VIDEO_PLAY_RE.search(plain_line)
+    if match:
+        events.append(
+            ParsedVrcLogEvent(
+                timestamp=timestamp,
+                event_type="actual-play",
+                video_url=None,
+                display_name=None,
+                parser_name="dudu_on_video_play",
+                raw_line=line,
+                actual_play_method="dudu_on_video_play",
+            )
+        )
+
     match = VIDEO_PLAYBACK_RE.search(plain_line)
     if match:
         events.append(
@@ -643,6 +692,103 @@ def _event_from_wannadance_play_video(
         is_random=value.get("isRandom"),
         duration_seconds=_float_or_none(duration),
         duration_source="wanna_video_duration",
+    )
+
+
+def _events_from_dudu_queue_info(
+    *,
+    timestamp: str | None,
+    payload: str,
+    raw_line: str,
+) -> list[ParsedVrcLogEvent]:
+    value = _try_json(payload)
+    if not isinstance(value, list):
+        return []
+    events: list[ParsedVrcLogEvent] = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            continue
+        events.append(
+            _dudu_metadata_event(
+                timestamp=timestamp,
+                raw_line=raw_line,
+                parser_name="dudu_queue_info",
+                video_id=_first_present(entry, "songId", "song_id", "id"),
+                video_url=entry.get("url") or entry.get("videoUrl") or entry.get("video_url"),
+                title=entry.get("title") or entry.get("info") or entry.get("name"),
+                display_name=entry.get("playerName") or entry.get("player_name") or entry.get("user"),
+                is_random=entry.get("shuffle") or entry.get("isRandom"),
+                duration_seconds=_float_or_none(
+                    str(entry.get("duration")) if entry.get("duration") is not None else None
+                ),
+                duration_source="dudu_queue_json",
+            )
+        )
+    return [event for event in events if event is not None]
+
+
+def _event_from_dudu_song_data(
+    *,
+    timestamp: str | None,
+    payload: str,
+    raw_line: str,
+) -> ParsedVrcLogEvent | None:
+    value = _try_json(payload)
+    if not isinstance(value, dict):
+        return None
+    return _dudu_metadata_event(
+        timestamp=timestamp,
+        raw_line=raw_line,
+        parser_name="dudu_song_data",
+        video_id=_first_present(value, "id", "songId", "song_id"),
+        video_url=value.get("url") or value.get("videoUrl") or value.get("video_url"),
+        title=_dudu_title_value(value),
+        display_name=value.get("user") or value.get("playerName") or value.get("displayName"),
+        is_random=value.get("shuffle") or value.get("isRandom"),
+        duration_seconds=_float_or_none(
+            str(value.get("duration")) if value.get("duration") is not None else None
+        ),
+        duration_source="dudu_song_json",
+    )
+
+
+def _dudu_metadata_event(
+    *,
+    timestamp: str | None,
+    raw_line: str,
+    parser_name: str,
+    video_id,
+    video_url,
+    title,
+    display_name,
+    is_random,
+    duration_seconds: float | None,
+    duration_source: str | None,
+) -> ParsedVrcLogEvent | None:
+    video_id_text = str(video_id).strip() if video_id is not None else ""
+    if not video_id_text and not video_url:
+        return None
+
+    clean_url = _clean_url(str(video_url)) if video_url else _dudu_video_url(video_id_text)
+    title_id, video_name, requester_marker = _parse_video_title_payload(str(title or ""))
+    resolved_video_id = video_id_text or title_id
+    random_source = _truthy(is_random)
+    clean_display_name = _clean_display_name(str(display_name)) if display_name is not None else None
+    source_hint = "random" if random_source else None
+
+    return ParsedVrcLogEvent(
+        timestamp=timestamp,
+        event_type="metadata",
+        video_url=clean_url,
+        display_name=clean_display_name,
+        parser_name=parser_name,
+        raw_line=raw_line,
+        video_name=video_name,
+        video_id=resolved_video_id or None,
+        requester_marker=requester_marker,
+        source_hint=source_hint,
+        duration_seconds=duration_seconds,
+        duration_source=duration_source if duration_seconds is not None else None,
     )
 
 
@@ -919,6 +1065,29 @@ def _clean_url(value: str | None) -> str:
 
 def _wanna_video_url(song_id: str) -> str:
     return f"http://api.udon.dance/Api/Songs/play?id={song_id}"
+
+
+def _dudu_video_url(video_id: str) -> str:
+    return f"https://api.dudufit.dance/api/v1/videos/{video_id}"
+
+
+def _dudu_title_value(value: dict) -> str:
+    info = str(value.get("info") or "").strip()
+    if info:
+        return info
+
+    title = str(value.get("title") or value.get("name") or "").strip()
+    artist = str(value.get("artist") or "").strip()
+    if title and artist and artist.casefold() not in title.casefold():
+        return f"{title} - {artist}"
+    return title or artist
+
+
+def _first_present(mapping: dict, *keys: str):
+    for key in keys:
+        if key in mapping and mapping[key] is not None:
+            return mapping[key]
+    return None
 
 
 def _truthy(value) -> bool:

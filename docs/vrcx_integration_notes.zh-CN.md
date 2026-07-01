@@ -181,6 +181,7 @@ VRCX 数据库路径也可以配置在 `config/dancing-log.local.json` 的 `vrcx
 
 - 读取 `gamelog_video_play`
 - 解析支持的 WannaDance 和实测 PyPyDance 播放 URL
+- 实验性识别实测 DuDu FitDance API/CDN/官网 URL
 - 写入 staging 溯源表 `vrcx_import_events`
 - 写入 accepted Local Playback Evidence row 到 `playback_records`
 - 如果解析到的 id 不在目录里，就创建 placeholder `dance_tracks`
@@ -194,10 +195,11 @@ Playback Root，`vrcx_import_events` 是导入 staging 溯源。普通 Timeline 
 
 当前支持的 WannaDance URL 包括公开 API host、实测 API-compatible host、Kiva
 上游 host，以及支持的 CDN 文件 URL 模式。实测 PyPyDance API URL 也会解析为
-`pypydance:<id>`。
+`pypydance:<id>`。实测 DuDu FitDance API、CDN 和官网 URL 会实验性解析为
+`dudu:<id>`，但不会推断缺失的 requester identity。
 
-Dudu、VRDancing 和其他系统目前只识别为 unsupported 或 unknown，等看到真实
-元数据形状后再扩展。
+VRDancing 和其他系统目前只识别为 unsupported 或 unknown，等看到真实元数据形状后
+再扩展。
 
 实时原始日志捕获单独实现在 `dancing_log/vrc_log_watcher.py`，入口命令：
 

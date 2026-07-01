@@ -290,6 +290,7 @@ The importer currently:
 
 - reads `gamelog_video_play`
 - parses supported WannaDance and observed PyPyDance playback URLs
+- experimentally recognizes observed DuDu FitDance API/CDN/page URLs
 - writes staging provenance rows to `vrcx_import_events`
 - writes accepted Local Playback Evidence rows to `playback_records`
 - creates placeholder `dance_tracks` rows when a parsed id is not already in the
@@ -306,9 +307,11 @@ staging provenance. Normal Timeline and Insights reads use accepted
 Supported WannaDance URL families include documented API hosts, observed
 WannaDance-compatible API hosts, upstream Kiva hosts, and supported CDN file URL
 patterns. Observed PyPyDance API URLs are also parsed into `pypydance:<id>`.
+Observed DuDu FitDance API, CDN, and page URLs are parsed experimentally into
+`dudu:<id>` without inferring missing requester identity.
 
-Dudu, VRDancing, and other systems are recognized only as unsupported or unknown
-until their real metadata shapes are inspected.
+VRDancing and other systems are recognized only as unsupported or unknown until
+their real metadata shapes are inspected.
 
 Live raw-log capture is implemented separately in `dancing_log/vrc_log_watcher.py`
 and exposed through:

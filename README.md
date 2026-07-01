@@ -69,6 +69,7 @@ Chinese docs:
 - `docs/dance_data_model.zh-CN.md`: Chinese data model notes.
 - `docs/portable_release.zh-CN.md`: Chinese portable release notes.
 - `docs/wanna_catalog_sync.zh-CN.md`: Chinese WannaDance sync notes.
+- `docs/dudu_catalog_sync.zh-CN.md`: Chinese DuDu FitDance source notes.
 - `docs/vrcx_integration_notes.zh-CN.md`: Chinese VRCX import notes.
 - `docs/music_api_research.zh-CN.md`: Chinese music API research notes.
 
@@ -202,9 +203,9 @@ to config:
 uv run python main.py import-vrcx
 ```
 
-The importer currently supports WannaDance and observed PyPyDance URLs. Dudu
-and other systems are counted as unsupported instead of being misclassified as
-WannaDance.
+The importer currently supports WannaDance and observed PyPyDance URLs. It also
+has experimental recognition for observed DuDu FitDance API/CDN/page URLs. Other
+systems are counted as unsupported instead of being misclassified as WannaDance.
 
 `import-vrcx` writes staging provenance to `vrcx_import_events` and accepted
 Local Playback Evidence to `playback_records`. It no longer creates normalized

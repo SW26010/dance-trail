@@ -11,6 +11,7 @@ import sqlite3
 from urllib.parse import parse_qs, urlparse
 
 from dancing_log.storage import (
+    DUDU_SYSTEM_KEY,
     WANNA_SYSTEM_KEY,
     connect_db,
     ensure_dance_system,
@@ -86,10 +87,23 @@ WANNA_CDN_HOSTS_UPSTREAM = frozenset({
 })
 WANNA_CDN_HOSTS = WANNA_CDN_HOSTS_DOCUMENTED | WANNA_CDN_HOSTS_UPSTREAM
 PYPY_SYSTEM_KEY = "pypydance"
+DUDU_API_HOSTS = frozenset({
+    "api.dudufit.dance",
+})
+DUDU_CDN_HOSTS = frozenset({
+    "api-ddfd.imkiva.com",
+    "global-cdn.dudufit.dance",
+})
 
 WANNA_API_PATH = "/api/songs/play"
 WANNA_CDN_FILE_RE = re.compile(r"^/files/[^/]+/(?P<song_id>\d+)-[^/]+\.mp4$", re.IGNORECASE)
 PYPY_VIDEO_FILE_RE = re.compile(r"^/api/v1/videos/(?P<video_id>\d+)\.mp4$", re.IGNORECASE)
+DUDU_API_VIDEO_RE = re.compile(r"^/api/v1/videos/(?P<video_id>\d+)$", re.IGNORECASE)
+DUDU_CDN_VIDEO_RE = re.compile(r"^/videos/(?P<video_id>\d+)-[^/]+\.mp4$", re.IGNORECASE)
+DUDU_WEB_VIDEO_RE = re.compile(
+    r"^/(?:[a-z]{2}(?:-[a-z]{2})?/)?videos/(?P<video_id>\d+)/?$",
+    re.IGNORECASE,
+)
 
 
 def parse_dance_url(video_url: str | None) -> DanceUrlParseResult:
@@ -144,6 +158,40 @@ def parse_dance_url(video_url: str | None) -> DanceUrlParseResult:
                 "api_video_file_path",
             )
         return DanceUrlParseResult(None, None, "pypydance", "unsupported_system")
+
+    if host in DUDU_API_HOSTS:
+        match = DUDU_API_VIDEO_RE.match(parsed.path)
+        if match:
+            return DanceUrlParseResult(
+                DUDU_SYSTEM_KEY,
+                match.group("video_id"),
+                "dudu",
+                "api_video_path",
+            )
+        return DanceUrlParseResult(None, None, "dudu", "missing_video_id")
+
+    if host in DUDU_CDN_HOSTS:
+        match = DUDU_CDN_VIDEO_RE.match(parsed.path)
+        if match:
+            return DanceUrlParseResult(
+                DUDU_SYSTEM_KEY,
+                match.group("video_id"),
+                "dudu",
+                "cdn_file_path",
+            )
+        return DanceUrlParseResult(None, None, "dudu", "unrecognized_cdn_path")
+
+    if host == "www.dudufit.dance":
+        match = DUDU_WEB_VIDEO_RE.match(parsed.path)
+        if match:
+            return DanceUrlParseResult(
+                DUDU_SYSTEM_KEY,
+                match.group("video_id"),
+                "dudu",
+                "web_video_path",
+            )
+        return DanceUrlParseResult(None, None, "dudu", "missing_video_id")
+
     if "dudu" in host:
         return DanceUrlParseResult(None, None, "dudu", "unsupported_system")
     return DanceUrlParseResult(None, None, "other", "unsupported")
@@ -180,6 +228,12 @@ def infer_source(
     return SOURCE_UNKNOWN, 0.5
 
 
+def _requester_fields_for_import(
+    row: sqlite3.Row,
+) -> tuple[str | None, str | None]:
+    return _text_or_none(row["display_name"]), _text_or_none(row["user_id"])
+
+
 def _event_key(row: sqlite3.Row) -> str:
     parts = [
         str(row["vrcx_rowid"]),
@@ -189,6 +243,11 @@ def _event_key(row: sqlite3.Row) -> str:
         str(row["user_id"] or ""),
     ]
     return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()
+
+
+def _text_or_none(value: object) -> str | None:
+    text = str(value or "").strip()
+    return text or None
 
 
 def _fetch_vrcx_rows(conn: sqlite3.Connection, limit: int | None = None) -> list[sqlite3.Row]:
@@ -254,10 +313,11 @@ def import_vrcx_database(
                 continue
             raw_created_at = row["created_at"]
             created_at = normalize_timestamp(raw_created_at)
+            display_name, user_id = _requester_fields_for_import(row)
 
             source, confidence = infer_source(
-                row["display_name"],
-                row["user_id"],
+                display_name,
+                user_id,
                 self_user_id=self_user_id,
                 blank_requester_source=blank_requester_source,
             )
@@ -316,8 +376,8 @@ def import_vrcx_database(
                     row["video_name"],
                     row["video_id"],
                     row["location"],
-                    row["display_name"],
-                    row["user_id"],
+                    display_name,
+                    user_id,
                     system_id,
                     parsed.external_id,
                     dance_track_id,
@@ -512,4 +572,6 @@ def _system_name(system_key: str | None) -> str:
         return "WannaDance"
     if system_key == PYPY_SYSTEM_KEY:
         return "PyPyDance"
+    if system_key == DUDU_SYSTEM_KEY:
+        return "DuDu FitDance"
     return system_key or "Unknown"

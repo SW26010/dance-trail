@@ -34,6 +34,7 @@ from dancing_log.playback_record_writer import (
 )
 from dancing_log.rebuild import archive_existing_data
 from dancing_log.storage import (
+    DUDU_SYSTEM_KEY,
     WANNA_SYSTEM_KEY,
     add_dance_event,
     connect_db,
@@ -1216,7 +1217,7 @@ class SQLiteRuntimeTest(unittest.TestCase):
                             "Dudu Song",
                             "",
                             "wrld_3",
-                            "",
+                            "Alice",
                             "",
                         ),
                     ],
@@ -1225,9 +1226,9 @@ class SQLiteRuntimeTest(unittest.TestCase):
 
             stats = import_vrcx_database(vrcx_path, app_db_path=app_path)
 
-            self.assertEqual(stats.playback_records_changed, 2)
-            self.assertEqual(stats.dance_events_changed, 2)
-            self.assertEqual(stats.skipped_unsupported, 1)
+            self.assertEqual(stats.playback_records_changed, 3)
+            self.assertEqual(stats.dance_events_changed, 3)
+            self.assertEqual(stats.skipped_unsupported, 0)
             with connect_db(app_path) as conn:
                 wanna_track_count = conn.execute(
                     """
@@ -1246,6 +1247,15 @@ class SQLiteRuntimeTest(unittest.TestCase):
                     WHERE ds.key = 'pypydance' AND dt.external_id = '4051'
                     """
                 ).fetchone()[0]
+                dudu_track_count = conn.execute(
+                    """
+                    SELECT count(*)
+                    FROM dance_tracks dt
+                    JOIN dance_systems ds ON ds.id = dt.system_id
+                    WHERE ds.key = ? AND dt.external_id = '1321'
+                    """,
+                    (DUDU_SYSTEM_KEY,),
+                ).fetchone()[0]
                 event_count = conn.execute("SELECT count(*) FROM dance_events").fetchone()[0]
                 playback_count = conn.execute("SELECT count(*) FROM playback_records").fetchone()[0]
                 source_tables = {
@@ -1261,15 +1271,29 @@ class SQLiteRuntimeTest(unittest.TestCase):
                     ORDER BY created_at
                     """
                 ).fetchall()
+                dudu_playback = conn.execute(
+                    """
+                    SELECT requester_display_name, requester_user_id, request_type
+                    FROM playback_records
+                    WHERE dance_system_key = ? AND dance_external_id = '1321'
+                    """,
+                    (DUDU_SYSTEM_KEY,),
+                ).fetchone()
             self.assertEqual(wanna_track_count, 1)
             self.assertEqual(pypy_track_count, 1)
+            self.assertEqual(dudu_track_count, 1)
             self.assertEqual(event_count, 0)
-            self.assertEqual(playback_count, 2)
+            self.assertEqual(playback_count, 3)
             self.assertEqual(source_tables, {"vrcx_import_events"})
             self.assertEqual(parsed[0]["parsed_external_id"], "3114")
             self.assertEqual(parsed[1]["parsed_external_id"], "4051")
+            self.assertEqual(parsed[2]["parsed_external_id"], "1321")
             self.assertIsInstance(parsed[0]["parsed_dance_track_id"], int)
             self.assertIsInstance(parsed[1]["parsed_dance_track_id"], int)
+            self.assertIsInstance(parsed[2]["parsed_dance_track_id"], int)
+            self.assertEqual(dudu_playback["requester_display_name"], "Alice")
+            self.assertIsNone(dudu_playback["requester_user_id"])
+            self.assertEqual(dudu_playback["request_type"], "unknown")
 
     def test_vrcx_import_reuses_cleanup_dance_event_source_identity(self):
         with tempfile.TemporaryDirectory() as tmp:

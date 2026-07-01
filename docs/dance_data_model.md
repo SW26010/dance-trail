@@ -1,7 +1,7 @@
 # Dance Data Model
 
 Date: 2026-05-17
-Updated: 2026-06-25
+Updated: 2026-06-30
 
 This document describes the current SQLite runtime model for `dancing-log`.
 The project no longer uses the legacy `songs` table or
@@ -23,10 +23,11 @@ The first refactor implements the core model directly:
 - Generated CSV/JSON files are import/export artifacts only.
 - Existing generated data is archived during rebuild, not migrated in place.
 - `config/dancing-log.local.json` and `data/queued_self/` are preserved as local inputs.
-- WannaDance is the first implemented dance system.
-- PyPyDance URL identity is supported from observed logs; Dudu, VRDancing, and
-  other systems remain unsupported until their real metadata shapes are
-  inspected.
+- WannaDance is the first dance system with catalog sync implemented.
+- PyPyDance URL identity is supported from observed logs. DuDu FitDance has
+  experimental support from a small sample set: official/API URLs, VRChat log
+  metadata, and VRCX URLs can be recognized as `dudu`. Dudu catalog sync
+  remains unimplemented; VRDancing and other systems are still unsupported.
 - `music_tracks` and `dance_track_music_links` are implemented with conservative
   title/artist matching.
 - `playback_records` is the current Local Playback Evidence root for accepted
@@ -68,7 +69,10 @@ A dance system is the source namespace for playable entries. Examples:
 - `dudu`
 - `vrdancing`
 
-Only `wannadance` is implemented today.
+Only `wannadance` has catalog sync implemented today. `pypydance` supports
+URL/playback identity. `dudu` has experimental playback identity support and can
+produce playback evidence from the watcher/VRCX path, but it does not yet have
+catalog sync and should not be described as full DuDu FitDance support.
 
 ### Dance Track
 
