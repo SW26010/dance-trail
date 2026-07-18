@@ -1,0 +1,13 @@
+{
+  "name": "dancing-log-webui-tests",
+  "private": true,
+  "packageManager": "pnpm@11.9.0",
+  "scripts": {
+    "test:a11y": "playwright test tests/webui-accessibility",
+    "test:a11y:update": "playwright test tests/webui-accessibility --update-snapshots"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.12.1",
+    "@playwright/test": "1.61.1"
+  }
+}

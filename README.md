@@ -58,6 +58,7 @@ Related docs:
 - `docs/dance_data_model.md`: current SQLite model and table boundaries.
 - `docs/app_directories.md`: application-root paths, local config, and output directories.
 - `docs/portable_release.md`: Windows portable release build and tag workflow.
+- `docs/accessibility/webui-release-checklist.md`: WCAG-EM release evaluation and evidence process.
 - `docs/wanna_catalog_sync.md`: WannaDance API/cache sync behavior.
 - `docs/vrcx_integration_notes.md`: VRCX source research and importer status.
 - `docs/music_api_research.md`: archived provider-matching research.
@@ -297,7 +298,23 @@ alive for diagnosis. SSE connections use a separate active close and bounded
 drain.
 Timeline opens on the latest local date that has playback records, then keeps
 calendar and arrow navigation scoped to the selected local date.
-The UI supports English and Chinese through a browser-local language switch.
+The UI supports English and Chinese through a browser-local language switch,
+and system, light, and dark Fluent 2 themes through a separate theme selector.
+The Local Web UI is a Windows desktop productivity surface governed by Fluent 2,
+WCAG 2.2 AA, and WAI-ARIA APG. Run its browser acceptance suite with:
+
+```powershell
+uv sync --locked --cache-dir .uv-cache
+pnpm install --frozen-lockfile
+pnpm exec playwright install chromium
+pnpm test:a11y
+```
+
+This scans all seven primary pages in light and dark themes with Playwright and
+axe, then exercises ARIA, keyboard, focus, validation, failure, and forced-colors
+contracts. Automated success is not a complete conformance claim. Follow
+`docs/accessibility/webui-release-checklist.md` for the required WCAG-EM manual
+release check; Lighthouse Accessibility remains a supporting signal only.
 
 For deterministic offline replay of a fixed corpus, use the replay helper
 instead of `watch-vrc-log --from-start`:

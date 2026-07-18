@@ -249,7 +249,18 @@ uv run python main.py webui --port 8787 --no-open
 
 Web UI 只绑定到 `127.0.0.1`，默认打开 `http://127.0.0.1:8787/home`。Home、Timeline、Catalog、Lists、Insights、Data Operations、Settings 分别使用 `/home`、`/timeline`、`/catalog`、`/lists`、`/insights`、`/data-operations`、`/settings`，刷新和浏览器前进后退都会保留当前页面。Timeline 的日期和倒序选择会写入查询参数。
 
-桌面/Web UI 模式的 OBS overlay 共用同一个 HTTP 服务，地址为 `http://127.0.0.1:8787/overlay`；状态和 SSE 接口位于 `/api/overlay/state` 和 `/api/overlay/events`。此模式不会再为 overlay 占用第二个端口。停止实时 overlay 发布后，该页面会明确显示 `Overlay inactive`；只有 overlay 已启用、watcher 尚未捕获当前播放时才显示 `Waiting for playback`。即使 overlay 发布已禁用，Home 仍从独立的内存 Live Status 状态显示 watcher 当前播放；开关只控制面向 OBS 的投影。Settings 保存支持字段时，会把不认识的本地配置键作为只读值保留。UI 支持英语和中文，可在浏览器本地切换语言。
+桌面/Web UI 模式的 OBS overlay 共用同一个 HTTP 服务，地址为 `http://127.0.0.1:8787/overlay`；状态和 SSE 接口位于 `/api/overlay/state` 和 `/api/overlay/events`。此模式不会再为 overlay 占用第二个端口。停止实时 overlay 发布后，该页面会明确显示 `Overlay inactive`；只有 overlay 已启用、watcher 尚未捕获当前播放时才显示 `Waiting for playback`。即使 overlay 发布已禁用，Home 仍从独立的内存 Live Status 状态显示 watcher 当前播放；开关只控制面向 OBS 的投影。Settings 保存支持字段时，会把不认识的本地配置键作为只读值保留。UI 支持英语和中文，以及跟随系统、浅色、深色三种 Fluent 2 主题。
+
+Local Web UI 是 Windows 桌面生产力界面，以 Fluent 2、WCAG 2.2 AA 和 WAI-ARIA APG 为规范。浏览器验收命令：
+
+```powershell
+uv sync --locked --cache-dir .uv-cache
+pnpm install --frozen-lockfile
+pnpm exec playwright install chromium
+pnpm test:a11y
+```
+
+套件会用 Playwright + axe 扫描七个主页面的浅色和深色状态，并检查 ARIA、键盘、焦点、校验错误、操作失败和强制高对比度契约。自动化通过不等于完整 WCAG 一致性；每次发布还必须按 `docs/accessibility/webui-release-checklist.zh-CN.md` 完成并留存 WCAG-EM 人工检查。Lighthouse Accessibility 只作辅助信号。
 
 桌面应用退出时会先停止 Web UI 接收新请求并等待普通 HTTP handler 完成，再把实时会话不可逆地转入关闭状态。请求头和正文受单调时钟绝对期限约束；退出还会主动关闭尚未进入业务操作的连接。只有已收到并解析完整请求的 handler 才参与无界的可靠排空。这样可以等待同步 CLI watcher、后台 watcher 完成数据库提交、结算和 artifact 清理，而不会让慢速或半包请求永久卡住退出。SSE 连接使用独立的主动关闭和有界 drain；如果已受理的业务操作或 finalizer 永久卡住，进程会保留以便诊断，而不是冒险截断 SQLite 提交或留下不完整的 capture artifact。
 
@@ -291,6 +302,7 @@ Web UI 只绑定到 `127.0.0.1`，默认打开 `http://127.0.0.1:8787/home`。Ho
 - `docs/dance_data_model.md`
 - `docs/app_directories.md`
 - `docs/portable_release.md`
+- `docs/accessibility/webui-release-checklist.md`
 - `docs/wanna_catalog_sync.md`
 - `docs/vrcx_integration_notes.md`
 - `docs/music_api_research.md`
@@ -300,6 +312,7 @@ Web UI 只绑定到 `127.0.0.1`，默认打开 `http://127.0.0.1:8787/home`。Ho
 - `docs/dance_data_model.zh-CN.md`
 - `docs/app_directories.zh-CN.md`
 - `docs/portable_release.zh-CN.md`
+- `docs/accessibility/webui-release-checklist.zh-CN.md`
 - `docs/wanna_catalog_sync.zh-CN.md`
 - `docs/dudu_catalog_sync.zh-CN.md`
 - `docs/vrcx_integration_notes.zh-CN.md`

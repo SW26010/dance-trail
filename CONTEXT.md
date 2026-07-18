@@ -21,7 +21,7 @@ A viewer-facing display surface for live playback status in OBS. It is one featu
 _Avoid_: Web UI, control panel
 
 **Local Web UI**:
-The Web UI product boundary for one user operating `dancing-log` on their own machine. It is not a shared service, remote dashboard, or multi-user web app. Its HTTP boundary accepts only the expected localhost `Host`, including for read and event-stream requests.
+The Web UI product boundary for one user operating `dancing-log` on their own machine. It is a Windows desktop productivity surface governed by Fluent 2, WCAG 2.2 AA, and WAI-ARIA APG rather than a SaaS marketing site or mobile application. It is not a shared service, remote dashboard, or multi-user web app. Its HTTP boundary accepts only the expected localhost `Host`, including for read and event-stream requests.
 _Avoid_: hosted app, LAN dashboard, multi-user app
 
 **Dance Plan**:

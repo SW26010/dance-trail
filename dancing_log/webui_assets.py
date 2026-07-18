@@ -25,130 +25,271 @@ WEBUI_HTML = r"""<!doctype html>
 <style>
 :root {
   color-scheme: light;
-  --bg: #f6f7f9;
-  --panel: #ffffff;
-  --panel-alt: #fbfbfc;
-  --line: #d8dde5;
-  --line-strong: #b8c0cc;
-  --text: #18212f;
-  --muted: #657083;
-  --blue: #256fc4;
-  --green: #187758;
-  --orange: #a95716;
-  --red: #b33131;
-  --violet: #6c5a9a;
-  --shadow: 0 10px 26px rgba(24, 33, 47, 0.08);
-  --sidebar: #111820;
-  --sidebar-text: #edf2f7;
-  --sidebar-muted: #aeb8c6;
-  --sidebar-hover: #182333;
-  --sidebar-hover-line: #344154;
-  --nav-active-bg: #eef4ff;
-  --nav-active-text: #132033;
-  --input-bg: #ffffff;
-  --input-readonly: #eef1f5;
-  --primary-text: #ffffff;
-  --code-bg: #111820;
-  --code-text: #e7edf6;
-  --blue-line: #9fc2eb;
-  --blue-bg: #eef5ff;
-  --green-line: #98d6c1;
-  --green-bg: #eef9f5;
-  --orange-line: #e5bf96;
-  --orange-bg: #fff7ed;
-  --red-line: #e8abab;
-  --red-bg: #fff1f1;
-  --violet-line: #c9bee5;
-  --violet-bg: #f7f3ff;
+
+  /* Fluent 2 semantic aliases. Components consume these rather than palette values. */
+  --color-neutral-background-1: #ffffff;
+  --color-neutral-background-1-hover: #f5f5f5;
+  --color-neutral-background-1-pressed: #e0e0e0;
+  --color-neutral-background-2: #fafafa;
+  --color-neutral-background-3: #f5f5f5;
+  --color-neutral-background-4: #f0f0f0;
+  --color-neutral-foreground-1: #242424;
+  --color-neutral-foreground-2: #424242;
+  --color-neutral-foreground-3: #616161;
+  --color-neutral-stroke-1: #d1d1d1;
+  --color-neutral-stroke-1-hover: #b3b3b3;
+  --color-neutral-stroke-2: #e0e0e0;
+  --color-brand-background: #0f6cbd;
+  --color-brand-background-hover: #115ea3;
+  --color-brand-background-pressed: #0c3b5e;
+  --color-brand-foreground-1: #0f6cbd;
+  --color-brand-foreground-link: #0f548c;
+  --color-neutral-foreground-on-brand: #ffffff;
+  --color-focus-stroke-outer: #000000;
+  --color-focus-stroke-inner: #ffffff;
+  --color-status-success-foreground: #0e700e;
+  --color-status-success-border: #9fd89f;
+  --color-status-success-background: #f1faf1;
+  --color-status-warning-foreground: #8a3707;
+  --color-status-warning-border: #f2c661;
+  --color-status-warning-background: #fff9f0;
+  --color-status-danger-foreground: #b10e1c;
+  --color-status-danger-border: #eeacb2;
+  --color-status-danger-background: #fdf3f4;
+  --color-status-informative-foreground: #0f548c;
+  --color-status-informative-border: #a9d3f2;
+  --color-status-informative-background: #f0f6fa;
+  --color-status-accent-foreground: #5c2e91;
+  --color-status-accent-border: #c6b1de;
+  --color-status-accent-background: #f7f2fb;
+  --shadow-2: 0 1px 2px rgba(0, 0, 0, 0.14), 0 0 2px rgba(0, 0, 0, 0.12);
+  --shadow-4: 0 2px 4px rgba(0, 0, 0, 0.14), 0 0 2px rgba(0, 0, 0, 0.12);
+  --border-radius-small: 4px;
+  --border-radius-medium: 6px;
+  --border-radius-large: 8px;
+
+  /* Short aliases keep the existing renderer compact. */
+  --bg: var(--color-neutral-background-2);
+  --panel: var(--color-neutral-background-1);
+  --panel-alt: var(--color-neutral-background-3);
+  --line: var(--color-neutral-stroke-2);
+  --line-strong: var(--color-neutral-stroke-1);
+  --text: var(--color-neutral-foreground-1);
+  --muted: var(--color-neutral-foreground-3);
+  --blue: var(--color-brand-foreground-1);
+  --green: var(--color-status-success-foreground);
+  --orange: var(--color-status-warning-foreground);
+  --red: var(--color-status-danger-foreground);
+  --violet: var(--color-status-accent-foreground);
+  --shadow: var(--shadow-2);
+  --sidebar: var(--color-neutral-background-3);
+  --sidebar-text: var(--color-neutral-foreground-1);
+  --sidebar-muted: var(--color-neutral-foreground-3);
+  --sidebar-hover: var(--color-neutral-background-1-hover);
+  --sidebar-hover-line: var(--color-neutral-stroke-1-hover);
+  --nav-active-bg: #e6f2fb;
+  --nav-active-text: var(--color-neutral-foreground-1);
+  --input-bg: var(--color-neutral-background-1);
+  --input-readonly: var(--color-neutral-background-4);
+  --primary-text: var(--color-neutral-foreground-on-brand);
+  --code-bg: #242424;
+  --code-text: #f5f5f5;
+  --blue-line: var(--color-status-informative-border);
+  --blue-bg: var(--color-status-informative-background);
+  --green-line: var(--color-status-success-border);
+  --green-bg: var(--color-status-success-background);
+  --orange-line: var(--color-status-warning-border);
+  --orange-bg: var(--color-status-warning-background);
+  --red-line: var(--color-status-danger-border);
+  --red-bg: var(--color-status-danger-background);
+  --violet-line: var(--color-status-accent-border);
+  --violet-bg: var(--color-status-accent-background);
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-neutral-background-1: #292929;
+  --color-neutral-background-1-hover: #3d3d3d;
+  --color-neutral-background-1-pressed: #525252;
+  --color-neutral-background-2: #1f1f1f;
+  --color-neutral-background-3: #141414;
+  --color-neutral-background-4: #333333;
+  --color-neutral-foreground-1: #ffffff;
+  --color-neutral-foreground-2: #d6d6d6;
+  --color-neutral-foreground-3: #adadad;
+  --color-neutral-stroke-1: #666666;
+  --color-neutral-stroke-1-hover: #8a8a8a;
+  --color-neutral-stroke-2: #525252;
+  --color-brand-background: #115ea3;
+  --color-brand-background-hover: #0f6cbd;
+  --color-brand-background-pressed: #2886de;
+  --color-brand-foreground-1: #62abf5;
+  --color-brand-foreground-link: #96c6fa;
+  --color-neutral-foreground-on-brand: #ffffff;
+  --color-focus-stroke-outer: #ffffff;
+  --color-focus-stroke-inner: #000000;
+  --color-status-success-foreground: #7fdb76;
+  --color-status-success-border: #107c10;
+  --color-status-success-background: #173b17;
+  --color-status-warning-foreground: #fce100;
+  --color-status-warning-border: #c19c00;
+  --color-status-warning-background: #4a3f00;
+  --color-status-danger-foreground: #ff99a4;
+  --color-status-danger-border: #c50f1f;
+  --color-status-danger-background: #420610;
+  --color-status-informative-foreground: #96c6fa;
+  --color-status-informative-border: #0f6cbd;
+  --color-status-informative-background: #082338;
+  --color-status-accent-foreground: #d7bff0;
+  --color-status-accent-border: #8764b8;
+  --color-status-accent-background: #2f1f45;
+  --shadow-2: 0 1px 2px rgba(0, 0, 0, 0.48), 0 0 2px rgba(0, 0, 0, 0.36);
+  --shadow-4: 0 2px 4px rgba(0, 0, 0, 0.48), 0 0 2px rgba(0, 0, 0, 0.36);
+  --nav-active-bg: #0f548c;
+  --code-bg: #0f0f0f;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg: #0f1319;
-    --panel: #171d25;
-    --panel-alt: #1e2630;
-    --line: #303948;
-    --line-strong: #4a5668;
-    --text: #e7edf4;
-    --muted: #a3adbd;
-    --blue: #78adf3;
-    --green: #74c7a6;
-    --orange: #e8a45d;
-    --red: #f07b7b;
-    --violet: #ada3e8;
-    --shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
-    --sidebar: #0b1016;
-    --sidebar-text: #edf2f7;
-    --sidebar-muted: #9ca8b8;
-    --sidebar-hover: #17202b;
-    --sidebar-hover-line: #344052;
-    --nav-active-bg: #d9e7ff;
-    --nav-active-text: #08111d;
-    --input-bg: #101820;
-    --input-readonly: #202936;
-    --primary-text: #08111d;
-    --code-bg: #0b1016;
-    --code-text: #e7edf4;
-    --blue-line: rgba(120, 173, 243, 0.58);
-    --blue-bg: rgba(42, 78, 122, 0.28);
-    --green-line: rgba(116, 199, 166, 0.55);
-    --green-bg: rgba(30, 92, 72, 0.28);
-    --orange-line: rgba(232, 164, 93, 0.58);
-    --orange-bg: rgba(118, 76, 30, 0.28);
-    --red-line: rgba(240, 123, 123, 0.58);
-    --red-bg: rgba(117, 42, 48, 0.28);
-    --violet-line: rgba(173, 163, 232, 0.58);
-    --violet-bg: rgba(75, 64, 128, 0.28);
+    --color-neutral-background-1: #292929;
+    --color-neutral-background-1-hover: #3d3d3d;
+    --color-neutral-background-1-pressed: #525252;
+    --color-neutral-background-2: #1f1f1f;
+    --color-neutral-background-3: #141414;
+    --color-neutral-background-4: #333333;
+    --color-neutral-foreground-1: #ffffff;
+    --color-neutral-foreground-2: #d6d6d6;
+    --color-neutral-foreground-3: #adadad;
+    --color-neutral-stroke-1: #666666;
+    --color-neutral-stroke-1-hover: #8a8a8a;
+    --color-neutral-stroke-2: #525252;
+    --color-brand-background: #115ea3;
+    --color-brand-background-hover: #0f6cbd;
+    --color-brand-background-pressed: #2886de;
+    --color-brand-foreground-1: #62abf5;
+    --color-brand-foreground-link: #96c6fa;
+    --color-neutral-foreground-on-brand: #ffffff;
+    --color-focus-stroke-outer: #ffffff;
+    --color-focus-stroke-inner: #000000;
+    --color-status-success-foreground: #7fdb76;
+    --color-status-success-border: #107c10;
+    --color-status-success-background: #173b17;
+    --color-status-warning-foreground: #fce100;
+    --color-status-warning-border: #c19c00;
+    --color-status-warning-background: #4a3f00;
+    --color-status-danger-foreground: #ff99a4;
+    --color-status-danger-border: #c50f1f;
+    --color-status-danger-background: #420610;
+    --color-status-informative-foreground: #96c6fa;
+    --color-status-informative-border: #0f6cbd;
+    --color-status-informative-background: #082338;
+    --color-status-accent-foreground: #d7bff0;
+    --color-status-accent-border: #8764b8;
+    --color-status-accent-background: #2f1f45;
+    --shadow-2: 0 1px 2px rgba(0, 0, 0, 0.48), 0 0 2px rgba(0, 0, 0, 0.36);
+    --shadow-4: 0 2px 4px rgba(0, 0, 0, 0.48), 0 0 2px rgba(0, 0, 0, 0.36);
+    --nav-active-bg: #0f548c;
+    --code-bg: #0f0f0f;
   }
 }
 * { box-sizing: border-box; }
 html { overflow-y: auto; scrollbar-gutter: stable; }
 html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
-body { font-family: "Segoe UI", system-ui, sans-serif; font-size: 14px; letter-spacing: 0; }
+body {
+  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+  letter-spacing: 0;
+}
 button, input, select { font: inherit; letter-spacing: 0; }
 button { cursor: pointer; }
+.skip-link {
+  position: fixed;
+  z-index: 100;
+  top: 8px;
+  left: 8px;
+  transform: translateY(-160%);
+  border: 2px solid var(--color-focus-stroke-outer);
+  border-radius: var(--border-radius-medium);
+  background: var(--panel);
+  color: var(--text);
+  padding: 8px 12px;
+}
+.skip-link:focus { transform: translateY(0); }
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-focus-stroke-outer);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 1px var(--color-focus-stroke-inner);
+}
 .app {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 232px minmax(0, 1fr);
+  grid-template-columns: 240px minmax(0, 1fr);
 }
 .sidebar {
   background: var(--sidebar);
   color: var(--sidebar-text);
-  padding: 18px 14px;
+  border-right: 1px solid var(--line);
+  padding: 20px 12px 12px;
   display: grid;
   grid-template-rows: auto 1fr auto;
-  gap: 18px;
+  gap: 20px;
 }
-.brand { display: grid; gap: 3px; padding: 0 8px; }
-.brand strong { font-size: 18px; font-weight: 700; }
-.brand span { color: var(--sidebar-muted); font-size: 12px; }
+.brand { display: grid; gap: 2px; padding: 0 8px; }
+.brand strong { font-size: 20px; line-height: 28px; font-weight: 600; }
+.brand span { color: var(--sidebar-muted); font-size: 12px; line-height: 16px; }
 .nav { display: grid; align-content: start; gap: 4px; }
 .nav a {
+  position: relative;
   min-height: 40px;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: var(--border-radius-medium);
   background: transparent;
   color: var(--sidebar-text);
   text-align: left;
-  padding: 0 12px;
+  padding: 0 12px 0 16px;
   display: flex;
   align-items: center;
   text-decoration: none;
 }
 .nav a:hover { border-color: var(--sidebar-hover-line); background: var(--sidebar-hover); }
-.nav a.active { background: var(--nav-active-bg); color: var(--nav-active-text); }
-.sidebar-foot { color: var(--sidebar-muted); font-size: 12px; padding: 0 8px; overflow-wrap: anywhere; }
-.main { min-width: 0; padding: 22px; display: grid; gap: 16px; align-content: start; }
+.nav a:active { background: var(--color-neutral-background-1-pressed); }
+.nav a.active { background: var(--nav-active-bg); color: var(--nav-active-text); font-weight: 600; }
+.nav a.active::before {
+  content: "";
+  position: absolute;
+  inset: 8px auto 8px 3px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--color-brand-background);
+}
+.sidebar-foot {
+  color: var(--sidebar-muted);
+  font-size: 12px;
+  line-height: 16px;
+  padding: 0 8px;
+  overflow-wrap: anywhere;
+}
+.main { min-width: 0; padding: 24px 28px 32px; display: grid; gap: 20px; align-content: start; }
 .topbar {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  gap: 12px;
+  align-items: flex-start;
+  gap: 16px;
   min-width: 0;
 }
 .title-block { min-width: 0; }
-h1 { margin: 0; font-size: 24px; line-height: 1.2; }
+h1 { margin: 0; font-size: 24px; line-height: 32px; font-weight: 600; }
 .subtitle { margin-top: 4px; color: var(--muted); overflow-wrap: anywhere; }
 .top-actions {
   display: flex;
@@ -160,7 +301,7 @@ h1 { margin: 0; font-size: 24px; line-height: 1.2; }
 .toolbar { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .timeline-date-nav {
   display: inline-grid;
-  grid-template-columns: repeat(2, 32px) 112px repeat(2, 32px);
+  grid-template-columns: repeat(2, 32px) 120px repeat(2, 32px);
   gap: 3px;
   align-items: center;
 }
@@ -194,7 +335,7 @@ h1 { margin: 0; font-size: 24px; line-height: 1.2; }
   display: inline-grid;
   grid-template-columns: repeat(2, minmax(44px, auto));
   border: 1px solid var(--line-strong);
-  border-radius: 7px;
+  border-radius: var(--border-radius-medium);
   overflow: hidden;
   background: var(--panel);
 }
@@ -208,18 +349,36 @@ h1 { margin: 0; font-size: 24px; line-height: 1.2; }
 }
 .language-switch button:last-child { border-right: 0; }
 .language-switch button.active {
-  background: var(--blue);
+  background: var(--color-brand-background);
   color: var(--primary-text);
 }
+.language-switch button:hover { background: var(--color-neutral-background-1-hover); color: var(--text); }
+.language-switch button.active:hover { background: var(--color-brand-background-hover); color: var(--primary-text); }
+.theme-picker { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.theme-picker select { width: auto; min-width: 96px; }
 .button {
   min-height: 36px;
-  border-radius: 7px;
+  border-radius: var(--border-radius-medium);
   border: 1px solid var(--line-strong);
   background: var(--panel);
   color: var(--text);
   padding: 0 12px;
 }
-.button.primary { background: var(--blue); border-color: var(--blue); color: var(--primary-text); }
+.button:hover, .mini-button:hover { background: var(--color-neutral-background-1-hover); border-color: var(--color-neutral-stroke-1-hover); }
+.button:active, .mini-button:active { background: var(--color-neutral-background-1-pressed); }
+.button.primary, .mini-button.primary {
+  background: var(--color-brand-background);
+  border-color: var(--color-brand-background);
+  color: var(--primary-text);
+}
+.button.primary:hover, .mini-button.primary:hover {
+  background: var(--color-brand-background-hover);
+  border-color: var(--color-brand-background-hover);
+}
+.button.primary:active, .mini-button.primary:active {
+  background: var(--color-brand-background-pressed);
+  border-color: var(--color-brand-background-pressed);
+}
 .button.danger { color: var(--red); border-color: var(--red-line); }
 .button:disabled { opacity: 0.55; cursor: default; }
 .button.timeline-icon-button:hover,
@@ -227,10 +386,6 @@ h1 { margin: 0; font-size: 24px; line-height: 1.2; }
   border-color: var(--blue);
   background: var(--panel);
   box-shadow: none;
-}
-.button.timeline-icon-button:focus-visible {
-  outline: 2px solid var(--blue);
-  outline-offset: 2px;
 }
 .view { display: none; gap: 16px; align-content: start; }
 .view.active { display: grid; }
@@ -240,7 +395,7 @@ h1 { margin: 0; font-size: 24px; line-height: 1.2; }
 .panel {
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--border-radius-large);
   box-shadow: var(--shadow);
   min-width: 0;
 }
@@ -253,8 +408,9 @@ h1 { margin: 0; font-size: 24px; line-height: 1.2; }
   justify-content: space-between;
   gap: 12px;
 }
-.panel-head h2 { margin: 0; font-size: 15px; }
-.panel-body { padding: 14px; display: grid; gap: 12px; min-width: 0; }
+.panel-head h2 { margin: 0; font-size: 16px; line-height: 22px; font-weight: 600; }
+.panel-body { padding: 16px; display: grid; gap: 12px; min-width: 0; overflow-x: auto; }
+.table-scroll { min-width: 0; max-width: 100%; overflow-x: auto; }
 .metric { display: grid; gap: 4px; padding: 14px; }
 .metric span { color: var(--muted); font-size: 12px; }
 .metric strong { font-size: 24px; line-height: 1.1; }
@@ -307,14 +463,13 @@ h1 { margin: 0; font-size: 24px; line-height: 1.2; }
 .row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .mini-button {
   min-height: 30px;
-  border-radius: 7px;
+  border-radius: var(--border-radius-medium);
   border: 1px solid var(--line-strong);
   background: var(--panel);
   color: var(--text);
   padding: 0 9px;
   font-size: 12px;
 }
-.mini-button.primary { background: var(--blue); border-color: var(--blue); color: var(--primary-text); }
 .mini-button.danger { color: var(--red); border-color: var(--red-line); }
 .mini-button:disabled { opacity: 0.48; cursor: default; }
 .settings-grid { display: grid; gap: 14px; }
@@ -328,16 +483,17 @@ h1 { margin: 0; font-size: 24px; line-height: 1.2; }
 }
 .field-row:last-child { border-bottom: 0; }
 .field-label { display: grid; gap: 4px; }
-.field-label strong { font-weight: 650; }
+.field-label strong, .field-name { color: var(--text); font-weight: 600; }
 .field-label code { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .field-summary { color: var(--muted); font-size: 12px; line-height: 1.35; }
+.operation-summary { margin: 0; color: var(--muted); }
 .field-control { display: grid; gap: 7px; min-width: 0; }
 .input-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
 .path-mode-line { grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; }
-input[type="text"], input[type="number"], input[type="date"], select {
+input[type="text"], input[type="number"], input[type="date"], input[type="time"], select {
   width: 100%;
   min-height: 36px;
-  border-radius: 7px;
+  border-radius: var(--border-radius-medium);
   border: 1px solid var(--line-strong);
   background: var(--input-bg);
   color: var(--text);
@@ -345,7 +501,7 @@ input[type="text"], input[type="number"], input[type="date"], select {
 }
 input.timeline-date-input {
   min-height: 32px;
-  padding: 0 22px 0 5px;
+  padding: 0 28px 0 5px;
   text-align: center;
   font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
   font-size: 13px;
@@ -359,8 +515,8 @@ input.timeline-date-input {
 input.timeline-date-picker {
   position: absolute;
   inset: 0 0 0 auto;
-  width: 22px;
-  max-width: 22px;
+  width: 28px;
+  max-width: 28px;
   min-height: 32px;
   padding: 0;
   border: 0;
@@ -371,8 +527,8 @@ input.timeline-date-picker {
   cursor: pointer;
 }
 input.timeline-date-picker:focus-visible {
-  outline: 1px solid var(--blue);
-  outline-offset: -1px;
+  outline: 2px solid var(--color-focus-stroke-outer);
+  outline-offset: 0;
 }
 input.timeline-date-picker::-webkit-datetime-edit,
 input.timeline-date-picker::-webkit-datetime-edit-fields-wrapper,
@@ -406,7 +562,7 @@ input[readonly], input:disabled { background: var(--input-readonly); color: var(
 .resolved.missing { color: var(--orange); }
 .message {
   display: none;
-  border-radius: 8px;
+  border-radius: var(--border-radius-large);
   border: 1px solid var(--line);
   background: var(--panel-alt);
   padding: 10px 12px;
@@ -420,7 +576,7 @@ input[readonly], input:disabled { background: var(--input-readonly); color: var(
   overflow: auto;
   background: var(--code-bg);
   color: var(--code-text);
-  border-radius: 7px;
+  border-radius: var(--border-radius-medium);
   padding: 12px;
   max-height: 240px;
 }
@@ -438,7 +594,7 @@ tr:last-child td { border-bottom: 0; }
 .list-stack { display: grid; gap: 8px; }
 .list-item {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--border-radius-large);
   padding: 10px;
   display: grid;
   gap: 5px;
@@ -458,50 +614,60 @@ tr:last-child td { border-bottom: 0; }
   .topbar { align-items: stretch; flex-direction: column; }
   .top-actions { justify-content: flex-start; }
   .toolbar { justify-content: flex-start; }
-  .timeline-date-nav { grid-template-columns: repeat(2, 32px) 112px repeat(2, 32px); }
+  .timeline-date-nav { grid-template-columns: repeat(2, 32px) 120px repeat(2, 32px); }
   .field-row { grid-template-columns: 1fr; }
   .input-line { grid-template-columns: 1fr; }
   .nav { grid-template-columns: 1fr; }
-  .timeline-table, .timeline-table thead, .timeline-table tbody, .timeline-table tr, .timeline-table th, .timeline-table td {
-    display: block;
-    width: 100% !important;
+  .timeline-table { min-width: 680px; }
+}
+@media (forced-colors: active) {
+  .panel, .status-item, .list-item, .pill, .message { box-shadow: none; }
+  .nav a.active { border-color: Highlight; color: CanvasText; }
+  .nav a.active::before { background: Highlight; }
+  .button.primary, .mini-button.primary, .language-switch button.active {
+    border-color: ButtonText;
+    background: ButtonFace;
+    color: ButtonText;
   }
-  .timeline-table thead { display: none; }
-  .timeline-table tr { border-bottom: 1px solid var(--line); }
-  .timeline-table tr:last-child { border-bottom: 0; }
-  .timeline-table td { border-bottom: 0; padding: 8px 10px; }
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline-color: Highlight;
+    box-shadow: none;
+  }
 }
 </style>
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to main content</a>
 <div class="app">
-  <aside class="sidebar">
+  <aside class="sidebar" aria-label="Application navigation">
     <div class="brand"><strong>dancing-log</strong><span id="brand-subtitle">Local Web UI</span></div>
-    <nav class="nav" id="nav"></nav>
+    <nav class="nav" id="nav" aria-label="Primary"></nav>
     <div class="sidebar-foot" id="sidebar-path"></div>
   </aside>
-  <main class="main">
+  <main class="main" id="main-content" tabindex="-1">
     <div class="topbar">
       <div class="title-block">
-        <h1 id="view-title">Home</h1>
+        <h1 id="view-title" tabindex="-1">Home</h1>
         <div class="subtitle" id="view-subtitle"></div>
       </div>
       <div class="top-actions">
+        <label class="theme-picker" for="theme-select"><span id="theme-label">Theme</span><select id="theme-select"></select></label>
         <div class="language-switch" id="language-switch" role="group" aria-label="Language"></div>
         <div class="toolbar" id="view-toolbar"></div>
       </div>
     </div>
-    <section class="view active" id="view-home"></section>
-    <section class="view" id="view-timeline"></section>
-    <section class="view" id="view-catalog"></section>
-    <section class="view" id="view-lists"></section>
-    <section class="view" id="view-insights"></section>
-    <section class="view" id="view-operations"></section>
-    <section class="view" id="view-settings"></section>
+    <section class="view active" id="view-home" aria-labelledby="view-title"></section>
+    <section class="view" id="view-timeline" aria-labelledby="view-title"></section>
+    <section class="view" id="view-catalog" aria-labelledby="view-title"></section>
+    <section class="view" id="view-lists" aria-labelledby="view-title"></section>
+    <section class="view" id="view-insights" aria-labelledby="view-title"></section>
+    <section class="view" id="view-operations" aria-labelledby="view-title"></section>
+    <section class="view" id="view-settings" aria-labelledby="view-title"></section>
   </main>
 </div>
 <script>
 const LANGUAGE_KEY = "dancing-log.language";
+const THEME_KEY = "dancing-log.theme";
 const CSRF_TOKEN = "__DANCING_LOG_CSRF_TOKEN__";
 const NAV = ["home", "timeline", "catalog", "lists", "insights", "operations", "settings"];
 const LIVE_STATE_POLL_INTERVAL_MS = 250;
@@ -511,6 +677,13 @@ const TEXT = {
   en: {
     brandSubtitle: "Local Web UI",
     languageLabel: "Language",
+    themeLabel: "Theme",
+    themeSystem: "System",
+    themeLight: "Light",
+    themeDark: "Dark",
+    skipToMain: "Skip to main content",
+    applicationNavigation: "Application navigation",
+    primaryNavigation: "Primary",
     nav_home: "Home",
     nav_timeline: "Timeline",
     nav_catalog: "Catalog",
@@ -575,12 +748,14 @@ const TEXT = {
     live: "Live-derived",
     load: "Load",
     timelineDate: "Timeline date",
+    openDatePicker: "Open date picker",
     previousMonth: "Previous month",
     previousDay: "Previous day",
     nextDay: "Next day",
     nextMonth: "Next month",
     timelineSortChronological: "Chronological",
     timelineSortReverse: "Reverse",
+    reverseTimelineOrder: "Reverse timeline order",
     copyDailyDancesTitle: "Copy valid events",
     copiedDailyDances: "Copied valid events",
     noAcceptedTimelineRecords: "No valid dance events for this day",
@@ -648,6 +823,13 @@ const TEXT = {
   zh: {
     brandSubtitle: "本地 Web UI",
     languageLabel: "语言",
+    themeLabel: "主题",
+    themeSystem: "跟随系统",
+    themeLight: "浅色",
+    themeDark: "深色",
+    skipToMain: "跳到主要内容",
+    applicationNavigation: "应用导航",
+    primaryNavigation: "主导航",
     nav_home: "首页",
     nav_timeline: "时间线",
     nav_catalog: "目录",
@@ -712,12 +894,14 @@ const TEXT = {
     live: "实时来源",
     load: "加载",
     timelineDate: "时间线日期",
+    openDatePicker: "打开日期选择器",
     previousMonth: "上个月",
     previousDay: "前一天",
     nextDay: "后一天",
     nextMonth: "下个月",
     timelineSortChronological: "时间顺序",
     timelineSortReverse: "倒序",
+    reverseTimelineOrder: "倒序显示时间线",
     copyDailyDancesTitle: "复制有效事件",
     copiedDailyDances: "已复制有效事件",
     noAcceptedTimelineRecords: "这一天没有有效跳舞事件",
@@ -813,6 +997,7 @@ const DANCE_SYSTEM_LABELS = {
 const state = {
   active: viewFromPath(location.pathname),
   lang: initialLanguage(),
+  theme: initialTheme(),
   configSnapshot: null,
   operationsSnapshot: null,
   draft: {},
@@ -830,10 +1015,14 @@ const state = {
 const brandSubtitleNode = document.getElementById("brand-subtitle");
 const navNode = document.getElementById("nav");
 const languageNode = document.getElementById("language-switch");
+const themeLabelNode = document.getElementById("theme-label");
+const themeSelectNode = document.getElementById("theme-select");
 const toolbarNode = document.getElementById("view-toolbar");
 const titleNode = document.getElementById("view-title");
 const subtitleNode = document.getElementById("view-subtitle");
 const sidebarPathNode = document.getElementById("sidebar-path");
+const skipLinkNode = document.querySelector(".skip-link");
+const sidebarNode = document.querySelector(".sidebar");
 
 function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, char => ({
@@ -857,6 +1046,11 @@ function ui(key) {
 
 function navLabel(key) {
   return ui(`nav_${key}`);
+}
+
+function initialTheme() {
+  const saved = localStorage.getItem(THEME_KEY);
+  return ["system", "light", "dark"].includes(saved) ? saved : "system";
 }
 
 function viewFromPath(path) {
@@ -1006,7 +1200,7 @@ function api(path, options = {}) {
   });
 }
 
-function setView(next, { navigate = false, syncLocation = false } = {}) {
+function setView(next, { navigate = false, syncLocation = false, focusHeading = false } = {}) {
   if (!NAV.includes(next)) next = "home";
   if (navigate) {
     history.pushState({}, "", ROUTES[next]);
@@ -1026,8 +1220,10 @@ function setView(next, { navigate = false, syncLocation = false } = {}) {
   const [title, subtitle] = viewTitle(next);
   titleNode.textContent = title;
   subtitleNode.textContent = subtitle;
+  document.title = `${title} — dancing-log`;
   toolbarNode.innerHTML = "";
   renderActive();
+  if (focusHeading) titleNode.focus({ preventScroll: true });
 }
 
 function renderNav() {
@@ -1038,7 +1234,7 @@ function renderNav() {
     link.onclick = event => {
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       event.preventDefault();
-      setView(link.dataset.view, { navigate: true });
+      setView(link.dataset.view, { navigate: true, focusHeading: true });
     };
   }
 }
@@ -1046,6 +1242,9 @@ function renderNav() {
 function renderLanguageSwitch() {
   document.documentElement.lang = state.lang === "zh" ? "zh-CN" : "en";
   brandSubtitleNode.textContent = ui("brandSubtitle");
+  skipLinkNode.textContent = ui("skipToMain");
+  sidebarNode.setAttribute("aria-label", ui("applicationNavigation"));
+  navNode.setAttribute("aria-label", ui("primaryNavigation"));
   languageNode.setAttribute("aria-label", ui("languageLabel"));
   languageNode.innerHTML = `
     <button type="button" data-lang="en" class="${state.lang === "en" ? "active" : ""}" aria-pressed="${state.lang === "en"}">EN</button>
@@ -1061,11 +1260,14 @@ function setLanguage(lang) {
   state.lang = lang;
   localStorage.setItem(LANGUAGE_KEY, lang);
   renderLanguageSwitch();
+  renderThemePicker();
   renderNav();
   const [title, subtitle] = viewTitle(state.active);
   titleNode.textContent = title;
   subtitleNode.textContent = subtitle;
+  document.title = `${title} — dancing-log`;
   renderActive();
+  languageNode.querySelector(`[data-lang="${lang}"]`)?.focus();
 }
 
 function showMessage(id, message, kind = "") {
@@ -1073,6 +1275,9 @@ function showMessage(id, message, kind = "") {
   if (!node) return;
   node.textContent = message || "";
   node.className = `message ${message ? "show" : ""} ${kind}`;
+  node.setAttribute("role", kind === "error" ? "alert" : "status");
+  node.setAttribute("aria-live", kind === "error" ? "assertive" : "polite");
+  node.setAttribute("aria-atomic", "true");
 }
 
 function renderActive() {
@@ -1115,6 +1320,22 @@ function groupedFields(fields) {
   return groups;
 }
 
+function safeDomId(value) {
+  return String(value).replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function fieldControlId(key) {
+  return `field-control-${safeDomId(key)}`;
+}
+
+function fieldDescriptionId(key) {
+  return `field-description-${safeDomId(key)}`;
+}
+
+function fieldErrorId(key) {
+  return `field-error-${safeDomId(key)}`;
+}
+
 function renderSettings() {
   toolbarNode.innerHTML = `
     <button class="button" type="button" id="settings-reset" title="${esc(ui("resetTitle"))}">${esc(ui("reset"))}</button>
@@ -1122,16 +1343,16 @@ function renderSettings() {
   `;
   const node = document.getElementById("view-settings");
   if (!state.configSnapshot) {
-    node.innerHTML = `<div class="panel"><div class="empty">${esc(ui("loadingConfig"))}</div></div>`;
+    node.innerHTML = `<div class="panel"><div class="empty" role="status">${esc(ui("loadingConfig"))}</div></div>`;
     loadConfig().then(renderSettings).catch(error => {
-      node.innerHTML = `<div class="message show error">${esc(error.message)}</div>`;
+      node.innerHTML = `<div class="message show error" role="alert">${esc(error.message)}</div>`;
     });
     return;
   }
   const snapshot = state.configSnapshot;
   const groups = groupedFields(snapshot.fields);
   node.innerHTML = `
-    <div class="message" id="settings-message"></div>
+    <div class="message" id="settings-message" role="status" aria-live="polite" aria-atomic="true"></div>
     <div class="settings-grid">
       ${groups.map(group => renderSettingsGroup(group)).join("")}
       ${renderDetectedSources(snapshot.detected_sources || [])}
@@ -1139,9 +1360,20 @@ function renderSettings() {
     </div>
   `;
   document.getElementById("settings-save").onclick = saveSettings;
-  document.getElementById("settings-reset").onclick = () => {
-    state.configSnapshot = null;
-    renderSettings();
+  document.getElementById("settings-reset").onclick = async () => {
+    const resetButton = document.getElementById("settings-reset");
+    const saveButton = document.getElementById("settings-save");
+    resetButton.disabled = true;
+    saveButton.disabled = true;
+    try {
+      await loadConfig();
+      renderSettings();
+      document.getElementById("settings-reset")?.focus();
+    } catch (error) {
+      resetButton.disabled = false;
+      saveButton.disabled = false;
+      showMessage("settings-message", error.message, "error");
+    }
   };
   bindFieldControls();
 }
@@ -1161,56 +1393,61 @@ function renderField(field) {
   const key = field.key;
   const value = state.draft[key];
   const error = state.fieldErrors[key];
+  const controlId = fieldControlId(key);
+  const describedBy = [fieldDescriptionId(key)];
+  if (field.path) describedBy.push(pathPreviewId(key));
+  if (error) describedBy.push(fieldErrorId(key));
   return `
     <div class="field-row" data-field="${esc(key)}">
       <div class="field-label">
-        <strong>${esc(fieldText(field, "label"))}</strong>
+        <label class="field-name" for="${controlId}">${esc(fieldText(field, "label"))}</label>
         <code>${esc(key)}</code>
-        <span class="field-summary">${esc(fieldText(field, "summary"))}</span>
+        <span class="field-summary" id="${fieldDescriptionId(key)}">${esc(fieldText(field, "summary"))}</span>
       </div>
       <div class="field-control">
-        ${renderFieldControl(field, value)}
+        ${renderFieldControl(field, value, controlId, describedBy.join(" "), Boolean(error))}
         ${field.path ? renderPathPreview(field) : ""}
-        ${error ? `<span class="resolved missing">${esc(translatedError(error))}</span>` : ""}
+        ${error ? `<span class="resolved missing" id="${fieldErrorId(key)}" role="alert">${esc(translatedError(error))}</span>` : ""}
       </div>
     </div>
   `;
 }
 
-function renderFieldControl(field, value) {
+function renderFieldControl(field, value, controlId, describedBy, invalid) {
+  const attrs = `id="${controlId}" aria-describedby="${esc(describedBy)}" ${invalid ? 'aria-invalid="true"' : ""}`;
   if (field.type === "readonly") {
-    return `<input type="text" readonly value="${esc(value)}">`;
+    return `<input type="text" ${attrs} readonly value="${esc(value)}">`;
   }
   if (field.type === "boolean") {
     return `
-      <label class="toggle-line">
-        <input type="checkbox" data-key="${esc(field.key)}" ${value ? "checked" : ""}>
-        <span>${value ? esc(ui("enabled")) : esc(ui("disabled"))}</span>
-      </label>
+      <div class="toggle-line">
+        <input type="checkbox" ${attrs} data-key="${esc(field.key)}" ${value ? "checked" : ""}>
+        <span data-toggle-state>${value ? esc(ui("enabled")) : esc(ui("disabled"))}</span>
+      </div>
     `;
   }
   if (field.type === "integer") {
     return `
-      <input type="number" data-key="${esc(field.key)}" min="${esc(field.min)}" max="${esc(field.max)}" value="${esc(value)}">
+      <input type="number" ${attrs} data-key="${esc(field.key)}" min="${esc(field.min)}" max="${esc(field.max)}" value="${esc(value)}">
     `;
   }
   if (field.type === "time") {
     return `
-      <input type="time" data-key="${esc(field.key)}" min="${esc(field.min)}" max="${esc(field.max)}" step="60" value="${esc(value)}">
+      <input type="time" ${attrs} data-key="${esc(field.key)}" min="${esc(field.min)}" max="${esc(field.max)}" step="60" value="${esc(value)}">
     `;
   }
   if (field.type === "path") {
     if (isAutomaticSourcePath(field.key)) {
-      return renderAutomaticSourcePathControl(field, value);
+      return renderAutomaticSourcePathControl(field, value, attrs, controlId);
     }
     return `
       <div class="input-line">
-        <input type="text" data-key="${esc(field.key)}" placeholder="${field.required ? "" : "null"}" value="${esc(value ?? "")}">
-        <button class="button" type="button" data-pick="${esc(field.key)}" title="${esc(ui("browseTitle").replace("{kind}", pickerKind(field.picker)))}">${esc(ui("browse"))}</button>
+        <input type="text" ${attrs} data-key="${esc(field.key)}" placeholder="${field.required ? "" : "null"}" value="${esc(value ?? "")}">
+        <button class="button" type="button" data-pick="${esc(field.key)}" aria-label="${esc(`${ui("browse")}: ${fieldText(field, "label")}`)}" title="${esc(ui("browseTitle").replace("{kind}", pickerKind(field.picker)))}">${esc(ui("browse"))}</button>
       </div>
     `;
   }
-  return `<input type="text" data-key="${esc(field.key)}" placeholder="${esc(field.placeholder || "")}" value="${esc(value ?? "")}">`;
+  return `<input type="text" ${attrs} data-key="${esc(field.key)}" placeholder="${esc(field.placeholder || "")}" value="${esc(value ?? "")}">`;
 }
 
 function isAutomaticSourcePath(key) {
@@ -1222,18 +1459,18 @@ function isCustomPathEnabled(key) {
   return value !== null && value !== "";
 }
 
-function renderAutomaticSourcePathControl(field, value) {
+function renderAutomaticSourcePathControl(field, value, attrs, controlId) {
   const custom = isCustomPathEnabled(field.key);
   const automatic = automaticSourceForField(field.key);
   const displayValue = custom ? value : (automatic?.value || "");
   return `
     <div class="input-line path-mode-line">
       <label class="toggle-line">
-        <input type="checkbox" data-path-custom="${esc(field.key)}" ${custom ? "checked" : ""}>
+        <input type="checkbox" data-path-custom="${esc(field.key)}" aria-controls="${controlId}" ${custom ? "checked" : ""}>
         <span>${esc(ui("customPath"))}</span>
       </label>
-      <input type="text" data-key="${esc(field.key)}" placeholder="${custom ? "" : esc(ui("automatic"))}" value="${esc(displayValue ?? "")}" ${custom ? "" : "disabled"}>
-      <button class="button" type="button" data-pick="${esc(field.key)}" title="${esc(ui("browseTitle").replace("{kind}", pickerKind(field.picker)))}" ${custom ? "" : "disabled"}>${esc(ui("browse"))}</button>
+      <input type="text" ${attrs} data-key="${esc(field.key)}" placeholder="${custom ? "" : esc(ui("automatic"))}" value="${esc(displayValue ?? "")}" ${custom ? "" : "disabled"}>
+      <button class="button" type="button" data-pick="${esc(field.key)}" aria-label="${esc(`${ui("browse")}: ${fieldText(field, "label")}`)}" title="${esc(ui("browseTitle").replace("{kind}", pickerKind(field.picker)))}" ${custom ? "" : "disabled"}>${esc(ui("browse"))}</button>
       ${renderFieldSaveStatus(field.key)}
     </div>
   `;
@@ -1244,7 +1481,7 @@ function normalizeDraftValue(value) {
 }
 
 function fieldStatusId(key) {
-  return `field-status-${String(key).replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+  return `field-status-${safeDomId(key)}`;
 }
 
 function isFieldDirty(key) {
@@ -1253,7 +1490,7 @@ function isFieldDirty(key) {
 
 function renderFieldSaveStatus(key) {
   const dirty = isFieldDirty(key);
-  return `<span id="${fieldStatusId(key)}" class="pill ${dirty ? "orange" : "green"}">${esc(ui(dirty ? "unsaved" : "saved"))}</span>`;
+  return `<span id="${fieldStatusId(key)}" class="pill ${dirty ? "orange" : "green"}" role="status" aria-live="polite">${esc(ui(dirty ? "unsaved" : "saved"))}</span>`;
 }
 
 function updateFieldStatusNode(key) {
@@ -1270,19 +1507,19 @@ function renderPathPreview(field) {
     if (automatic) {
       const cls = automatic.exists ? "ok" : "missing";
       const suffix = pathStatusLabel(automatic);
-      return `<span id="${pathPreviewId(field.key)}" class="resolved ${cls}">${esc(ui("automatic"))}: ${esc(automatic.value)} (${esc(suffix)})</span>`;
+      return `<span id="${pathPreviewId(field.key)}" class="resolved ${cls}" aria-live="polite">${esc(ui("automatic"))}: ${esc(automatic.value)} (${esc(suffix)})</span>`;
     }
-    return `<span id="${pathPreviewId(field.key)}" class="resolved missing">${esc(ui("automatic"))}: ${esc(ui("missing"))}</span>`;
+    return `<span id="${pathPreviewId(field.key)}" class="resolved missing" aria-live="polite">${esc(ui("automatic"))}: ${esc(ui("missing"))}</span>`;
   }
   if ((rawValue === null || rawValue === "") && !field.required) {
-    return `<span id="${pathPreviewId(field.key)}" class="resolved">${esc(ui("savedNull"))}</span>`;
+    return `<span id="${pathPreviewId(field.key)}" class="resolved" aria-live="polite">${esc(ui("savedNull"))}</span>`;
   }
   if (!preview.resolved) {
-    return `<span id="${pathPreviewId(field.key)}" class="resolved">${esc(ui("savedNull"))}</span>`;
+    return `<span id="${pathPreviewId(field.key)}" class="resolved" aria-live="polite">${esc(ui("savedNull"))}</span>`;
   }
   const cls = preview.exists ? "ok" : "missing";
   const suffix = pathStatusLabel(preview);
-  return `<span id="${pathPreviewId(field.key)}" class="resolved ${cls}">${esc(preview.resolved)} (${esc(suffix)})</span>`;
+  return `<span id="${pathPreviewId(field.key)}" class="resolved ${cls}" aria-live="polite">${esc(preview.resolved)} (${esc(suffix)})</span>`;
 }
 
 function automaticSourceForField(key) {
@@ -1290,7 +1527,7 @@ function automaticSourceForField(key) {
 }
 
 function pathPreviewId(key) {
-  return `path-preview-${String(key).replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+  return `path-preview-${safeDomId(key)}`;
 }
 
 function updatePathPreviewNode(key) {
@@ -1380,8 +1617,8 @@ function renderUnsupported(unsupported) {
 
 function bindFieldControls() {
   for (const control of document.querySelectorAll("[data-key]")) {
-    control.oninput = () => updateDraftFromControl(control, false);
-    control.onchange = () => updateDraftFromControl(control, control.type === "checkbox");
+    control.oninput = () => updateDraftFromControl(control);
+    control.onchange = () => updateDraftFromControl(control);
   }
   for (const control of document.querySelectorAll("[data-path-custom]")) {
     control.onchange = () => updatePathCustomToggle(control);
@@ -1394,6 +1631,7 @@ function bindFieldControls() {
       state.draft[button.dataset.useDetected] = button.dataset.value;
       schedulePathPreview(button.dataset.useDetected, button.dataset.value);
       renderSettings();
+      document.querySelector(`[data-key="${button.dataset.useDetected}"]`)?.focus();
     };
   }
 }
@@ -1410,14 +1648,28 @@ function updatePathCustomToggle(control) {
     state.pathPreviews[key] = { resolved: null, exists: null };
   }
   renderSettings();
+  const focusTarget = control.checked
+    ? document.querySelector(`[data-key="${key}"]`)
+    : document.querySelector(`[data-path-custom="${key}"]`);
+  focusTarget?.focus();
 }
 
-function updateDraftFromControl(control, redraw) {
+function updateDraftFromControl(control) {
   const key = control.dataset.key;
   const field = state.configSnapshot.fields.find(item => item.key === key);
   if (control.type === "checkbox") {
     state.draft[key] = control.checked;
-    if (key === "auto_start_overlay" && control.checked) state.draft.auto_start_watcher = true;
+    const stateNode = control.parentElement?.querySelector("[data-toggle-state]");
+    if (stateNode) stateNode.textContent = ui(control.checked ? "enabled" : "disabled");
+    if (key === "auto_start_overlay" && control.checked) {
+      state.draft.auto_start_watcher = true;
+      const watcherControl = document.querySelector('[data-key="auto_start_watcher"]');
+      if (watcherControl) {
+        watcherControl.checked = true;
+        const watcherState = watcherControl.parentElement?.querySelector("[data-toggle-state]");
+        if (watcherState) watcherState.textContent = ui("enabled");
+      }
+    }
   } else if (control.type === "number") {
     state.draft[key] = Number(control.value);
   } else {
@@ -1426,7 +1678,6 @@ function updateDraftFromControl(control, redraw) {
   }
   if (field?.type === "path") schedulePathPreview(key, state.draft[key]);
   if (field?.type === "path" && isAutomaticSourcePath(key)) updateFieldStatusNode(key);
-  if (redraw) renderSettings();
 }
 
 async function pickPath(key) {
@@ -1440,6 +1691,7 @@ async function pickPath(key) {
     state.draft[key] = result.value;
     schedulePathPreview(key, result.value);
     renderSettings();
+    document.querySelector(`[data-key="${key}"]`)?.focus();
   } catch (error) {
     showMessage("settings-message", error.message, "error");
   }
@@ -1458,23 +1710,25 @@ async function saveSettings() {
     updatePathPreviewsFromSnapshot(result.snapshot);
     renderSettings();
     showMessage("settings-message", ui("saved"), "success");
+    document.getElementById("settings-save")?.focus();
   } catch (error) {
     if (error.data && error.data.errors) state.fieldErrors = error.data.errors;
     if (error.data && error.data.snapshot) state.configSnapshot = error.data.snapshot;
     renderSettings();
     showMessage("settings-message", ui("saveFailed"), "error");
+    document.querySelector('[aria-invalid="true"]')?.focus();
   }
 }
 
 async function renderHome() {
   const node = document.getElementById("view-home");
-  node.innerHTML = `<div class="panel"><div class="empty">${esc(ui("loading"))}</div></div>`;
+  node.innerHTML = `<div class="panel"><div class="empty" role="status">${esc(ui("loading"))}</div></div>`;
   const data = await api("/api/summary").catch(error => ({ error: error.message, counts: {}, recent: [] }));
   if (state.active !== "home") return;
   toolbarNode.innerHTML = renderHomeToolbar(data.session || {});
   node.innerHTML = `
-    ${(data.startup_warnings || []).length ? `<div class="message show error">${data.startup_warnings.map(esc).join("<br>")}</div>` : ""}
-    <div class="message" id="home-message"></div>
+    ${(data.startup_warnings || []).length ? `<div class="message show error" role="alert">${data.startup_warnings.map(esc).join("<br>")}</div>` : ""}
+    <div class="message" id="home-message" role="status" aria-live="polite" aria-atomic="true"></div>
     <div class="grid summary-grid">
       ${metric(ui("danceTracks"), data.counts?.dance_tracks ?? 0, "blue")}
       ${metric(ui("playbackRecords"), data.counts?.playback_records ?? 0, "green")}
@@ -1551,9 +1805,36 @@ async function pollHomeSessionToTerminalState(session) {
   }
 }
 
+function renderThemePicker() {
+  themeLabelNode.textContent = ui("themeLabel");
+  themeSelectNode.setAttribute("aria-label", ui("themeLabel"));
+  themeSelectNode.innerHTML = `
+    <option value="system" ${state.theme === "system" ? "selected" : ""}>${esc(ui("themeSystem"))}</option>
+    <option value="light" ${state.theme === "light" ? "selected" : ""}>${esc(ui("themeLight"))}</option>
+    <option value="dark" ${state.theme === "dark" ? "selected" : ""}>${esc(ui("themeDark"))}</option>
+  `;
+  themeSelectNode.onchange = () => setTheme(themeSelectNode.value);
+  applyTheme();
+}
+
+function applyTheme() {
+  if (state.theme === "system") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.dataset.theme = state.theme;
+}
+
+function setTheme(theme) {
+  if (!["system", "light", "dark"].includes(theme)) return;
+  state.theme = theme;
+  localStorage.setItem(THEME_KEY, theme);
+  applyTheme();
+}
+
 function bindHomeControls() {
   const refresh = document.getElementById("home-refresh");
-  if (refresh) refresh.onclick = renderHome;
+  if (refresh) refresh.onclick = async () => {
+    await renderHome();
+    document.getElementById("home-refresh")?.focus();
+  };
   for (const button of document.querySelectorAll("[data-live-control]")) {
     button.onclick = () => controlLive(button.dataset.liveControl, button.dataset.liveAction);
   }
@@ -1576,6 +1857,7 @@ async function controlLive(kind, action) {
     }
   } finally {
     for (const control of controls) control.disabled = false;
+    document.querySelector(`[data-live-control="${kind}"]`)?.focus();
   }
 }
 
@@ -1584,14 +1866,14 @@ function renderLiveStatus(session) {
   const watcherState = lifecycleState(session.watcher_state, session.watcher_running);
   const overlayState = lifecycleState(session.overlay_state, session.overlay_running);
   return `
-    <section class="panel" id="home-live-status">
+    <section class="panel" id="home-live-status" aria-live="polite">
       <div class="panel-head"><h2>${esc(ui("liveStatus"))}</h2></div>
       <div class="panel-body">
         <div class="status-grid">
           ${statusItem(ui("watcher"), watcherState)}
           ${statusItem(ui("overlay"), overlayState)}
         </div>
-        ${session.last_error ? `<div class="message show error"><strong>${esc(ui("lastRuntimeError"))}</strong><br>${esc(session.last_error)}</div>` : ""}
+        ${session.last_error ? `<div class="message show error" role="alert"><strong>${esc(ui("lastRuntimeError"))}</strong><br>${esc(session.last_error)}</div>` : ""}
         ${stats ? `<div><div class="resolved">${esc(ui("lastWatcherStats"))}</div><pre class="readonly-json">${esc(JSON.stringify(stats, null, 2))}</pre></div>` : `<div class="empty">${esc(ui("noWatcherStats"))}</div>`}
       </div>
     </section>
@@ -1620,7 +1902,7 @@ function metric(label, value, color) {
 
 function renderRecent(rows) {
   if (!rows.length) return `<div class="empty">${esc(ui("noRecords"))}</div>`;
-  return `<table><thead><tr><th>${esc(ui("time"))}</th><th>${esc(ui("track"))}</th><th>${esc(ui("source"))}</th></tr></thead><tbody>
+  return `<table><caption class="sr-only">${esc(ui("recentAccepted"))}</caption><thead><tr><th scope="col">${esc(ui("time"))}</th><th scope="col">${esc(ui("track"))}</th><th scope="col">${esc(ui("source"))}</th></tr></thead><tbody>
     ${rows.map(row => `<tr><td>${esc(row.played_at)}</td><td>${esc(row.video_name || row.title || row.external_id || "")}</td><td>${esc(row.source || "")}</td></tr>`).join("")}
   </tbody></table>`;
 }
@@ -1634,12 +1916,12 @@ async function renderTimeline() {
       <button class="timeline-step" type="button" data-timeline-step="day" data-step="-1" title="${esc(ui("previousDay"))}" aria-label="${esc(ui("previousDay"))}">&lt;</button>
       <div class="timeline-date-field">
         <input class="timeline-date-input" type="text" id="timeline-date" value="${esc(initialTimelineDate)}" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="YYYY-MM-DD" aria-label="${esc(ui("timelineDate"))}">
-        <input class="timeline-date-picker" type="date" id="timeline-date-picker" value="${esc(initialTimelineDate)}" aria-label="${esc(ui("timelineDate"))}" tabindex="-1">
+        <input class="timeline-date-picker" type="date" id="timeline-date-picker" value="${esc(initialTimelineDate)}" aria-label="${esc(ui("openDatePicker"))}" title="${esc(ui("openDatePicker"))}">
       </div>
       <button class="timeline-step" type="button" data-timeline-step="day" data-step="1" title="${esc(ui("nextDay"))}" aria-label="${esc(ui("nextDay"))}">&gt;</button>
       <button class="timeline-step" type="button" data-timeline-step="month" data-step="1" title="${esc(ui("nextMonth"))}" aria-label="${esc(ui("nextMonth"))}">&gt;&gt;</button>
     </div>
-    <button class="button timeline-icon-button timeline-sort-button" type="button" id="timeline-sort" title="${esc(timelineSortLabel())}" aria-label="${esc(timelineSortLabel())}" aria-pressed="${state.timelineSort === "desc"}" data-sort="${esc(state.timelineSort)}"><span class="timeline-sort-part timeline-sort-asc">↑</span><span class="timeline-sort-part timeline-sort-desc">↓</span></button>
+    <button class="button timeline-icon-button timeline-sort-button" type="button" id="timeline-sort" title="${esc(timelineSortLabel())}" aria-label="${esc(ui("reverseTimelineOrder"))}" aria-pressed="${state.timelineSort === "desc"}" data-sort="${esc(state.timelineSort)}"><span class="timeline-sort-part timeline-sort-asc" aria-hidden="true">↑</span><span class="timeline-sort-part timeline-sort-desc" aria-hidden="true">↓</span></button>
     <button class="button timeline-icon-button timeline-copy-button" type="button" id="timeline-copy" title="${esc(ui("copyDailyDancesTitle"))}" aria-label="${esc(ui("copyDailyDancesTitle"))}">⧉</button>
   `;
   const node = document.getElementById("view-timeline");
@@ -1651,7 +1933,7 @@ async function renderTimeline() {
   let currentRecords = [];
   function renderRecords() {
     node.innerHTML = `
-      <div class="message" id="timeline-message"></div>
+      <div class="message" id="timeline-message" role="status" aria-live="polite" aria-atomic="true"></div>
       <section class="panel"><div class="panel-body">${renderTimelineRows(sortedTimelineRows(currentRecords))}</div></section>
     `;
     bindTimelineActions(node, load);
@@ -1751,7 +2033,6 @@ async function renderTimeline() {
   sortButton.onclick = () => {
     state.timelineSort = state.timelineSort === "desc" ? "asc" : "desc";
     sortButton.title = timelineSortLabel();
-    sortButton.setAttribute("aria-label", timelineSortLabel());
     sortButton.setAttribute("aria-pressed", state.timelineSort === "desc" ? "true" : "false");
     sortButton.dataset.sort = state.timelineSort;
     syncTimelineUrl();
@@ -1815,9 +2096,9 @@ async function copyTextToClipboard(text) {
 
 function renderTimelineRows(rows) {
   if (!rows.length) return `<div class="empty">${esc(ui("noTimelineRecords"))}</div>`;
-  return `<table class="timeline-table"><thead><tr><th style="width:110px">${esc(ui("time"))}</th><th>${esc(ui("record"))}</th><th style="width:170px">${esc(ui("reviewStatus"))}</th><th style="width:240px">${esc(ui("actions"))}</th></tr></thead><tbody>
+  return `<div class="table-scroll" role="region" aria-label="${esc(ui("playbackRecords"))}" tabindex="0"><table class="timeline-table"><caption class="sr-only">${esc(ui("playbackRecords"))}</caption><thead><tr><th scope="col" style="width:110px">${esc(ui("time"))}</th><th scope="col">${esc(ui("record"))}</th><th scope="col" style="width:170px">${esc(ui("reviewStatus"))}</th><th scope="col" style="width:240px">${esc(ui("actions"))}</th></tr></thead><tbody>
     ${rows.map(row => `<tr><td>${esc(row.time)}</td><td>${renderTimelineRecord(row)}</td><td>${renderTimelineStatus(row)}</td><td>${renderTimelineActions(row)}</td></tr>`).join("")}
-  </tbody></table>`;
+  </tbody></table></div>`;
 }
 
 function renderTimelineRecord(row) {
@@ -1888,6 +2169,7 @@ function bindTimelineActions(container, reload) {
   for (const button of container.querySelectorAll("[data-playback-action]")) {
     button.onclick = async () => {
       const playbackRecordId = Number(button.dataset.playbackId);
+      const playbackRecordKey = button.dataset.playbackId;
       const action = button.dataset.playbackAction;
       button.disabled = true;
       try {
@@ -1896,6 +2178,9 @@ function bindTimelineActions(container, reload) {
           body: { playback_record_id: playbackRecordId, action }
         });
         await reload();
+        const rowButtons = [...container.querySelectorAll("[data-playback-id]")]
+          .filter(candidate => candidate.dataset.playbackId === playbackRecordKey);
+        (rowButtons.find(candidate => !candidate.disabled) || document.getElementById("timeline-copy"))?.focus();
       } catch (error) {
         showMessage("timeline-message", `${ui("reviewUpdateFailed")}: ${translatedError(error.message)}`, "error");
         button.disabled = false;
@@ -1906,7 +2191,7 @@ function bindTimelineActions(container, reload) {
 
 async function renderCatalog() {
   toolbarNode.innerHTML = `
-    <input type="text" id="catalog-search" placeholder="${esc(ui("searchCatalog"))}">
+    <input type="text" id="catalog-search" aria-label="${esc(ui("searchCatalog"))}" placeholder="${esc(ui("searchCatalog"))}">
     <button class="button" type="button" id="catalog-load">${esc(ui("search"))}</button>
   `;
   const node = document.getElementById("view-catalog");
@@ -1916,12 +2201,15 @@ async function renderCatalog() {
     node.innerHTML = `<section class="panel"><div class="panel-body">${renderCatalogRows(data.tracks || [])}</div></section>`;
   }
   document.getElementById("catalog-load").onclick = load;
+  document.getElementById("catalog-search").onkeydown = event => {
+    if (event.key === "Enter") load();
+  };
   await load();
 }
 
 function renderCatalogRows(rows) {
   if (!rows.length) return `<div class="empty">${esc(ui("noTracks"))}</div>`;
-  return `<table><thead><tr><th style="width:130px">${esc(ui("track"))}</th><th>${esc(ui("title"))}</th><th>${esc(ui("artist"))}</th><th style="width:150px">${esc(ui("preferences"))}</th></tr></thead><tbody>
+  return `<table><caption class="sr-only">${esc(ui("danceTracks"))}</caption><thead><tr><th scope="col" style="width:130px">${esc(ui("track"))}</th><th scope="col">${esc(ui("title"))}</th><th scope="col">${esc(ui("artist"))}</th><th scope="col" style="width:150px">${esc(ui("preferences"))}</th></tr></thead><tbody>
     ${rows.map(row => `<tr>
       <td>${esc(row.system_key)}:${esc(row.external_id)}</td>
       <td>${esc(row.title || "")}</td>
@@ -1961,16 +2249,16 @@ async function renderInsights() {
   const data = await api("/api/insights");
   node.innerHTML = `
     <div class="grid two-col">
-      <section class="panel"><div class="panel-head"><h2>${esc(ui("sourceDistribution"))}</h2></div><div class="panel-body">${renderKeyCount(data.source_distribution || [], "source")}</div></section>
-      <section class="panel"><div class="panel-head"><h2>${esc(ui("topTracks"))}</h2></div><div class="panel-body">${renderKeyCount(data.top_tracks || [], "title")}</div></section>
+      <section class="panel"><div class="panel-head"><h2>${esc(ui("sourceDistribution"))}</h2></div><div class="panel-body">${renderKeyCount(data.source_distribution || [], "source", ui("sourceDistribution"))}</div></section>
+      <section class="panel"><div class="panel-head"><h2>${esc(ui("topTracks"))}</h2></div><div class="panel-body">${renderKeyCount(data.top_tracks || [], "title", ui("topTracks"))}</div></section>
     </div>
     <section class="panel"><div class="panel-head"><h2>${esc(ui("recommendations"))}</h2></div><div class="panel-body">${renderCatalogRows(data.recommendations || [])}</div></section>
   `;
 }
 
-function renderKeyCount(rows, key) {
+function renderKeyCount(rows, key, caption) {
   if (!rows.length) return `<div class="empty">${esc(ui("noData"))}</div>`;
-  return `<table><thead><tr><th>${esc(ui("name"))}</th><th style="width:90px">${esc(ui("count"))}</th></tr></thead><tbody>
+  return `<table><caption class="sr-only">${esc(caption)}</caption><thead><tr><th scope="col">${esc(ui("name"))}</th><th scope="col" style="width:90px">${esc(ui("count"))}</th></tr></thead><tbody>
     ${rows.map(row => `<tr><td>${esc(row[key] || row.external_id || "(none)")}</td><td>${esc(row.count || 0)}</td></tr>`).join("")}
   </tbody></table>`;
 }
@@ -1978,12 +2266,12 @@ function renderKeyCount(rows, key) {
 async function renderOperations() {
   const node = document.getElementById("view-operations");
   if (!state.operationsSnapshot) {
-    node.innerHTML = `<div class="panel"><div class="empty">${esc(ui("loading"))}</div></div>`;
+    node.innerHTML = `<div class="panel"><div class="empty" role="status">${esc(ui("loading"))}</div></div>`;
     api("/api/operations").then(data => {
       state.operationsSnapshot = data;
       renderOperations();
     }).catch(error => {
-      node.innerHTML = `<div class="message show error">${esc(error.message)}</div>`;
+      node.innerHTML = `<div class="message show error" role="alert">${esc(error.message)}</div>`;
     });
     return;
   }
@@ -2004,14 +2292,15 @@ function renderOperationPanel(operation) {
         <span class="pill orange">${esc(operationText(operation, "risk"))}</span>
       </div>
       <div class="panel-body">
+        <p class="operation-summary" id="operation-summary-${safeDomId(operation.key)}">${esc(operationText(operation, "summary"))}</p>
         <code>${esc(operation.command)}</code>
         <div class="settings-grid">
           ${renderOperationParameters(operation)}
         </div>
         <div class="toolbar">
-          <button class="button primary" type="button" data-run-operation="${esc(operation.key)}" ${state.runningOperation ? "disabled" : ""}>${esc(running ? ui("runningOperation") : ui("run"))}</button>
+          <button class="button primary" type="button" data-run-operation="${esc(operation.key)}" aria-describedby="operation-summary-${safeDomId(operation.key)}" ${state.runningOperation ? "disabled" : ""}>${esc(running ? ui("runningOperation") : ui("run"))}</button>
         </div>
-        ${error ? `<div class="message show error"><strong>${esc(ui("operationFailed"))}</strong><br>${esc(error)}</div>` : ""}
+        ${error ? `<div class="message show error" role="alert"><strong>${esc(ui("operationFailed"))}</strong><br>${esc(error)}</div>` : ""}
         ${result ? renderOperationResult(result) : ""}
       </div>
     </section>
@@ -2024,29 +2313,39 @@ function renderOperationParameters(operation) {
 }
 
 function renderOperationParameter(operation, parameter) {
+  const controlId = operationControlId(operation.key, parameter.key);
+  const descriptionId = operationDescriptionId(operation.key, parameter.key);
   return `
     <div class="field-row">
       <div class="field-label">
-        <strong>${esc(parameter.label)}</strong>
+        <label class="field-name" for="${controlId}">${esc(parameter.label)}</label>
         <code>${esc(parameter.key)}</code>
-        <span class="field-summary">${esc(parameter.summary)}</span>
+        <span class="field-summary" id="${descriptionId}">${esc(parameter.summary)}</span>
       </div>
       <div class="field-control">
-        ${renderOperationParameterControl(operation, parameter)}
+        ${renderOperationParameterControl(operation, parameter, controlId, descriptionId)}
       </div>
     </div>
   `;
 }
 
-function renderOperationParameterControl(operation, parameter) {
+function operationControlId(operationKey, parameterKey) {
+  return `operation-${safeDomId(operationKey)}-${safeDomId(parameterKey)}`;
+}
+
+function operationDescriptionId(operationKey, parameterKey) {
+  return `${operationControlId(operationKey, parameterKey)}-description`;
+}
+
+function renderOperationParameterControl(operation, parameter, controlId, descriptionId) {
   const value = state.operationDrafts[operation.key]?.[parameter.key];
-  const dataAttrs = `data-operation-key="${esc(operation.key)}" data-param-key="${esc(parameter.key)}"`;
+  const dataAttrs = `id="${controlId}" aria-describedby="${descriptionId}" ${parameter.required ? 'aria-required="true"' : ""} data-operation-key="${esc(operation.key)}" data-param-key="${esc(parameter.key)}"`;
   if (parameter.type === "boolean") {
     return `
-      <label class="toggle-line">
+      <div class="toggle-line">
         <input type="checkbox" ${dataAttrs} ${value ? "checked" : ""}>
-        <span>${value ? esc(ui("enabled")) : esc(ui("disabled"))}</span>
-      </label>
+        <span data-toggle-state>${value ? esc(ui("enabled")) : esc(ui("disabled"))}</span>
+      </div>
     `;
   }
   if (parameter.type === "integer") {
@@ -2064,7 +2363,7 @@ function renderOperationParameterControl(operation, parameter) {
 
 function renderOperationResult(result) {
   return `
-    <div class="message show success"><strong>${esc(ui("operationComplete"))}</strong><br>${esc(result.summary || "")}</div>
+    <div class="message show success" role="status"><strong>${esc(ui("operationComplete"))}</strong><br>${esc(result.summary || "")}</div>
     <pre class="readonly-json">${esc((result.lines || []).join("\n"))}</pre>
   `;
 }
@@ -2087,10 +2386,7 @@ function ensureOperationDraft(operation) {
 function bindOperationControls(operations) {
   for (const control of document.querySelectorAll("[data-operation-key][data-param-key]")) {
     control.oninput = () => updateOperationDraft(control);
-    control.onchange = () => {
-      updateOperationDraft(control);
-      renderOperations();
-    };
+    control.onchange = () => updateOperationDraft(control);
   }
   for (const button of document.querySelectorAll("[data-run-operation]")) {
     button.onclick = () => runOperation(button.dataset.runOperation, operations);
@@ -2106,6 +2402,8 @@ function updateOperationDraft(control) {
   ensureOperationDraft(operation);
   if (parameter.type === "boolean") {
     state.operationDrafts[operationKey][paramKey] = control.checked;
+    const stateNode = control.parentElement?.querySelector("[data-toggle-state]");
+    if (stateNode) stateNode.textContent = ui(control.checked ? "enabled" : "disabled");
   } else {
     state.operationDrafts[operationKey][paramKey] = control.value;
   }
@@ -2132,7 +2430,12 @@ async function runOperation(key, operations) {
   state.runningOperation = key;
   state.operationErrors[key] = "";
   state.operationResults[key] = null;
-  renderOperations();
+  for (const button of document.querySelectorAll("[data-run-operation]")) button.disabled = true;
+  const activeButton = document.querySelector(`[data-run-operation="${key}"]`);
+  if (activeButton) {
+    activeButton.textContent = ui("runningOperation");
+    activeButton.setAttribute("aria-busy", "true");
+  }
   try {
     const response = await api("/api/operations/run", {
       method: "POST",
@@ -2144,12 +2447,14 @@ async function runOperation(key, operations) {
   } finally {
     state.runningOperation = null;
     renderOperations();
+    document.querySelector(`[data-run-operation="${key}"]`)?.focus();
   }
 }
 
 renderLanguageSwitch();
+renderThemePicker();
 renderNav();
-addEventListener("popstate", () => setView(viewFromPath(location.pathname), { syncLocation: true }));
+addEventListener("popstate", () => setView(viewFromPath(location.pathname), { syncLocation: true, focusHeading: true }));
 setView(viewFromPath(location.pathname), { syncLocation: true });
 </script>
 </body>

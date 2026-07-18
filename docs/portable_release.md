@@ -36,6 +36,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1
 
 ## GitHub Release
 
+Before creating a version tag, complete the WCAG-EM procedure in
+`docs/accessibility/webui-release-checklist.md` and commit a passing report as
+`docs/accessibility/release-reports/<version-tag>.md`. The report must contain an
+exact `Result: Pass` line. Automated Playwright/axe success is a prerequisite,
+not a replacement for this manual evaluation.
+
 Push a version tag:
 
 ```powershell
@@ -43,8 +49,9 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The `Release Portable` workflow builds the same portable zip, uploads it as an
-artifact, and attaches the zip plus SHA-256 checksum to the GitHub Release.
+The `Release Portable` workflow verifies the matching manual report, runs the
+Web UI accessibility acceptance suite, builds the same portable zip, uploads it
+as an artifact, and attaches the zip plus SHA-256 checksum to the GitHub Release.
 
 ## Portable Folder Contents
 
