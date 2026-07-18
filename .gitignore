@@ -13,6 +13,7 @@ wheels/
 
 # Web UI test runtime
 node_modules/
+.pnpm-store/
 .playwright-runtime/
 playwright-report/
 test-results/

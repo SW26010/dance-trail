@@ -1,7 +1,8 @@
-# Local Web UI WCAG-EM 发布检查表
+# Local Web UI 无障碍检查表
 
-每次发布以及基础 Web UI 组件发生重大变更后执行本流程。范围是七个 Local
-Web UI 主导航页面；OBS Overlay 是单独的观看者输出界面。
+每次发布以及基础 Web UI 组件发生重大变更后，必须执行本流程的自动化部分。
+第 2–5 节是建议性的人工复核提示，不是合并或发布门槛。OBS Overlay 是单独的
+观看者输出界面。
 
 ## 1. 建立评估范围
 
@@ -11,8 +12,8 @@ Web UI 主导航页面；OBS Overlay 是单独的观看者输出界面。
    - 基础组件重大变更：
      `change-reports/YYYY-MM-DD-<小写-kebab-slug>.md`，例如
      `change-reports/2026-07-18-fluent2-webui-baseline.md`。
-2. 记录准确 commit、Windows 版本、Edge/Chrome 版本、显示缩放、输入设备和
-   辅助技术版本。
+2. 记录准确 commit 和生成资产哈希。若执行建议性的人工复核，再记录 Windows、
+   浏览器、显示缩放、输入设备和辅助技术版本。
 3. 覆盖 Home、Timeline、Catalog、Lists、Insights、Data Operations 和
    Settings；按实际存在情况抽样加载、空白、有数据、禁用、校验错误、操作成功/
    失败以及已保存/未保存状态。
@@ -28,7 +29,7 @@ Web UI 主导航页面；OBS Overlay 是单独的观看者输出界面。
    所有测试必须通过，所有 WCAG 2.2 A/AA axe 扫描必须为 0 violation，不设
    allowlist。
 
-## 2. 键盘
+## 2. 键盘（建议项）
 
 - 从全新页面加载开始只使用键盘，检查跳转链接、合理的焦点顺序、清晰的 Fluent
   焦点指示器，并确认没有键盘陷阱。
@@ -40,7 +41,7 @@ Web UI 主导航页面；OBS Overlay 是单独的观看者输出界面。
 - 如出现自定义 APG 组件，逐项执行其 APG 按键表；按适用情况覆盖 Escape、方向键、
   Home/End、Tab/Shift+Tab、激活、进入焦点和返回焦点。
 
-## 3. 屏幕阅读器
+## 3. 屏幕阅读器（建议项）
 
 - 使用当前 NVDA + 当前 Edge 或 Chrome；涉及 Windows 特有行为时，再用 Narrator
   复核。
@@ -53,7 +54,7 @@ Web UI 主导航页面；OBS Overlay 是单独的观看者输出界面。
   虚拟光标。
 - 切换中英文，确认文档语言和控件名称一起更新。
 
-## 4. 缩放、重排和文本间距
+## 4. 缩放、重排和文本间距（建议项）
 
 - 浏览器 200% 缩放下不得丢失内容或功能。
 - 400% 缩放（或等价 320 CSS 像素视口）下应单轴重排；真正二维的表格可以例外，
@@ -61,7 +62,7 @@ Web UI 主导航页面；OBS Overlay 是单独的观看者输出界面。
 - 应用 WCAG 文本间距覆盖值（1.5 倍行高、2 倍段落间距、0.12em 字距、0.16em
   词距），不得出现裁切、重叠或控件丢失。
 
-## 5. Windows 高对比度和主题
+## 5. Windows 高对比度和主题（建议项）
 
 - 检查浅色、深色和跟随系统三种主题。
 - 至少启用一种深色和一种浅色 Windows 对比度主题，检查文字、焦点、选中导航、
@@ -70,10 +71,15 @@ Web UI 主导航页面；OBS Overlay 是单独的观看者输出界面。
 
 ## 6. 记录结果
 
-- 记录每项观察结果；每个缺陷都链接到可复现 issue。
-- 仅当评估范围内没有未解决的 WCAG 2.2 A/AA failure 时，才把报告写成精确的
-  `Result: Pass`；否则写 `Result: Fail` 并阻止发布。
-- 在创建版本 tag 前提交报告。Release workflow 会检查
-  `release-reports/<tag>.md` 是否存在并包含 `Result: Pass`。
+- 执行人工复核时记录观察结果，并把发现的缺陷链接到可复现 issue；跳过时写
+  `Not run (advisory)`。
+- 所有必要自动化和资产绑定检查通过，且没有已知的发布阻断级无障碍缺陷时，报告
+  写为 `Result: Pass`；必要检查失败或仍有已知阻断缺陷时写 `Result: Fail`。
+- 记录被评估的 commit SHA，以及 `dancing_log/webui_dist/` 下两个文件各自的
+  SHA-256；在创建版本 tag 前提交报告。Release workflow 会检查精确的
+  `Result: Pass`，确认评估 revision 是 tag 的祖先，并分别从该 revision 和当前
+  release 构建重新计算两个哈希。
 - 基础组件重大变更的报告缺失或仍为 `Result: Pending` / `Result: Fail` 时不得合并。
+- 未执行建议性的人工复核，不会阻止报告通过、合并或发布。自动化通过不表示完整
+  WCAG 一致性声明。
 - 不得把 Lighthouse 分数作为合规证明；如需记录，只能列为辅助信号。

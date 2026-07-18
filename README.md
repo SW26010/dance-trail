@@ -300,21 +300,26 @@ Timeline opens on the latest local date that has playback records, then keeps
 calendar and arrow navigation scoped to the selected local date.
 The UI supports English and Chinese through a browser-local language switch,
 and system, light, and dark Fluent 2 themes through a separate theme selector.
-The Local Web UI is a Windows desktop productivity surface governed by Fluent 2,
-WCAG 2.2 AA, and WAI-ARIA APG. Run its browser acceptance suite with:
+The Local Web UI is a Windows desktop productivity surface implemented with
+React and `@fluentui/react-components` v9. Its root `FluentProvider`, official
+Fluent Web Themes, and token-only custom layout are governed by Fluent 2,
+WCAG 2.2 AA, and WAI-ARIA APG. Build and run its browser acceptance suite with:
 
 ```powershell
 uv sync --locked --cache-dir .uv-cache
 pnpm install --frozen-lockfile
+pnpm check:webui
+pnpm build:webui
 pnpm exec playwright install chromium
 pnpm test:a11y
 ```
 
 This scans all seven primary pages in light and dark themes with Playwright and
 axe, then exercises ARIA, keyboard, focus, validation, failure, and forced-colors
-contracts. Automated success is not a complete conformance claim. Follow
-`docs/accessibility/webui-release-checklist.md` for the required WCAG-EM manual
-release check; Lighthouse Accessibility remains a supporting signal only.
+contracts. These automated checks and reproducible asset hashes are the release
+gate. The manual sections in `docs/accessibility/webui-release-checklist.md` are
+advisory and may be skipped; automated success is not a complete conformance
+claim. Lighthouse Accessibility remains a supporting signal only.
 
 For deterministic offline replay of a fixed corpus, use the replay helper
 instead of `watch-vrc-log --from-start`:

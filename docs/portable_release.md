@@ -11,15 +11,20 @@ Prerequisites:
 - Windows
 - Python 3.14
 - `uv` on `PATH`
+- Node.js 24.x on `PATH`
+- pnpm 11.9.0 on `PATH`
 
-Run:
+Install the locked Web UI dependencies, then run the build:
 
 ```powershell
+pnpm install --frozen-lockfile
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1
 ```
 
-The script runs the unit tests, builds a PyInstaller onedir desktop app plus a
-console CLI app, runs an exe smoke test, and writes:
+The script builds the Fluent React Web UI, runs the unit tests, and uses the
+locked `release` dependency group from `uv.lock` and the pnpm lockfile to build
+PyInstaller onedir desktop and console apps. It then runs an exe smoke test and
+writes:
 
 ```text
 dist/releases/DancingLog-v<version>-win-x64-portable.zip
@@ -36,11 +41,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1
 
 ## GitHub Release
 
-Before creating a version tag, complete the WCAG-EM procedure in
+Before creating a version tag, complete the required automated procedure in
 `docs/accessibility/webui-release-checklist.md` and commit a passing report as
 `docs/accessibility/release-reports/<version-tag>.md`. The report must contain an
-exact `Result: Pass` line. Automated Playwright/axe success is a prerequisite,
-not a replacement for this manual evaluation.
+exact `Result: Pass` line and reproducible revision/asset hashes. Manual
+observations are advisory and are not required for release.
 
 Push a version tag:
 
@@ -49,7 +54,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The `Release Portable` workflow verifies the matching manual report, runs the
+The `Release Portable` workflow verifies the matching accessibility report, runs the
 Web UI accessibility acceptance suite, builds the same portable zip, uploads it
 as an artifact, and attaches the zip plus SHA-256 checksum to the GitHub Release.
 

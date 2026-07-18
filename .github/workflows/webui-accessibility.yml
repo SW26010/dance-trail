@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -28,6 +30,9 @@ jobs:
 
       - name: Sync Python environment
         run: uv sync --locked --cache-dir .uv-cache
+
+      - name: Run Python unit tests
+        run: uv run --locked --cache-dir .uv-cache python -m unittest discover
 
       - name: Set up pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
@@ -46,6 +51,22 @@ jobs:
 
       - name: Install Chromium
         run: pnpm exec playwright install chromium
+
+      - name: Check and build Fluent React Web UI
+        run: |
+          pnpm check:webui
+          pnpm build:webui
+          git diff --exit-code -- dancing_log/webui_dist
+
+      - name: Verify accessibility evidence for material Web UI changes
+        env:
+          BASE_REVISION: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_REVISION: ${{ github.sha }}
+        run: >-
+          uv run --locked --cache-dir .uv-cache python
+          scripts/verify_accessibility_changes.py
+          --base-revision $env:BASE_REVISION
+          --head-revision $env:HEAD_REVISION
 
       - name: Run Web UI accessibility acceptance
         run: pnpm test:a11y

@@ -4,7 +4,8 @@ Date: 2026-07-18
 
 ## Status
 
-Accepted
+Accepted; mandatory manual-review gate superseded by
+[ADR 0012](0012-make-manual-webui-accessibility-review-advisory.md)
 
 ## Context
 

@@ -424,12 +424,19 @@ class WebUiServerTest(unittest.TestCase):
     def _csrf_token(self, server: WebUiServer) -> str:
         with urlopen(server.url, timeout=2) as response:
             html = response.read().decode("utf-8")
-        marker = 'const CSRF_TOKEN = "'
-        self.assertIn(marker, html)
-        token = html.split(marker, 1)[1].split('"', 1)[0]
+        bootstrap = self._webui_bootstrap(html)
+        token = bootstrap["csrfToken"]
         self.assertTrue(token)
-        self.assertNotEqual(token, "__DANCING_LOG_CSRF_TOKEN__")
+        self.assertNotEqual(token, "__DANCING_LOG_BOOTSTRAP__")
         return token
+
+    def _webui_bootstrap(self, html: str) -> dict:
+        marker = '<script id="dancing-log-bootstrap" type="application/json">'
+        self.assertIn(marker, html)
+        payload = html.split(marker, 1)[1].split("</script>", 1)[0]
+        bootstrap = json.loads(payload)
+        self.assertIsInstance(bootstrap, dict)
+        return bootstrap
 
     def _assert_slow_request_expires(
         self,
@@ -531,87 +538,28 @@ class WebUiServerTest(unittest.TestCase):
                     html = response.read().decode("utf-8")
                     final_url = response.geturl()
                 self.assertEqual(final_url, server.home_url)
-                self.assertIn("dancing-log", html)
-                self.assertIn('<h1 id="view-title" tabindex="-1">Home</h1>', html)
-                self.assertIn('"timeline":"/timeline"', html)
-                self.assertIn('"operations":"/data-operations"', html)
-                self.assertIn('<a href="${ROUTES[key]}"', html)
-                self.assertIn('addEventListener("popstate"', html)
-                self.assertIn('active: viewFromPath(location.pathname)', html)
-                self.assertIn("Settings", html)
-                self.assertIn('stopping: "Stopping"', html)
-                self.assertIn(".pill.blue {", html)
-                self.assertIn("session.watcher_state", html)
+                self.assertIn("<title>dancing-log</title>", html)
+                self.assertIn('<div id="root"></div>', html)
                 self.assertIn(
-                    "const watcherState = lifecycleState(session.watcher_state, session.watcher_running);",
+                    '<script type="module" crossorigin src="/assets/app.js"></script>',
                     html,
                 )
-                self.assertIn(
-                    "const watcherActive = watcherState !== \"stopped\";",
-                    html,
-                )
-                self.assertIn('id="home-live-status"', html)
-                self.assertIn("if (error.data?.session)", html)
-                self.assertIn(
-                    "await pollHomeSessionToTerminalState(error.data.session);",
-                    html,
-                )
-                self.assertIn("pollHomeSessionToTerminalState", html)
-                self.assertIn('watcherState === "stopping" ? "disabled" : ""', html)
-                self.assertIn("dancing-log.language", html)
-                self.assertIn("dancing-log.theme", html)
-                self.assertIn("中文", html)
-                self.assertIn("本地 Web UI", html)
-                self.assertIn('class="skip-link" href="#main-content"', html)
-                self.assertIn('id="theme-select"', html)
-                self.assertIn("--color-brand-background", html)
-                self.assertIn("forced-colors: active", html)
-                self.assertIn("/api/playback-review", html)
-                self.assertIn("data-playback-action", html)
-                self.assertIn("Restore default", html)
-                self.assertIn("timeline-copy", html)
-                self.assertIn("timeline-icon-button", html)
-                self.assertIn("timeline-sort-part", html)
-                self.assertIn("timeline-date-input", html)
-                self.assertIn("timeline-date-field", html)
-                self.assertIn("timeline-date-picker", html)
-                self.assertIn("normalizeTimelineDateInput", html)
-                self.assertIn('class="timeline-date-input" type="text" id="timeline-date"', html)
-                self.assertIn('class="timeline-date-picker" type="date" id="timeline-date-picker"', html)
-                self.assertIn('inputmode="numeric"', html)
-                self.assertNotIn('type="date" id="timeline-date"', html)
-                self.assertNotIn("timeline-date-picker-icon", html)
-                self.assertIn("timeline-source", html)
-                self.assertIn("renderTimelineSource", html)
-                self.assertIn("timeline-record-title", html)
-                self.assertIn("timeline-system", html)
-                self.assertIn("DANCE_SYSTEM_LABELS", html)
-                self.assertIn("danceSystemLabel", html)
-                self.assertIn(
-                    "if (name) return name;\n"
-                    "  if (DANCE_SYSTEM_LABELS[key]) return DANCE_SYSTEM_LABELS[key];",
-                    html,
-                )
-                self.assertIn("requester_user_id", html)
-                self.assertIn('title="${esc(requesterUserId)}"', html)
-                self.assertIn("copyTextToClipboard", html)
-                self.assertIn("Copy valid", html)
-                self.assertIn("复制有效事件", html)
-                self.assertNotIn('id="timeline-source"', html)
-                self.assertIn("prefers-color-scheme: dark", html)
-                self.assertIn("color-scheme: dark", html)
-                self.assertIn("scrollbar-gutter: stable", html)
-                self.assertIn('aria-labelledby="view-title"', html)
-                self.assertIn("scope=\"col\"", html)
                 self.assertNotIn("https://", html)
-                self.assertIn('const CSRF_TOKEN = "', html)
-                self.assertIn("AUTOMATIC_SOURCE_PATH_KEYS", html)
-                self.assertIn("data-path-custom", html)
-                self.assertNotIn("data-save-settings", html)
-                self.assertIn("isFieldDirty", html)
-                self.assertNotIn("autoSaveConfigKey", html)
-                self.assertNotIn("__DANCING_LOG_CSRF_TOKEN__", html)
-                self.assertNotIn("__DANCING_LOG_ROUTES__", html)
+                self.assertNotIn("__DANCING_LOG_BOOTSTRAP__", html)
+
+                bootstrap = self._webui_bootstrap(html)
+                self.assertTrue(bootstrap["csrfToken"])
+                self.assertEqual(bootstrap["routes"]["timeline"], "/timeline")
+                self.assertEqual(
+                    bootstrap["routes"]["operations"], "/data-operations"
+                )
+
+                with urlopen(f"{server.url}assets/app.js", timeout=2) as response:
+                    app_asset = response.read()
+                    self.assertEqual(
+                        response.headers.get_content_type(), "text/javascript"
+                    )
+                self.assertGreater(len(app_asset), 100_000)
 
                 with urlopen(f"{server.url}api/config", timeout=2) as response:
                     snapshot = json.loads(response.read().decode("utf-8"))
@@ -621,7 +569,6 @@ class WebUiServerTest(unittest.TestCase):
                     snapshot["config"]["dance_day_boundary_time"],
                     "00:00",
                 )
-                self.assertIn('input type="time"', html)
             finally:
                 server.stop()
 

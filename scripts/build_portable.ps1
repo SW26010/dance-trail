@@ -3,7 +3,6 @@ param(
     [string]$Version = "",
     [string]$Runtime = "win-x64",
     [string]$Python = "python",
-    [string]$PyInstallerSpec = "pyinstaller>=6.0",
     [switch]$NoUv,
     [switch]$SkipTests,
     [switch]$SkipSmoke
@@ -56,7 +55,7 @@ function Invoke-ProjectPython {
     param([string[]]$Arguments = @())
 
     if (-not $NoUv -and (Get-Command uv -ErrorAction SilentlyContinue)) {
-        & uv run --cache-dir (Join-Path $RepoRoot ".uv-cache") python @Arguments
+        & uv run --locked --cache-dir (Join-Path $RepoRoot ".uv-cache") python @Arguments
     }
     else {
         & $Python @Arguments
@@ -67,7 +66,7 @@ function Invoke-PyInstaller {
     param([string[]]$Arguments = @())
 
     if (-not $NoUv -and (Get-Command uv -ErrorAction SilentlyContinue)) {
-        & uv run --cache-dir (Join-Path $RepoRoot ".uv-cache") --with $PyInstallerSpec pyinstaller @Arguments
+        & uv run --locked --group release --cache-dir (Join-Path $RepoRoot ".uv-cache") pyinstaller @Arguments
     }
     else {
         & $Python -m PyInstaller @Arguments
@@ -122,11 +121,34 @@ $ReleaseName = "$AppName-v$Version-$Runtime-portable"
 $StageDir = Join-Path $PortableRoot $ReleaseName
 $ZipPath = Join-Path $ReleaseRoot "$ReleaseName.zip"
 $ChecksumPath = "$ZipPath.sha256"
+$WebUiDist = Join-Path $RepoRoot "dancing_log\webui_dist"
 
 Set-Location $RepoRoot
 
 $pythonVersionCheck = "import sys; raise SystemExit(0 if sys.version_info >= (3, 14) else 'Python 3.14 or newer is required for release builds; got ' + sys.version.split()[0])"
 Invoke-Checked { Invoke-ProjectPython -Arguments @("-c", $pythonVersionCheck) } "Check Python version"
+
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+    throw "Node.js 24.x is required to build the Fluent React Web UI"
+}
+$nodeVersion = (& node -p "process.versions.node").Trim()
+if ($LASTEXITCODE -ne 0 -or -not $nodeVersion.StartsWith("24.")) {
+    throw "Node.js 24.x is required to build the Fluent React Web UI; got $nodeVersion"
+}
+if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
+    throw "pnpm 11.9.0 is required to build the Fluent React Web UI"
+}
+$pnpmVersion = (& pnpm --version).Trim()
+if ($LASTEXITCODE -ne 0 -or $pnpmVersion -ne "11.9.0") {
+    throw "pnpm 11.9.0 is required to build the Fluent React Web UI; got $pnpmVersion"
+}
+if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot "node_modules\.modules.yaml"))) {
+    throw "Web UI dependencies are not installed; run pnpm install --frozen-lockfile"
+}
+Invoke-Checked { & pnpm build:webui } "Build Fluent React Web UI"
+if (-not (Test-Path -LiteralPath (Join-Path $WebUiDist "index.html"))) {
+    throw "Web UI build output is missing index.html: $WebUiDist"
+}
 
 if (-not $SkipTests) {
     Invoke-Checked { Invoke-ProjectPython -Arguments @("-m", "unittest", "discover") } "Run unit tests"
@@ -143,6 +165,7 @@ $pyInstallerBaseArgs = @(
     "--onedir",
     "--exclude-module", "imageio",
     "--exclude-module", "imageio_ffmpeg",
+    "--add-data", "$WebUiDist;dancing_log/webui_dist",
     "--distpath", $PyInstallerDist,
     "--workpath", $PyInstallerWork,
     "--specpath", $PyInstallerWork

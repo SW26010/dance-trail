@@ -16,7 +16,11 @@ from dancing_log.overlay_server import (
     OverlayState,
     render_overlay_html,
 )
-from dancing_log.webui_assets import WEBUI_ROUTE_BY_VIEW, render_webui_html
+from dancing_log.webui_assets import (
+    WEBUI_ROUTE_BY_VIEW,
+    load_webui_asset,
+    render_webui_html,
+)
 from dancing_log.webui_endpoints import (
     control_live_overlay_from_payload,
     control_live_watcher_from_payload,
@@ -131,6 +135,10 @@ def handle_get_request(runtime: WebUiRouteRuntime, target: str) -> WebUiRouteRes
         return _redirect_response(_with_query(path[:-1], parsed.query))
     if path in WEBUI_PAGE_PATHS:
         return _html_response(200, render_webui_html(runtime.csrf_token))
+    webui_asset = load_webui_asset(path)
+    if webui_asset is not None:
+        content_type, body = webui_asset
+        return WebUiRouteResponse(200, content_type, body)
     if path == OVERLAY_PAGE_PATH:
         return _html_response(200, render_overlay_html())
 

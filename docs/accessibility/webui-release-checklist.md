@@ -1,8 +1,9 @@
-# Local Web UI WCAG-EM Release Checklist
+# Local Web UI Accessibility Checklist
 
-Use this procedure for every release and after a material change to a base Web
-UI component. It evaluates the seven Local Web UI Navigation Entries. The OBS
-Overlay is a separate viewer-facing output surface.
+Use the automated portion of this procedure for every release and after a
+material change to a base Web UI component. Sections 2–5 are advisory manual
+review prompts and are not merge or release gates. The OBS Overlay is a separate
+viewer-facing output surface.
 
 ## 1. Establish the evaluation
 
@@ -12,7 +13,8 @@ Overlay is a separate viewer-facing output surface.
    - material base-component change:
      `change-reports/YYYY-MM-DD-<lowercase-kebab-slug>.md`, for example
      `change-reports/2026-07-18-fluent2-webui-baseline.md`.
-2. Record the exact commit, Windows build, Edge/Chrome version, display scale,
+2. Record the exact commit and generated asset hashes. If optional manual review
+   is performed, also record the Windows build, browser version, display scale,
    input devices, and assistive technologies.
 3. Include Home, Timeline, Catalog, Lists, Insights, Data Operations, and
    Settings. Sample loading, empty, populated, disabled, validation error,
@@ -28,7 +30,7 @@ Overlay is a separate viewer-facing output surface.
 
    All tests and all WCAG 2.2 A/AA axe scans must pass with no allowlist.
 
-## 2. Keyboard
+## 2. Keyboard (advisory)
 
 - Use only the keyboard from a fresh page load. Verify the skip link, logical
   focus order, visible Fluent focus indicator, and no keyboard trap.
@@ -44,7 +46,7 @@ Overlay is a separate viewer-facing output surface.
   Escape, arrow, Home/End, Tab/Shift+Tab, activation, focus entry, and focus
   return as applicable.
 
-## 3. Screen reader
+## 3. Screen reader (advisory)
 
 - Test current NVDA with current Edge or Chrome. Use Windows Narrator as a
   secondary check when a Windows-specific behavior is involved.
@@ -60,7 +62,7 @@ Overlay is a separate viewer-facing output surface.
   once at an appropriate urgency without unexpectedly moving the virtual cursor.
 - Switch English/Chinese and verify the document language and translated names.
 
-## 4. Zoom, reflow, and text spacing
+## 4. Zoom, reflow, and text spacing (advisory)
 
 - At 200% browser zoom, verify no content or function is lost.
 - At 400% zoom (or a 320 CSS-pixel equivalent viewport), verify single-axis
@@ -70,7 +72,7 @@ Overlay is a separate viewer-facing output surface.
   0.12em letter spacing, 0.16em word spacing) and verify no clipping, overlap,
   or loss of controls.
 
-## 5. Windows high contrast and themes
+## 5. Windows high contrast and themes (advisory)
 
 - Test light, dark, and system theme selection.
 - Enable at least one dark and one light Windows Contrast Theme. Verify text,
@@ -80,12 +82,19 @@ Overlay is a separate viewer-facing output surface.
 
 ## 6. Record the result
 
-- Record each observation and link every defect to a reproducible issue.
-- Set `Result: Pass` only when no WCAG 2.2 A/AA failure remains in the evaluated
-  scope. Otherwise set `Result: Fail` and block the release.
-- Commit the report before creating the version tag. The release workflow checks
-  that `release-reports/<tag>.md` exists and says `Result: Pass`.
+- Record optional manual observations when performed and link discovered defects
+  to reproducible issues. Use `Not run (advisory)` when they are skipped.
+- Set `Result: Pass` when every required automated check and asset-binding check
+  passes and no known release-blocking accessibility defect remains. Use
+  `Result: Fail` for a failed required check or known blocking defect.
+- Record the evaluated commit SHA and SHA-256 values for both files under
+  `dancing_log/webui_dist/`. Commit the report before creating the version tag.
+  The release workflow checks `Result: Pass`, verifies the evaluated revision is
+  an ancestor of the tag, and recomputes both hashes from that revision and the
+  current release build.
 - Do not merge a material base-component change while its report is missing or
   says `Result: Pending` or `Result: Fail`.
+- Missing optional manual observations do not block a passing report, merge, or
+  release. An automated pass is not a claim of complete WCAG conformance.
 - Do not use a Lighthouse score as a conformance claim. Record it only as an
   optional supporting signal.

@@ -1,9 +1,11 @@
-# Local Web UI WCAG-EM Evaluation Report
+# Local Web UI Accessibility Evaluation Report
 
 Evidence kind: `Release` or `Material base-component change`
 Identifier: `<version tag or YYYY-MM-DD-lowercase-kebab-slug>`
-Evaluated revision: `<full commit SHA or immutable review revision>`
-Evaluator: `<name or initials>`
+Evaluated revision: `<full 40-character commit SHA for Result: Pass>`
+Asset SHA-256 (`dancing_log/webui_dist/app.js`): `<64 lowercase hexadecimal characters>`
+Asset SHA-256 (`dancing_log/webui_dist/index.html`): `<64 lowercase hexadecimal characters>`
+Evaluator: `<automation run, name, or initials>`
 Date: `YYYY-MM-DD`
 Result: Pending
 
@@ -13,40 +15,40 @@ Result: Pending
 - Important states:
 - Exclusions and rationale:
 
-## Environment
+## Optional manual environment
 
-- Windows:
-- Browser and version:
-- Display scale and browser zoom:
-- Keyboard/input devices:
-- Screen reader and version:
-- Windows Contrast Themes:
+- Windows: Not run (advisory).
+- Browser and version: Not run (advisory).
+- Display scale and browser zoom: Not run (advisory).
+- Keyboard/input devices: Not run (advisory).
+- Screen reader and version: Not run (advisory).
+- Windows Contrast Themes: Not run (advisory).
 
-## Automated prerequisite
+## Required automated gates
 
 - `pnpm test:a11y` result:
 - CI run:
 
-## Manual results
+## Optional manual observations
 
 ### Keyboard and focus
 
-- Result:
+- Result: Not run (advisory), or Pass/Fail when performed.
 - Evidence/findings:
 
 ### Screen reader
 
-- Result:
+- Result: Not run (advisory), or Pass/Fail when performed.
 - Evidence/findings:
 
 ### Zoom, reflow, and text spacing
 
-- Result:
+- Result: Not run (advisory), or Pass/Fail when performed.
 - Evidence/findings:
 
 ### Light, dark, system, and Windows high contrast
 
-- Result:
+- Result: Not run (advisory), or Pass/Fail when performed.
 - Evidence/findings:
 
 ## Open issues
@@ -55,6 +57,9 @@ Result: Pending
 
 ## Conclusion
 
-Replace `Result: Pending` above with exactly `Result: Pass` only when the
-evaluated scope has no unresolved WCAG 2.2 A/AA failure. Use `Result: Fail`
-otherwise.
+Replace `Result: Pending` above with exactly `Result: Pass` when all required
+automated and asset-binding gates pass and no known release-blocking
+accessibility defect remains. Use `Result: Fail` for a failed required gate or a
+known blocking defect. Optional manual observations may remain `Not run
+(advisory)` and do not block a passing result. Do not describe an automated pass
+as complete WCAG conformance.

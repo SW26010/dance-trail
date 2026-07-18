@@ -12,3 +12,8 @@ dependencies = [
 recording-tools = [
     "imageio-ffmpeg>=0.6.0",
 ]
+
+[dependency-groups]
+release = [
+    "pyinstaller==6.21.0",
+]

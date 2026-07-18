@@ -10,15 +10,19 @@ app-root 路径模型：`config/`、`data/`、`logs/` 都放在可执行文件�
 - Windows
 - Python 3.14
 - `uv` 在 `PATH` 中
+- Node.js 24.x 在 `PATH` 中
+- pnpm 11.9.0 在 `PATH` 中
 
-运行：
+先安装锁定的 Web UI 依赖，再运行构建：
 
 ```powershell
+pnpm install --frozen-lockfile
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1
 ```
 
-脚本会运行单元测试、构建 PyInstaller onedir 桌面托盘程序和 console CLI
-程序、对 exe 做 smoke test，然后输出：
+脚本会构建 Fluent React Web UI、运行单元测试，并使用 `uv.lock` 中锁定的
+`release` dependency group 与 pnpm lockfile 构建 PyInstaller onedir 桌面托盘
+程序和 console CLI 程序；之后对 exe 做 smoke test，并输出：
 
 ```text
 dist/releases/DancingLog-v<version>-win-x64-portable.zip
@@ -36,9 +40,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1
 ## GitHub Release
 
 创建版本 tag 前，先按 `docs/accessibility/webui-release-checklist.zh-CN.md`
-完成 WCAG-EM 检查，并把通过报告提交为
+完成必要的自动化检查，并把通过报告提交为
 `docs/accessibility/release-reports/<版本标签>.md`。报告必须包含一行精确的
-`Result: Pass`。Playwright/axe 自动化通过是前置条件，不能代替人工评估。
+`Result: Pass` 和可复算的 revision/资产哈希。人工复核是建议项，不是发布
+前置条件。
 
 推送版本 tag：
 
@@ -47,7 +52,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-`Release Portable` workflow 会先验证对应人工报告并运行 Web UI 无障碍验收，
+`Release Portable` workflow 会先验证对应无障碍报告并运行 Web UI 无障碍验收，
 再构建同一个 portable zip、上传 artifact，并把 zip 和 SHA-256 checksum 附到
 GitHub Release。
 
