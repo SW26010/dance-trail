@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -164,6 +166,45 @@ class AccessibilityReportTest(unittest.TestCase):
 
         self.assertEqual(reports, (relative_report,))
         self.assertEqual(verify.call_count, 1)
+
+    def test_historical_failed_report_does_not_require_current_format(self) -> None:
+        relative_report = Path(
+            "docs/accessibility/change-reports/2026-07-18-historical.md"
+        )
+        report_path = self.root / relative_report
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(
+            "# Superseded historical evidence\n\nResult: Fail\n",
+            encoding="utf-8",
+        )
+
+        reports = verify_accessibility_changes(
+            [relative_report.as_posix()],
+            self.root,
+            head_revision="2" * 40,
+        )
+
+        self.assertEqual(reports, ())
+
+    def test_change_verifier_supports_direct_script_execution(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "scripts/verify_accessibility_changes.py",
+                "--help",
+            ],
+            cwd=repo_root,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("--base-revision", completed.stdout)
 
 
 if __name__ == "__main__":

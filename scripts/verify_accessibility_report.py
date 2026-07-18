@@ -36,15 +36,23 @@ def sha256_bytes(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
+def report_result(content: str) -> str:
+    results = [
+        match.group(1)
+        for line in content.splitlines()
+        if (match := RESULT_PATTERN.fullmatch(line))
+    ]
+    if len(results) != 1:
+        raise ReportValidationError("Report must contain exactly one Result line")
+    return results[0]
+
+
 def parse_report(content: str) -> AccessibilityReport:
     revisions: list[str] = []
-    results: list[str] = []
     assets: dict[Path, str] = {}
     for line in content.splitlines():
         if match := REVISION_PATTERN.fullmatch(line):
             revisions.append(match.group(1))
-        if match := RESULT_PATTERN.fullmatch(line):
-            results.append(match.group(1))
         if match := ASSET_PATTERN.fullmatch(line):
             asset = Path(match.group(1))
             if asset in assets:
@@ -57,8 +65,7 @@ def parse_report(content: str) -> AccessibilityReport:
         raise ReportValidationError(
             "Report must contain exactly one evaluated revision"
         )
-    if len(results) != 1:
-        raise ReportValidationError("Report must contain exactly one Result line")
+    result = report_result(content)
     missing = [
         asset.as_posix() for asset in REQUIRED_ASSETS if asset not in assets
     ]
@@ -66,7 +73,7 @@ def parse_report(content: str) -> AccessibilityReport:
         raise ReportValidationError(
             f"Report is missing required asset hashes: {', '.join(missing)}"
         )
-    return AccessibilityReport(revisions[0], results[0], assets)
+    return AccessibilityReport(revisions[0], result, assets)
 
 
 def _git(repo_root: Path, *arguments: str) -> bytes:

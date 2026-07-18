@@ -6,11 +6,18 @@ import subprocess
 import sys
 from pathlib import Path
 
-from scripts.verify_accessibility_report import (
-    ReportValidationError,
-    parse_report,
-    verify_report,
-)
+if __package__:
+    from scripts.verify_accessibility_report import (
+        ReportValidationError,
+        report_result,
+        verify_report,
+    )
+else:
+    from verify_accessibility_report import (  # type: ignore[no-redef]
+        ReportValidationError,
+        report_result,
+        verify_report,
+    )
 
 
 CHANGE_REPORT_DIRECTORY = Path("docs/accessibility/change-reports")
@@ -111,8 +118,8 @@ def verify_accessibility_changes(
 
     for path in sorted(path for path in paths if is_change_report(path)):
         report_path = repo_root / Path(path)
-        report = parse_report(report_path.read_text(encoding="utf-8"))
-        if report.result != "Pass":
+        content = report_path.read_text(encoding="utf-8")
+        if report_result(content) != "Pass":
             continue
         verify_report(
             report_path,
