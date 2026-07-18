@@ -118,5 +118,18 @@ def run_tray_webui_app(
     try:
         WindowsTrayApp(server, runtime).run(open_browser=open_browser)
     finally:
-        runtime.close()
-        server.stop()
+        _shutdown_tray_resources(server, runtime)
+
+
+def _shutdown_tray_resources(server: WebUiServer, runtime: TrayRuntime) -> None:
+    """Stop new HTTP work before reliably finalizing the live watcher."""
+    cleanup_errors: list[Exception] = []
+    for action in (server.stop, runtime.close):
+        try:
+            action()
+        except Exception as exc:
+            cleanup_errors.append(exc)
+    if len(cleanup_errors) == 1:
+        raise cleanup_errors[0]
+    if cleanup_errors:
+        raise ExceptionGroup("tray app shutdown failed", cleanup_errors)

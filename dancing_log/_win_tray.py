@@ -42,6 +42,8 @@ MF_STRING = 0x00000000
 MF_SEPARATOR = 0x00000800
 TPM_RIGHTBUTTON = 0x0002
 TPM_RETURNCMD = 0x0100
+MB_OK = 0x00000000
+MB_ICONERROR = 0x00000010
 
 IDI_APPLICATION = 32512
 SW_HIDE = 0
@@ -161,6 +163,13 @@ user32.TrackPopupMenu.argtypes = [
 ]
 user32.TrackPopupMenu.restype = wintypes.UINT
 user32.DestroyMenu.argtypes = [wintypes.HMENU]
+user32.MessageBoxW.argtypes = [
+    wintypes.HWND,
+    wintypes.LPCWSTR,
+    wintypes.LPCWSTR,
+    wintypes.UINT,
+]
+user32.MessageBoxW.restype = ctypes.c_int
 shell32.Shell_NotifyIconW.argtypes = [wintypes.DWORD, ctypes.POINTER(NOTIFYICONDATAW)]
 shell32.Shell_NotifyIconW.restype = wintypes.BOOL
 
@@ -197,7 +206,7 @@ class WindowsTrayApp:
         self._create_window()
         self._add_tray_icon()
         if open_browser:
-            webbrowser.open(self.server.url)
+            webbrowser.open(self.server.home_url)
         self._message_loop()
 
     def _create_window(self) -> None:
@@ -262,6 +271,13 @@ class WindowsTrayApp:
             self._quit()
 
     def _window_proc(self, hwnd, message, wparam, lparam):
+        try:
+            return self._dispatch_window_message(hwnd, message, wparam, lparam)
+        except Exception as error:
+            self._show_callback_error(error)
+            return 0
+
+    def _dispatch_window_message(self, hwnd, message, wparam, lparam):
         if message == WM_TRAYICON:
             if int(lparam) == WM_LBUTTONDBLCLK:
                 self._open_webui()
@@ -284,6 +300,20 @@ class WindowsTrayApp:
             user32.PostQuitMessage(0)
             return 0
         return user32.DefWindowProcW(hwnd, message, wparam, lparam)
+
+    def _show_callback_error(self, error: Exception) -> None:
+        """Keep Python exceptions inside WNDPROC and provide visible feedback."""
+        message = f"{type(error).__name__}: {error}"
+        try:
+            user32.MessageBoxW(
+                self._hwnd,
+                message,
+                "DancingLog tray action failed",
+                MB_OK | MB_ICONERROR,
+            )
+        except Exception:
+            # A ctypes callback must never leak a second exception while reporting one.
+            pass
 
     def _show_menu(self) -> None:
         assert self._hwnd is not None
@@ -314,7 +344,7 @@ class WindowsTrayApp:
             user32.DestroyMenu(menu)
 
     def _open_webui(self) -> None:
-        webbrowser.open(self.server.url)
+        webbrowser.open(self.server.home_url)
 
     def _quit(self) -> None:
         if self._hwnd is not None:

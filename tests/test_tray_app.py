@@ -5,7 +5,8 @@ import threading
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from dancing_log.app_paths import DEFAULT_CONFIG
 from dancing_log.tray_app import TrayRuntime, run_tray_webui_app
@@ -21,6 +22,77 @@ def wait_for_call_count(calls: list[dict], count: int) -> None:
 
 
 class TrayRuntimeTest(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "win32", "Windows tray callback test")
+    def test_windows_tray_callback_contains_lifecycle_timeout(self):
+        from dancing_log import _win_tray
+
+        app = _win_tray.WindowsTrayApp.__new__(_win_tray.WindowsTrayApp)
+        app.runtime = SimpleNamespace(
+            toggle_watcher=Mock(side_effect=TimeoutError("watcher is still stopping"))
+        )
+        app._hwnd = 123
+
+        with patch.object(_win_tray.user32, "MessageBoxW", return_value=1) as message_box:
+            result = app._window_proc(
+                app._hwnd,
+                _win_tray.WM_COMMAND,
+                _win_tray.IDM_TOGGLE_WATCHER,
+                0,
+            )
+
+        self.assertEqual(result, 0)
+        message_box.assert_called_once()
+        self.assertIn("watcher is still stopping", message_box.call_args.args[1])
+
+    def test_windows_shutdown_stops_server_before_runtime_close(self):
+        events: list[str] = []
+        runtime = SimpleNamespace(
+            session=object(),
+            close=Mock(side_effect=lambda: events.append("runtime.close")),
+        )
+        server = SimpleNamespace(
+            start=Mock(),
+            stop=Mock(side_effect=lambda: events.append("server.stop")),
+        )
+        tray_window = SimpleNamespace(run=Mock())
+        windows_tray_app = Mock(return_value=tray_window)
+        fake_win_tray_module = SimpleNamespace(WindowsTrayApp=windows_tray_app)
+
+        with (
+            patch.object(sys, "platform", "win32"),
+            patch("dancing_log.tray_app.TrayRuntime", return_value=runtime),
+            patch("dancing_log.tray_app.WebUiServer", return_value=server),
+            patch.dict(sys.modules, {"dancing_log._win_tray": fake_win_tray_module}),
+        ):
+            run_tray_webui_app(port=9988, open_browser=False, app_root=".")
+
+        runtime.close.assert_called_once_with()
+        server.stop.assert_called_once_with()
+        self.assertEqual(events, ["server.stop", "runtime.close"])
+
+    def test_windows_shutdown_closes_runtime_when_server_stop_fails(self):
+        runtime = SimpleNamespace(session=object(), close=Mock())
+        server = SimpleNamespace(
+            start=Mock(),
+            stop=Mock(side_effect=TimeoutError("slow SSE drain")),
+        )
+        tray_window = SimpleNamespace(run=Mock())
+        fake_win_tray_module = SimpleNamespace(
+            WindowsTrayApp=Mock(return_value=tray_window)
+        )
+
+        with (
+            patch.object(sys, "platform", "win32"),
+            patch("dancing_log.tray_app.TrayRuntime", return_value=runtime),
+            patch("dancing_log.tray_app.WebUiServer", return_value=server),
+            patch.dict(sys.modules, {"dancing_log._win_tray": fake_win_tray_module}),
+            self.assertRaisesRegex(TimeoutError, "slow SSE drain"),
+        ):
+            run_tray_webui_app(port=9988, open_browser=False, app_root=".")
+
+        server.stop.assert_called_once_with()
+        runtime.close.assert_called_once_with()
+
     def test_non_windows_entry_uses_webui_server_fallback(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
