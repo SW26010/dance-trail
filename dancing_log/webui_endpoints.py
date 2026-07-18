@@ -14,7 +14,11 @@ from dancing_log.data_operations import (
     operation_catalog_snapshot,
     run_data_operation_request,
 )
-from dancing_log.live_app_session import LiveAppSessionRuntime, LiveAppSessionStatus
+from dancing_log.live_app_session import (
+    LiveAppSessionRuntime,
+    LiveAppSessionStatus,
+    LiveSessionUnavailableError,
+)
 from dancing_log.playback_projection import (
     EFFECTIVE_PLAYBACK_ACCEPTED,
     EFFECTIVE_PLAYBACK_EXCLUDED,
@@ -28,20 +32,30 @@ from dancing_log.playback_review import (
 from dancing_log.read_snapshots import LocalReadSnapshots
 from dancing_log.storage import connect_db
 from dancing_log.webui_settings import load_config_snapshot
+from dancing_log.watcher_lifetime_lock import WatcherLifetimeLockUnavailable
+
+
+class LiveStateSnapshot(Protocol):
+    def snapshot(self) -> dict: ...
 
 
 class WebUiEndpointRuntime(Protocol):
     app_root: Path
     session: LiveAppSessionRuntime
+    live_state: LiveStateSnapshot
+    startup_warnings: tuple[str, ...]
 
     @property
     def paths(self) -> AppPaths: ...
 
 
 def load_summary_snapshot(runtime: WebUiEndpointRuntime) -> dict:
+    config_warnings = load_config_snapshot(runtime).get("warnings", [])
     snapshot = LocalReadSnapshots(runtime.app_root).home(
-        config_warnings=load_config_snapshot(runtime).get("warnings", []),
+        config_warnings=[*config_warnings, *runtime.startup_warnings],
     )
+    snapshot["startup_warnings"] = list(runtime.startup_warnings)
+    snapshot["current_live"] = runtime.live_state.snapshot()["current"]
     snapshot["session"] = live_session_status_snapshot(runtime.session.status())
     return snapshot
 
@@ -51,12 +65,19 @@ def control_live_watcher_from_payload(
     payload: dict,
 ) -> tuple[dict, int]:
     action = str(payload.get("action") or "").strip().lower()
-    if action == "start":
-        runtime.session.start_watcher()
-    elif action == "stop":
-        runtime.session.stop_watcher()
-    else:
-        return {"error": "action must be start or stop"}, 400
+    try:
+        if action == "start":
+            runtime.session.start_watcher()
+        elif action == "stop":
+            runtime.session.stop_watcher()
+        else:
+            return {"error": "action must be start or stop"}, 400
+    except (
+        TimeoutError,
+        LiveSessionUnavailableError,
+        WatcherLifetimeLockUnavailable,
+    ) as exc:
+        return _live_transition_conflict(runtime, exc)
     return {"session": live_session_status_snapshot(runtime.session.status())}, 200
 
 
@@ -65,19 +86,39 @@ def control_live_overlay_from_payload(
     payload: dict,
 ) -> tuple[dict, int]:
     action = str(payload.get("action") or "").strip().lower()
-    if action == "start":
-        runtime.session.start_overlay()
-    elif action == "stop":
-        runtime.session.stop_overlay()
-    else:
-        return {"error": "action must be start or stop"}, 400
+    try:
+        if action == "start":
+            runtime.session.start_overlay()
+        elif action == "stop":
+            runtime.session.stop_overlay()
+        else:
+            return {"error": "action must be start or stop"}, 400
+    except (
+        TimeoutError,
+        LiveSessionUnavailableError,
+        WatcherLifetimeLockUnavailable,
+    ) as exc:
+        return _live_transition_conflict(runtime, exc)
     return {"session": live_session_status_snapshot(runtime.session.status())}, 200
+
+
+def _live_transition_conflict(
+    runtime: WebUiEndpointRuntime,
+    error: Exception,
+) -> tuple[dict, int]:
+    return {
+        "error": str(error),
+        "session": live_session_status_snapshot(runtime.session.status()),
+    }, 409
 
 
 def live_session_status_snapshot(status: LiveAppSessionStatus) -> dict:
     return {
+        "session_state": status.session_state,
         "watcher_running": status.watcher_running,
         "overlay_running": status.overlay_running,
+        "watcher_state": status.watcher_state,
+        "overlay_state": status.overlay_state,
         "last_error": status.last_error,
         "last_watcher_stats": _watcher_stats_snapshot(status.last_watcher_stats),
     }

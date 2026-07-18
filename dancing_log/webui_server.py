@@ -2,33 +2,61 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 import json
 from pathlib import Path
 import secrets
-import sys
-import threading
 import time
 from urllib.parse import urlsplit
 import webbrowser
 
 from dancing_log.app_paths import AppPaths, AppRuntimeConfig, default_app_root
+from dancing_log.http_request_lifecycle import (
+    AcceptedOperationShutdown,
+    HttpShutdownParticipant,
+    ManagedLocalHTTPRequestHandler,
+    ManagedLocalHTTPServer,
+)
 from dancing_log.live_app_session import (
     LiveAppSessionRuntime,
     WatchVrcLogsFunc,
 )
+from dancing_log.overlay_server import (
+    EVENT_STREAM_DRAIN_TIMEOUT_SECONDS,
+    MountedOverlayAdapter,
+    OVERLAY_EVENTS_PATH,
+    OVERLAY_PAGE_PATH,
+    OverlayEventStreams,
+    OverlayState,
+    is_allowed_local_http_host,
+    is_allowed_local_http_origin,
+    send_overlay_events,
+)
+from dancing_log.webui_assets import WEBUI_ROUTE_BY_VIEW
 from dancing_log.webui_routes import (
     WebUiRouteResponse,
     handle_get_request,
     handle_post_request,
 )
+from dancing_log.watcher_lifetime_lock import (
+    WatcherLifetimeLease,
+    WatcherLifetimeLockUnavailable,
+)
 
 
 WEBUI_HOST = "127.0.0.1"
 DEFAULT_WEBUI_PORT = 8787
-LOCAL_WEBUI_HOSTS = {"127.0.0.1", "localhost"}
 CSRF_HEADER = "X-Dancing-Log-CSRF"
+MAX_POST_BODY_BYTES = 1024 * 1024
+HTTP_REQUEST_READ_DEADLINE_SECONDS = 2.0
+HTTP_REQUEST_READ_POLL_SECONDS = 0.25
+REJECTED_POST_DRAIN_GRACE_SECONDS = 0.05
+CONTROL_PAGE_FRAME_HEADERS = (
+    ("Content-Security-Policy", "frame-ancestors 'none'"),
+    ("X-Frame-Options", "DENY"),
+)
+
 
 @dataclass(frozen=True)
 class WebUiRuntime:
@@ -37,6 +65,9 @@ class WebUiRuntime:
     app_root: Path
     csrf_token: str
     session: LiveAppSessionRuntime
+    overlay_state: OverlayState
+    live_state: OverlayState
+    startup_warnings: tuple[str, ...] = ()
 
     @classmethod
     def from_root(
@@ -45,6 +76,7 @@ class WebUiRuntime:
         *,
         session_runtime: LiveAppSessionRuntime | None = None,
         watch_vrc_logs_func: WatchVrcLogsFunc | None = None,
+        overlay_state: OverlayState | None = None,
     ) -> "WebUiRuntime":
         if session_runtime is not None and watch_vrc_logs_func is not None:
             raise ValueError("pass either session_runtime or watch_vrc_logs_func, not both")
@@ -54,7 +86,13 @@ class WebUiRuntime:
             app_root=resolved_root,
             watch_vrc_logs_func=watch_vrc_logs_func,
         )
-        return cls(resolved_root, secrets.token_urlsafe(32), session)
+        return cls(
+            resolved_root,
+            secrets.token_urlsafe(32),
+            session,
+            overlay_state or OverlayState(enabled=False),
+            OverlayState(),
+        )
 
     @property
     def paths(self) -> AppPaths:
@@ -72,68 +110,132 @@ class WebUiServer:
         app_root: Path | str | None = None,
         session_runtime: LiveAppSessionRuntime | None = None,
         watch_vrc_logs_func: WatchVrcLogsFunc | None = None,
+        overlay_state: OverlayState | None = None,
     ) -> None:
         if host != WEBUI_HOST:
             raise ValueError("web UI server must bind to 127.0.0.1")
         self.host = host
         self.port = port
-        self.runtime = WebUiRuntime.from_root(
+        runtime = WebUiRuntime.from_root(
             app_root,
             session_runtime=session_runtime,
             watch_vrc_logs_func=watch_vrc_logs_func,
+            overlay_state=overlay_state,
         )
-        _run_startup_maintenance(self.runtime.app_root)
+        self.runtime = replace(
+            runtime,
+            startup_warnings=_run_startup_maintenance(runtime.app_root),
+        )
         self._owns_session = session_runtime is None
         self._server: _WebUiHTTPServer | None = None
-        self._thread: threading.Thread | None = None
+        self._mounted_overlay: MountedOverlayAdapter | None = None
 
     @property
     def url(self) -> str:
         return f"http://{self.host}:{self.port}/"
 
+    @property
+    def home_url(self) -> str:
+        return f"http://{self.host}:{self.port}{WEBUI_ROUTE_BY_VIEW['home']}"
+
+    @property
+    def overlay_url(self) -> str:
+        return f"http://{self.host}:{self.port}{OVERLAY_PAGE_PATH}"
+
     def start(self) -> None:
-        self._server = _WebUiHTTPServer((self.host, self.port), _WebUiHandler, self.runtime)
-        self.port = int(self._server.server_address[1])
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
-        self._thread.start()
+        server = _WebUiHTTPServer((self.host, self.port), _WebUiHandler, self.runtime)
+        self.port = int(server.server_address[1])
+        overlay = MountedOverlayAdapter(
+            self.runtime.overlay_state,
+            url=self.overlay_url,
+            live_state=self.runtime.live_state,
+        )
+        mounted = False
+        try:
+            self.runtime.session.mount_overlay(overlay)
+            mounted = True
+            server.start_http(thread_name="DancingLogWebUiHTTP")
+        except BaseException as primary:
+            cleanup_errors: list[BaseException] = []
+            if mounted:
+                try:
+                    self.runtime.session.unmount_overlay(overlay)
+                except BaseException as exc:
+                    cleanup_errors.append(exc)
+            try:
+                server.stop_http()
+            except BaseException as exc:
+                cleanup_errors.append(exc)
+            self._server = None
+            if cleanup_errors:
+                raise BaseExceptionGroup(
+                    f"Web UI start failed after {primary}",
+                    [primary, *cleanup_errors],
+                ) from None
+            raise
+        self._server = server
+        self._mounted_overlay = overlay
 
     def stop(self) -> None:
+        cleanup_errors: list[Exception] = []
         if self._server is not None:
-            self._server.shutdown()
-            self._server.server_close()
+            server = self._server
+            _attempt_webui_cleanup(cleanup_errors, server.stop_http)
             self._server = None
-        if self._thread is not None:
-            self._thread.join(timeout=2.0)
-            self._thread = None
+        if getattr(self, "_mounted_overlay", None) is not None:
+            overlay = self._mounted_overlay
+            try:
+                self.runtime.session.unmount_overlay(overlay)
+            except Exception as exc:
+                cleanup_errors.append(exc)
+            finally:
+                self._mounted_overlay = None
         if self._owns_session:
-            self.runtime.session.close()
+            _attempt_webui_cleanup(cleanup_errors, self.runtime.session.close)
+        if len(cleanup_errors) == 1:
+            raise cleanup_errors[0]
+        if cleanup_errors:
+            raise ExceptionGroup("Web UI shutdown failed", cleanup_errors)
 
 
-def _run_startup_maintenance(app_root: Path) -> None:
+def _run_startup_maintenance(app_root: Path) -> tuple[str, ...]:
     try:
         config = AppRuntimeConfig.load(app_root=app_root, migrate_legacy=True)
         app_db_path = config.path("app_db")
         from dancing_log.storage import connect_db, repair_stale_watcher_pending_records
 
-        with connect_db(app_db_path) as conn:
-            repair_stale_watcher_pending_records(conn)
-            conn.commit()
-    except Exception:
-        return
+        with WatcherLifetimeLease.acquire(
+            app_root=app_root,
+            app_db_path=app_db_path,
+        ):
+            with connect_db(app_db_path) as conn:
+                repair_stale_watcher_pending_records(conn)
+                conn.commit()
+    except WatcherLifetimeLockUnavailable:
+        return ()
+    except Exception as exc:
+        return (f"Startup maintenance failed ({type(exc).__name__}): {exc}",)
+    return ()
 
 
-class _WebUiHTTPServer(ThreadingHTTPServer):
+class _WebUiHTTPServer(ManagedLocalHTTPServer):
     def __init__(self, server_address, request_handler_class, runtime: WebUiRuntime) -> None:
-        super().__init__(server_address, request_handler_class)
         self.runtime = runtime
-
-    def handle_error(self, request, client_address) -> None:
-        exc = sys.exc_info()[1]
-        if isinstance(exc, (BrokenPipeError, ConnectionAbortedError, ConnectionResetError)):
-            return
-        if isinstance(exc, OSError) and getattr(exc, "winerror", None) in {10053, 10054}:
-            return
-        super().handle_error(request, client_address)
+        self.event_streams = OverlayEventStreams(runtime.overlay_state)
+        super().__init__(
+            server_address,
+            request_handler_class,
+            accepted_operation_shutdown=AcceptedOperationShutdown.DRAIN,
+            request_read_deadline_seconds=HTTP_REQUEST_READ_DEADLINE_SECONDS,
+            request_read_poll_seconds=HTTP_REQUEST_READ_POLL_SECONDS,
+            shutdown_participants=(
+                HttpShutdownParticipant(
+                    "overlay event streams",
+                    self.event_streams,
+                    EVENT_STREAM_DRAIN_TIMEOUT_SECONDS,
+                ),
+            ),
+        )
 
 
 class RequestRejected(ValueError):
@@ -143,47 +245,119 @@ class RequestRejected(ValueError):
         self.message = message
 
 
-class _WebUiHandler(BaseHTTPRequestHandler):
+class _WebUiHandler(ManagedLocalHTTPRequestHandler):
     server: _WebUiHTTPServer
 
     def do_GET(self) -> None:
         try:
-            self._send_response(handle_get_request(self.server.runtime, self.path))
+            self._validate_host()
+            if urlsplit(self.path).path == OVERLAY_EVENTS_PATH:
+                self.perform_operation(
+                    lambda: send_overlay_events(self, self.server.event_streams)
+                )
+                return
+            self.perform_operation(
+                lambda: self._send_response(
+                    handle_get_request(self.server.runtime, self.path)
+                )
+            )
+        except RequestRejected as exc:
+            if self._can_send_response():
+                self._send_json(exc.status, {"error": exc.message})
         except Exception as exc:  # pragma: no cover - kept visible to local UI users.
-            self._send_json(500, {"error": str(exc)})
+            if self._can_send_response():
+                self._send_json(500, {"error": str(exc)})
 
     def do_POST(self) -> None:
         try:
-            self._validate_post_request()
-            payload = self._read_json_body()
-            self._send_response(handle_post_request(self.server.runtime, self.path, payload))
+            self._validate_post_headers()
+            content_length = self._validated_content_length()
+            raw_body = self._read_request_body(content_length)
+            payload = self._parse_json_body(raw_body)
+            self.perform_operation(
+                lambda: self._send_response(
+                    handle_post_request(self.server.runtime, self.path, payload)
+                )
+            )
         except RequestRejected as exc:
+            self.close_connection = True
+            if not self._can_send_response():
+                return
             self._send_json(exc.status, {"error": exc.message})
+            writer = getattr(self, "wfile", None)
+            if writer is not None:
+                try:
+                    writer.flush()
+                except OSError:
+                    pass
+            self._discard_available_request_body()
         except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
+            if self._can_send_response():
+                self._send_json(400, {"error": str(exc)})
         except Exception as exc:  # pragma: no cover - kept visible to local UI users.
-            self._send_json(500, {"error": str(exc)})
+            if self._can_send_response():
+                self._send_json(500, {"error": str(exc)})
 
     def log_message(self, format: str, *args) -> None:
         return
 
-    def _read_json_body(self) -> dict:
-        length = int(self.headers.get("Content-Length") or 0)
+    def _validated_content_length(self) -> int:
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError as exc:
+            raise RequestRejected(400, "invalid Content-Length") from exc
+        if length < 0:
+            raise RequestRejected(400, "invalid Content-Length")
+        if length > MAX_POST_BODY_BYTES:
+            raise RequestRejected(413, "POST body is too large")
+        return length
+
+    def _read_request_body(self, length: int) -> bytes:
         if length <= 0:
+            return b""
+        try:
+            raw = self.rfile.read(length)
+        except TimeoutError as exc:
+            raise RequestRejected(408, "POST body was not received in time") from exc
+        if len(raw) != length:
+            raise RequestRejected(400, "incomplete request body")
+        return raw
+
+    def _discard_available_request_body(self) -> None:
+        """Drain a rejected body only within a small, fixed grace period."""
+        connection = getattr(self, "connection", None)
+        if connection is None:
+            return
+        try:
+            remaining = min(
+                max(int(self.headers.get("Content-Length") or 0), 0),
+                MAX_POST_BODY_BYTES,
+            )
+        except ValueError:
+            return
+        if remaining == 0:
+            return
+
+        self.discard_available_body(
+            length=remaining,
+            grace_seconds=REJECTED_POST_DRAIN_GRACE_SECONDS,
+        )
+
+    @staticmethod
+    def _parse_json_body(raw: bytes) -> dict:
+        if not raw:
             return {}
-        raw = self.rfile.read(length).decode("utf-8")
-        payload = json.loads(raw)
+        payload = json.loads(raw.decode("utf-8"))
         if not isinstance(payload, dict):
             raise ValueError("request body must be a JSON object")
         return payload
 
-    def _validate_post_request(self) -> None:
+    def _validate_post_headers(self) -> None:
+        self._validate_host()
         content_type = self.headers.get("Content-Type", "")
         media_type = content_type.split(";", 1)[0].strip().lower()
         if media_type != "application/json":
             raise RequestRejected(415, "POST requires application/json")
-        if not self._is_allowed_host(self.headers.get("Host", "")):
-            raise RequestRejected(403, "invalid Host")
         origin = self.headers.get("Origin")
         if origin and not self._is_allowed_origin(origin):
             raise RequestRejected(403, "invalid Origin")
@@ -191,26 +365,26 @@ class _WebUiHandler(BaseHTTPRequestHandler):
         if not secrets.compare_digest(token, self.server.runtime.csrf_token):
             raise RequestRejected(403, "invalid CSRF token")
 
+    def _can_send_response(self) -> bool:
+        connection = getattr(self, "connection", None)
+        if connection is None or not hasattr(connection, "fileno"):
+            return True
+        return connection.fileno() >= 0
+
+    def _validate_host(self) -> None:
+        if not self._is_allowed_host(self.headers.get("Host", "")):
+            raise RequestRejected(403, "invalid Host")
+
     def _is_allowed_host(self, value: str) -> bool:
-        try:
-            parsed = urlsplit(f"//{value}")
-            port = parsed.port
-        except ValueError:
-            return False
-        hostname = (parsed.hostname or "").lower()
-        return hostname in LOCAL_WEBUI_HOSTS and port == int(self.server.server_address[1])
+        return is_allowed_local_http_host(
+            value,
+            port=int(self.server.server_address[1]),
+        )
 
     def _is_allowed_origin(self, value: str) -> bool:
-        try:
-            parsed = urlsplit(value)
-            port = parsed.port
-        except ValueError:
-            return False
-        hostname = (parsed.hostname or "").lower()
-        return (
-            parsed.scheme == "http"
-            and hostname in LOCAL_WEBUI_HOSTS
-            and port == int(self.server.server_address[1])
+        return is_allowed_local_http_origin(
+            value,
+            port=int(self.server.server_address[1]),
         )
 
     def _send_json(self, status: int, payload: dict) -> None:
@@ -218,15 +392,47 @@ class _WebUiHandler(BaseHTTPRequestHandler):
         self._send_bytes(status, "application/json; charset=utf-8", data)
 
     def _send_response(self, response: WebUiRouteResponse) -> None:
-        self._send_bytes(response.status, response.content_type, response.body)
+        headers = response.headers
+        if (
+            response.content_type.startswith("text/html")
+            and urlsplit(self.path).path != OVERLAY_PAGE_PATH
+        ):
+            headers += CONTROL_PAGE_FRAME_HEADERS
+        self._send_bytes(
+            response.status,
+            response.content_type,
+            response.body,
+            headers=headers,
+        )
 
-    def _send_bytes(self, status: int, content_type: str, payload: bytes) -> None:
+    def _send_bytes(
+        self,
+        status: int,
+        content_type: str,
+        payload: bytes,
+        *,
+        headers: tuple[tuple[str, str], ...] = (),
+    ) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Cache-Control", "no-store")
+        if self.close_connection:
+            self.send_header("Connection", "close")
+        for name, value in headers:
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(payload)
+
+
+def _attempt_webui_cleanup(
+    errors: list[Exception],
+    action: Callable[[], object],
+) -> None:
+    try:
+        action()
+    except Exception as exc:
+        errors.append(exc)
 
 
 def run_webui_server(
@@ -238,9 +444,10 @@ def run_webui_server(
     """Run the local Web UI server until interrupted."""
     server = WebUiServer(port=port, app_root=app_root)
     server.start()
-    print(f"dancing-log Web UI: {server.url}")
+    print(f"dancing-log Web UI: {server.home_url}")
+    print(f"dancing-log OBS overlay: {server.overlay_url}")
     if open_browser:
-        webbrowser.open(server.url)
+        webbrowser.open(server.home_url)
     try:
         while True:
             time.sleep(3600)

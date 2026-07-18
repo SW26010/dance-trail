@@ -1,14 +1,19 @@
 import json
+from io import BytesIO
+import socket
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from dancing_log.app_paths import DEFAULT_CONFIG
 from dancing_log.data_operations import DataOperationResult, operation_catalog_snapshot
+from dancing_log.live_app_session import LiveAppSessionRuntime
 from dancing_log.playback_projection import (
     EFFECTIVE_PLAYBACK_ACCEPTED,
     EFFECTIVE_PLAYBACK_EXCLUDED,
@@ -16,6 +21,7 @@ from dancing_log.playback_projection import (
     set_manual_playback_decision,
 )
 from dancing_log.webui_endpoints import (
+    control_live_overlay_from_payload,
     load_catalog_snapshot,
     load_insights_snapshot,
     load_operations_snapshot,
@@ -29,7 +35,14 @@ from dancing_log.storage import (
     ensure_dance_track,
     upsert_live_playback_event,
 )
-from dancing_log.webui_server import WebUiRuntime, WebUiServer
+from dancing_log.webui_server import (
+    RequestRejected,
+    WebUiRuntime,
+    WebUiServer,
+    _WebUiHandler,
+    _WebUiHTTPServer,
+)
+from dancing_log.webui_routes import WebUiRouteResponse, handle_get_request
 from dancing_log.webui_settings import load_config_snapshot
 from dancing_log.windows_picker import (
     FOS_FILEMUSTEXIST,
@@ -52,6 +65,362 @@ def wait_for_call_count(calls: list[dict], count: int) -> None:
 
 
 class WebUiServerTest(unittest.TestCase):
+    def test_mount_failure_closes_bound_listener(self):
+        class RejectingSession:
+            def mount_overlay(self, _overlay) -> None:
+                raise RuntimeError("mount failed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            server = WebUiServer(
+                port=0,
+                app_root=tmp,
+                session_runtime=RejectingSession(),
+            )
+            closed: list[tuple[str, int]] = []
+            original_server_close = _WebUiHTTPServer.server_close
+
+            def record_server_close(http_server) -> None:
+                closed.append(http_server.server_address)
+                original_server_close(http_server)
+
+            with (
+                patch.object(
+                    _WebUiHTTPServer,
+                    "server_close",
+                    record_server_close,
+                ),
+                self.assertRaisesRegex(RuntimeError, "mount failed"),
+            ):
+                server.start()
+
+            self.assertEqual(closed, [(server.host, server.port)])
+
+            probe = socket.socket()
+            try:
+                probe.bind((server.host, server.port))
+            finally:
+                probe.close()
+
+    def test_start_failure_closes_bound_listener_without_shutdown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server = WebUiServer(port=0, app_root=tmp)
+            try:
+                with (
+                    patch(
+                        "dancing_log.http_request_lifecycle.threading.Thread.start",
+                        side_effect=RuntimeError("thread start failed"),
+                    ),
+                    self.assertRaisesRegex(RuntimeError, "thread start failed"),
+                ):
+                    server.start()
+
+                self.assertIsNone(server._server)
+                probe = socket.socket()
+                try:
+                    probe.bind((server.host, server.port))
+                finally:
+                    probe.close()
+            finally:
+                if server._server is not None:
+                    server._server.server_close()
+                    server._server = None
+
+    def test_startup_maintenance_skips_database_owned_by_live_watcher(self):
+        watcher_started = threading.Event()
+
+        def blocking_watch_vrc_logs(**kwargs):
+            watcher_started.set()
+            kwargs["stop_event"].wait(timeout=2.0)
+            return {"finished": True}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = LiveAppSessionRuntime(
+                app_root=tmp,
+                watch_vrc_logs_func=blocking_watch_vrc_logs,
+            )
+            runtime.start_watcher()
+            self.assertTrue(watcher_started.wait(timeout=1.0))
+            try:
+                with patch(
+                    "dancing_log.storage.repair_stale_watcher_pending_records"
+                ) as repair:
+                    server = WebUiServer(port=0, app_root=tmp)
+                repair.assert_not_called()
+                server.stop()
+            finally:
+                runtime.close()
+
+    def test_startup_maintenance_failure_is_visible_in_summary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch(
+                "dancing_log.storage.repair_stale_watcher_pending_records",
+                side_effect=RuntimeError("repair exploded"),
+            ):
+                server = WebUiServer(port=0, app_root=tmp)
+            try:
+                summary = load_summary_snapshot(server.runtime)
+
+                self.assertTrue(
+                    any(
+                        "startup maintenance failed" in warning.lower()
+                        and "repair exploded" in warning
+                        for warning in summary["config_warnings"]
+                    ),
+                    summary["config_warnings"],
+                )
+                self.assertEqual(len(summary["startup_warnings"]), 1)
+                self.assertIn("repair exploded", summary["startup_warnings"][0])
+            finally:
+                server.stop()
+
+    def test_partial_valid_post_body_cannot_block_shutdown_forever(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server = WebUiServer(port=0, app_root=tmp)
+            server.start()
+            token = self._csrf_token(server)
+            client: socket.socket | None = None
+            stop_thread = threading.Thread(target=server.stop)
+            try:
+                with patch.object(
+                    server._server,
+                    "request_read_deadline_seconds",
+                    10.0,
+                ):
+                    client = socket.create_connection(
+                        (server.host, server.port), timeout=1.0
+                    )
+                    client.sendall(
+                        (
+                            "POST /api/config HTTP/1.1\r\n"
+                            f"Host: {server.host}:{server.port}\r\n"
+                            "Content-Type: application/json\r\n"
+                            f"Origin: {server.url.rstrip('/')}\r\n"
+                            f"X-Dancing-Log-CSRF: {token}\r\n"
+                            "Content-Length: 100\r\n"
+                            "Connection: keep-alive\r\n"
+                            "\r\n"
+                            "{"
+                        ).encode("ascii")
+                    )
+                    deadline = time.monotonic() + 1.0
+                    while (
+                        server._server.active_request_count == 0
+                        and time.monotonic() < deadline
+                    ):
+                        time.sleep(0.01)
+                    self.assertEqual(server._server.active_request_count, 1)
+
+                    stop_thread.start()
+                    stop_thread.join(timeout=0.8)
+
+                self.assertFalse(stop_thread.is_alive())
+            finally:
+                if client is not None:
+                    client.close()
+                stop_thread.join(timeout=2.0)
+                if server._server is not None:
+                    server.stop()
+
+    def test_partial_header_remains_open_until_absolute_read_deadline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server = WebUiServer(port=0, app_root=tmp)
+            server.start()
+            client: socket.socket | None = None
+            try:
+                with patch.object(
+                    server._server,
+                    "request_read_deadline_seconds",
+                    0.6,
+                ):
+                    client = socket.create_connection(
+                        (server.host, server.port), timeout=1.0
+                    )
+                    client.sendall(b"GET /api/summary HTTP/1.1\r\n")
+                    registration_deadline = time.monotonic() + 1.0
+                    while (
+                        server._server.active_request_count == 0
+                        and time.monotonic() < registration_deadline
+                    ):
+                        time.sleep(0.01)
+                    self.assertEqual(server._server.active_request_count, 1)
+
+                    time.sleep(0.35)
+                    self.assertEqual(server._server.active_request_count, 1)
+
+                    expiry_deadline = time.monotonic() + 0.6
+                    while (
+                        server._server.active_request_count != 0
+                        and time.monotonic() < expiry_deadline
+                    ):
+                        time.sleep(0.01)
+                    self.assertEqual(server._server.active_request_count, 0)
+            finally:
+                if client is not None:
+                    client.close()
+                if server._server is not None:
+                    server.stop()
+
+    def test_slow_header_cannot_extend_request_read_deadline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server = WebUiServer(port=0, app_root=tmp)
+            server.start()
+            self._assert_slow_request_expires(
+                initial=b"POST /api/config HTTP/1.1",
+                trickle=b" ",
+                server=server,
+            )
+
+    def test_slow_body_cannot_extend_request_read_deadline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server = WebUiServer(port=0, app_root=tmp)
+            server.start()
+            token = self._csrf_token(server)
+            initial = (
+                "POST /api/config HTTP/1.1\r\n"
+                f"Host: {server.host}:{server.port}\r\n"
+                "Content-Type: application/json\r\n"
+                f"Origin: {server.url.rstrip('/')}\r\n"
+                f"X-Dancing-Log-CSRF: {token}\r\n"
+                "Content-Length: 10000\r\n"
+                "Connection: keep-alive\r\n"
+                "\r\n"
+                "{"
+            ).encode("ascii")
+            self._assert_slow_request_expires(
+                initial=initial,
+                trickle=b" ",
+                server=server,
+            )
+
+    def test_webui_stop_closes_session_after_http_lifecycle_failure(self):
+        events: list[str] = []
+
+        def stop_http() -> None:
+            events.append("http.stop")
+            raise RuntimeError("HTTP lifecycle failed")
+
+        fake_http_server = SimpleNamespace(stop_http=stop_http)
+        session = SimpleNamespace(close=lambda: events.append("session.close"))
+        server = WebUiServer.__new__(WebUiServer)
+        server._server = fake_http_server
+        server._mounted_overlay = None
+        server._owns_session = True
+        server.runtime = SimpleNamespace(session=session)
+
+        with self.assertRaisesRegex(RuntimeError, "HTTP lifecycle failed"):
+            server.stop()
+
+        self.assertEqual(events, ["http.stop", "session.close"])
+        self.assertIsNone(server._server)
+
+    def test_webui_stop_waits_for_in_flight_post_handler(self):
+        entered = threading.Event()
+        release = threading.Event()
+        request_errors: list[Exception] = []
+
+        def blocking_post(_runtime, _target, _payload):
+            entered.set()
+            release.wait(timeout=2.0)
+            return WebUiRouteResponse(
+                200,
+                "application/json; charset=utf-8",
+                b"{}",
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            server = WebUiServer(port=0, app_root=tmp)
+            server.start()
+            token = self._csrf_token(server)
+            request = self._json_request(
+                server,
+                "api/config",
+                {},
+                token=token,
+                origin=server.url.rstrip("/"),
+            )
+
+            def send_request() -> None:
+                try:
+                    with urlopen(request, timeout=2) as response:
+                        response.read()
+                except Exception as exc:
+                    request_errors.append(exc)
+
+            request_thread = threading.Thread(target=send_request)
+            stop_thread = threading.Thread(target=server.stop)
+            try:
+                with patch(
+                    "dancing_log.webui_server.handle_post_request",
+                    side_effect=blocking_post,
+                ):
+                    request_thread.start()
+                    self.assertTrue(entered.wait(timeout=1.0))
+                    stop_thread.start()
+                    stop_thread.join(timeout=0.8)
+                    self.assertTrue(stop_thread.is_alive())
+
+                    release.set()
+                    request_thread.join(timeout=1.0)
+                    stop_thread.join(timeout=2.0)
+
+                self.assertFalse(request_thread.is_alive())
+                self.assertFalse(stop_thread.is_alive())
+                self.assertEqual(request_errors, [])
+            finally:
+                release.set()
+                request_thread.join(timeout=2.0)
+                stop_thread.join(timeout=2.0)
+                if server._server is not None:
+                    server.stop()
+
+    def test_invalid_post_headers_are_rejected_without_waiting_for_body(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server = WebUiServer(port=0, app_root=tmp)
+            server.start()
+            client = socket.create_connection((server.host, server.port), timeout=1.0)
+            client.settimeout(0.5)
+            try:
+                client.sendall(
+                    (
+                        "POST /api/config HTTP/1.1\r\n"
+                        f"Host: evil.example:{server.port}\r\n"
+                        "Content-Type: application/json\r\n"
+                        f"Content-Length: {1024 * 1024}\r\n"
+                        "Connection: keep-alive\r\n"
+                        "\r\n"
+                    ).encode("ascii")
+                )
+
+                response = client.recv(4096)
+
+                self.assertIn(b" 403 ", response)
+                self.assertIn(b"Connection: close", response)
+            finally:
+                client.close()
+                server.stop()
+
+    def test_canonical_redirect_preserves_query_parameters(self):
+        response = handle_get_request(
+            SimpleNamespace(),
+            "/timeline/?date=2026-06-18&sort=desc",
+        )
+
+        self.assertEqual(response.status, 302)
+        self.assertEqual(
+            dict(response.headers)["Location"],
+            "/timeline?date=2026-06-18&sort=desc",
+        )
+
+    def test_port_80_accepts_http_authority_without_explicit_port(self):
+        handler = _WebUiHandler.__new__(_WebUiHandler)
+        handler.server = SimpleNamespace(server_address=("127.0.0.1", 80))
+
+        self.assertTrue(handler._is_allowed_host("localhost"))
+        self.assertTrue(handler._is_allowed_host("127.0.0.1"))
+        self.assertTrue(handler._is_allowed_origin("http://localhost"))
+        self.assertTrue(handler._is_allowed_origin("http://127.0.0.1"))
+        self.assertFalse(handler._is_allowed_origin("https://localhost"))
+
     def _csrf_token(self, server: WebUiServer) -> str:
         with urlopen(server.url, timeout=2) as response:
             html = response.read().decode("utf-8")
@@ -61,6 +430,61 @@ class WebUiServerTest(unittest.TestCase):
         self.assertTrue(token)
         self.assertNotEqual(token, "__DANCING_LOG_CSRF_TOKEN__")
         return token
+
+    def _assert_slow_request_expires(
+        self,
+        *,
+        initial: bytes,
+        trickle: bytes,
+        server: WebUiServer,
+    ) -> None:
+        client: socket.socket | None = None
+        writer_stop = threading.Event()
+        writer: threading.Thread | None = None
+        try:
+            with patch.object(
+                server._server,
+                "request_read_deadline_seconds",
+                0.12,
+            ):
+                client = socket.create_connection(
+                    (server.host, server.port), timeout=1.0
+                )
+                client.sendall(initial)
+
+                registration_deadline = time.monotonic() + 1.0
+                while (
+                    server._server.active_request_count == 0
+                    and time.monotonic() < registration_deadline
+                ):
+                    time.sleep(0.01)
+                self.assertEqual(server._server.active_request_count, 1)
+
+                def trickle_request() -> None:
+                    while not writer_stop.wait(0.02):
+                        try:
+                            client.sendall(trickle)
+                        except OSError:
+                            return
+
+                writer = threading.Thread(target=trickle_request)
+                writer.start()
+                deadline = time.monotonic() + 0.6
+                while (
+                    server._server.active_request_count != 0
+                    and time.monotonic() < deadline
+                ):
+                    time.sleep(0.01)
+
+            self.assertEqual(server._server.active_request_count, 0)
+        finally:
+            writer_stop.set()
+            if client is not None:
+                client.close()
+            if writer is not None:
+                writer.join(timeout=1.0)
+            if server._server is not None:
+                server.stop()
 
     def _json_request(
         self,
@@ -105,8 +529,35 @@ class WebUiServerTest(unittest.TestCase):
             try:
                 with urlopen(server.url, timeout=2) as response:
                     html = response.read().decode("utf-8")
+                    final_url = response.geturl()
+                self.assertEqual(final_url, server.home_url)
                 self.assertIn("dancing-log", html)
+                self.assertIn('<h1 id="view-title">Home</h1>', html)
+                self.assertIn('"timeline":"/timeline"', html)
+                self.assertIn('"operations":"/data-operations"', html)
+                self.assertIn('<a href="${ROUTES[key]}"', html)
+                self.assertIn('addEventListener("popstate"', html)
+                self.assertIn('active: viewFromPath(location.pathname)', html)
                 self.assertIn("Settings", html)
+                self.assertIn('stopping: "Stopping"', html)
+                self.assertIn(".pill.blue {", html)
+                self.assertIn("session.watcher_state", html)
+                self.assertIn(
+                    "const watcherState = lifecycleState(session.watcher_state, session.watcher_running);",
+                    html,
+                )
+                self.assertIn(
+                    "const watcherActive = watcherState !== \"stopped\";",
+                    html,
+                )
+                self.assertIn('id="home-live-status"', html)
+                self.assertIn("if (error.data?.session)", html)
+                self.assertIn(
+                    "await pollHomeSessionToTerminalState(error.data.session);",
+                    html,
+                )
+                self.assertIn("pollHomeSessionToTerminalState", html)
+                self.assertIn('watcherState === "stopping" ? "disabled" : ""', html)
                 self.assertIn("dancing-log.language", html)
                 self.assertIn("中文", html)
                 self.assertIn("本地 Web UI", html)
@@ -153,6 +604,7 @@ class WebUiServerTest(unittest.TestCase):
                 self.assertIn("isFieldDirty", html)
                 self.assertNotIn("autoSaveConfigKey", html)
                 self.assertNotIn("__DANCING_LOG_CSRF_TOKEN__", html)
+                self.assertNotIn("__DANCING_LOG_ROUTES__", html)
 
                 with urlopen(f"{server.url}api/config", timeout=2) as response:
                     snapshot = json.loads(response.read().decode("utf-8"))
@@ -160,6 +612,105 @@ class WebUiServerTest(unittest.TestCase):
                 self.assertIn("overlay_port", snapshot["config"])
             finally:
                 server.stop()
+
+    def test_webui_serves_canonical_page_routes_and_mounted_overlay(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server = WebUiServer(port=0, app_root=tmp)
+            server.start()
+            try:
+                for path in (
+                    "home",
+                    "timeline?date=2026-06-18&sort=desc",
+                    "catalog",
+                    "lists",
+                    "insights",
+                    "data-operations",
+                    "settings",
+                ):
+                    with urlopen(f"{server.url}{path}", timeout=2) as response:
+                        self.assertEqual(response.status, 200)
+                        self.assertIn("dancing-log", response.read().decode("utf-8"))
+
+                with urlopen(f"{server.url}api/overlay/state", timeout=2) as response:
+                    inactive_snapshot = json.loads(response.read().decode("utf-8"))
+                self.assertFalse(inactive_snapshot["overlay_enabled"])
+
+                server.runtime.overlay_state.publish(
+                    {
+                        "event_key": "wannadance:3114#1",
+                        "dance_system_key": "wannadance",
+                        "dance_external_id": "3114",
+                        "actual_play_at": "2026.05.17 15:30:10",
+                    }
+                )
+                with urlopen(server.overlay_url, timeout=2) as response:
+                    overlay_html = response.read().decode("utf-8")
+                self.assertIn("/api/overlay/state", overlay_html)
+                self.assertIn("/api/overlay/events", overlay_html)
+
+                with urlopen(f"{server.url}api/overlay/state", timeout=2) as response:
+                    snapshot = json.loads(response.read().decode("utf-8"))
+                self.assertEqual(snapshot["current"]["dance_external_id"], "3114")
+
+                with urlopen(f"{server.url}api/overlay/events", timeout=2) as response:
+                    data_line = ""
+                    for _ in range(4):
+                        line = response.readline().decode("utf-8").strip()
+                        if line.startswith("data: "):
+                            data_line = line
+                            break
+                event_snapshot = json.loads(data_line.removeprefix("data: "))
+                self.assertEqual(event_snapshot["current"]["dance_external_id"], "3114")
+
+                try:
+                    urlopen(f"{server.url}not-a-page", timeout=2)
+                except HTTPError as error:
+                    self.assertEqual(error.code, 404)
+                    error.close()
+                else:
+                    self.fail("unknown page route should return 404")
+            finally:
+                server.stop()
+
+    def test_control_pages_deny_framing_but_overlay_allows_obs_embedding(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server = WebUiServer(port=0, app_root=tmp)
+            server.start()
+            try:
+                with urlopen(server.home_url, timeout=2) as response:
+                    self.assertEqual(response.headers["X-Frame-Options"], "DENY")
+                    self.assertEqual(
+                        response.headers["Content-Security-Policy"],
+                        "frame-ancestors 'none'",
+                    )
+                with urlopen(server.overlay_url, timeout=2) as response:
+                    self.assertIsNone(response.headers["X-Frame-Options"])
+                    self.assertIsNone(response.headers["Content-Security-Policy"])
+            finally:
+                server.stop()
+
+    def test_rejected_post_validates_headers_before_body_and_closes_connection(self):
+        payload = b'{"config":{"app_db":"data/test.sqlite3"}}'
+        handler = _WebUiHandler.__new__(_WebUiHandler)
+        handler.headers = {
+            "Content-Length": str(len(payload)),
+            "Content-Type": "text/plain",
+        }
+        handler.rfile = BytesIO(payload)
+        handler._validate_post_headers = lambda: (_ for _ in ()).throw(
+            RequestRejected(415, "POST requires application/json")
+        )
+        responses: list[tuple[int, dict]] = []
+        handler._send_json = lambda status, body: responses.append((status, body))
+
+        handler.do_POST()
+
+        self.assertEqual(handler.rfile.tell(), 0)
+        self.assertTrue(handler.close_connection)
+        self.assertEqual(
+            responses,
+            [(415, {"error": "POST requires application/json"})],
+        )
 
     def test_webui_config_save_preserves_unknown_keys(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -319,13 +870,92 @@ class WebUiServerTest(unittest.TestCase):
             finally:
                 server.stop()
 
+    def test_webui_get_and_sse_reject_non_local_host(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server = WebUiServer(port=0, app_root=tmp)
+            server.start()
+            try:
+                hostile_host = f"evil.example:{server.port}"
+                config_request = Request(
+                    f"{server.url}api/config",
+                    headers={"Host": hostile_host},
+                )
+                config_body = self._http_error_json(config_request, 403)
+                self.assertEqual(config_body["error"], "invalid Host")
+
+                events_request = Request(
+                    f"{server.url}api/overlay/events",
+                    headers={"Host": hostile_host},
+                )
+                events_body = self._http_error_json(events_request, 403)
+                self.assertEqual(events_body["error"], "invalid Host")
+                self.assertEqual(server.runtime.overlay_state.subscriber_count, 0)
+            finally:
+                server.stop()
+
+    def test_webui_stop_terminates_overlay_sse_and_unsubscribes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server = WebUiServer(port=0, app_root=tmp)
+            server.start()
+            response = urlopen(f"{server.url}api/overlay/events", timeout=2)
+            received = bytearray()
+
+            def read_stream() -> None:
+                try:
+                    while chunk := response.read(1024):
+                        received.extend(chunk)
+                except (OSError, ValueError):
+                    pass
+
+            reader = threading.Thread(target=read_stream, daemon=True)
+            reader.start()
+            try:
+                deadline = time.monotonic() + 2.0
+                while time.monotonic() < deadline:
+                    if server.runtime.overlay_state.subscriber_count == 1:
+                        break
+                    time.sleep(0.01)
+                self.assertEqual(server.runtime.overlay_state.subscriber_count, 1)
+
+                server.stop()
+                server.runtime.overlay_state.publish_status(
+                    {"event_type": "after-stop", "message": "after-stop"}
+                )
+                reader.join(timeout=1.0)
+
+                self.assertFalse(reader.is_alive())
+                self.assertEqual(server.runtime.overlay_state.subscriber_count, 0)
+                self.assertNotIn(b"after-stop", received)
+            finally:
+                response.close()
+                if server._server is not None:
+                    server.stop()
+
+    def test_webui_stop_reports_sse_drain_timeout_after_other_cleanup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server = WebUiServer(port=0, app_root=tmp)
+            server.start()
+            event_streams = server._server.event_streams
+            with (
+                patch.object(event_streams, "wait_until_drained", return_value=False),
+                self.assertRaisesRegex(TimeoutError, "event stream"),
+            ):
+                server.stop()
+
+            self.assertIsNone(server._server)
+
     def test_webui_live_controls_use_session_runtime(self):
         calls: list[dict] = []
 
         def fake_watch_vrc_logs(**kwargs):
             calls.append(kwargs)
-            kwargs["stop_event"].wait(timeout=2.0)
-            return {"overlay_port": kwargs["overlay_port"]}
+            try:
+                kwargs["stop_event"].wait(timeout=2.0)
+                return {"overlay_port": kwargs["overlay_port"]}
+            finally:
+                overlay = kwargs.get("overlay")
+                if overlay is not None:
+                    overlay.close()
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -349,6 +979,12 @@ class WebUiServerTest(unittest.TestCase):
                     summary = json.loads(response.read().decode("utf-8"))
                 self.assertFalse(summary["session"]["watcher_running"])
                 self.assertFalse(summary["session"]["overlay_running"])
+                self.assertEqual(summary["session"]["session_state"], "open")
+                self.assertEqual(summary["session"]["watcher_state"], "stopped")
+                self.assertEqual(summary["session"]["overlay_state"], "stopped")
+                with urlopen(f"{server.url}api/overlay/state", timeout=2) as response:
+                    overlay_snapshot = json.loads(response.read().decode("utf-8"))
+                self.assertFalse(overlay_snapshot["overlay_enabled"])
 
                 watcher_start = self._json_request(
                     server,
@@ -362,9 +998,15 @@ class WebUiServerTest(unittest.TestCase):
                 wait_for_call_count(calls, 1)
                 self.assertTrue(result["session"]["watcher_running"])
                 self.assertFalse(result["session"]["overlay_running"])
+                self.assertEqual(result["session"]["watcher_state"], "running")
+                self.assertEqual(result["session"]["overlay_state"], "stopped")
+                with urlopen(f"{server.url}api/overlay/state", timeout=2) as response:
+                    overlay_snapshot = json.loads(response.read().decode("utf-8"))
+                self.assertFalse(overlay_snapshot["overlay_enabled"])
                 self.assertFalse(calls[-1]["live_db"])
                 self.assertTrue(calls[-1]["record_playback"])
                 self.assertIsNone(calls[-1]["overlay_port"])
+                self.assertEqual(calls[-1]["overlay"].url, server.overlay_url)
 
                 overlay_start = self._json_request(
                     server,
@@ -375,10 +1017,20 @@ class WebUiServerTest(unittest.TestCase):
                 )
                 with urlopen(overlay_start, timeout=2) as response:
                     result = json.loads(response.read().decode("utf-8"))
-                wait_for_call_count(calls, 2)
+                self.assertEqual(len(calls), 1)
                 self.assertTrue(result["session"]["watcher_running"])
                 self.assertTrue(result["session"]["overlay_running"])
-                self.assertEqual(calls[-1]["overlay_port"], 9911)
+                self.assertEqual(result["session"]["watcher_state"], "running")
+                self.assertEqual(result["session"]["overlay_state"], "running")
+                with urlopen(f"{server.url}api/overlay/state", timeout=2) as response:
+                    overlay_snapshot = json.loads(response.read().decode("utf-8"))
+                self.assertTrue(overlay_snapshot["overlay_enabled"])
+                self.assertEqual(
+                    overlay_snapshot["status"]["message"],
+                    "Waiting for playback",
+                )
+                self.assertIsNone(calls[-1]["overlay_port"])
+                self.assertEqual(calls[-1]["overlay"].url, server.overlay_url)
                 self.assertTrue(calls[-1]["record_playback"])
 
                 overlay_stop = self._json_request(
@@ -390,10 +1042,14 @@ class WebUiServerTest(unittest.TestCase):
                 )
                 with urlopen(overlay_stop, timeout=2) as response:
                     result = json.loads(response.read().decode("utf-8"))
-                wait_for_call_count(calls, 3)
+                self.assertEqual(len(calls), 1)
                 self.assertTrue(result["session"]["watcher_running"])
                 self.assertFalse(result["session"]["overlay_running"])
+                with urlopen(f"{server.url}api/overlay/state", timeout=2) as response:
+                    overlay_snapshot = json.loads(response.read().decode("utf-8"))
+                self.assertFalse(overlay_snapshot["overlay_enabled"])
                 self.assertIsNone(calls[-1]["overlay_port"])
+                self.assertEqual(calls[-1]["overlay"].url, server.overlay_url)
 
                 watcher_stop = self._json_request(
                     server,
@@ -433,6 +1089,187 @@ class WebUiServerTest(unittest.TestCase):
                 self.assertEqual(body["error"], "action must be start or stop")
             finally:
                 server.stop()
+
+    def test_home_summary_uses_live_state_while_overlay_is_disabled(self):
+        published = threading.Event()
+
+        def fake_watch_vrc_logs(**kwargs):
+            kwargs["overlay"].publish(
+                {
+                    "event_key": "wannadance:3114#home",
+                    "live_event_key": "live-home",
+                    "dance_system_key": "wannadance",
+                    "dance_external_id": "3114",
+                    "actual_play_at": "2026.07.18 20:30:00",
+                    "video_name": "Home Live Song",
+                }
+            )
+            published.set()
+            kwargs["stop_event"].wait(timeout=2.0)
+            return {"finished": True}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            server = WebUiServer(
+                port=0,
+                app_root=tmp,
+                watch_vrc_logs_func=fake_watch_vrc_logs,
+            )
+            server.start()
+            try:
+                token = self._csrf_token(server)
+                start = self._json_request(
+                    server,
+                    "api/live/watcher",
+                    {"action": "start"},
+                    token=token,
+                    origin=server.url.rstrip("/"),
+                )
+                with urlopen(start, timeout=2):
+                    pass
+                self.assertTrue(published.wait(timeout=1.0))
+
+                with urlopen(f"{server.url}api/summary", timeout=2) as response:
+                    summary = json.loads(response.read().decode("utf-8"))
+                with urlopen(
+                    f"{server.url}api/overlay/state", timeout=2
+                ) as response:
+                    overlay = json.loads(response.read().decode("utf-8"))
+
+                self.assertEqual(
+                    summary["current_live"]["dance_external_id"],
+                    "3114",
+                )
+                self.assertFalse(overlay["overlay_enabled"])
+                self.assertIsNone(overlay["current"])
+            finally:
+                server.stop()
+
+    def test_watcher_lock_conflict_returns_409_with_current_session_status(self):
+        watcher_started = threading.Event()
+
+        def blocking_watch_vrc_logs(**kwargs):
+            watcher_started.set()
+            kwargs["stop_event"].wait(timeout=2.0)
+            return {"finished": True}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            owner = LiveAppSessionRuntime(
+                app_root=tmp,
+                watch_vrc_logs_func=blocking_watch_vrc_logs,
+            )
+            owner.start_watcher()
+            self.assertTrue(watcher_started.wait(timeout=1.0))
+            server = WebUiServer(port=0, app_root=tmp)
+            server.start()
+            try:
+                token = self._csrf_token(server)
+                start = self._json_request(
+                    server,
+                    "api/live/watcher",
+                    {"action": "start"},
+                    token=token,
+                    origin=server.url.rstrip("/"),
+                )
+
+                body = self._http_error_json(start, 409)
+
+                self.assertIn("already active", body["error"])
+                self.assertEqual(body["session"]["last_error"], body["error"])
+                self.assertEqual(body["session"]["watcher_state"], "stopped")
+            finally:
+                server.stop()
+                owner.close()
+
+    def test_stop_unmounts_adapter_from_external_session(self):
+        watcher_started = threading.Event()
+
+        def blocking_watch_vrc_logs(**kwargs):
+            watcher_started.set()
+            kwargs["stop_event"].wait(timeout=2.0)
+            return {"finished": True}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            session = LiveAppSessionRuntime(
+                app_root=tmp,
+                watch_vrc_logs_func=blocking_watch_vrc_logs,
+            )
+            server = WebUiServer(
+                port=0,
+                app_root=tmp,
+                session_runtime=session,
+            )
+            server.start()
+            mounted_overlay = server._mounted_overlay
+            try:
+                self.assertIsNotNone(mounted_overlay)
+                session.start_watcher()
+                self.assertTrue(watcher_started.wait(timeout=1.0))
+
+                server.stop()
+
+                self.assertIsNone(session._mounted_overlay)
+                self.assertFalse(mounted_overlay.enabled)
+                self.assertEqual(session.status().session_state, "open")
+                self.assertTrue(session.status().watcher_running)
+                self.assertFalse(session.status().overlay_running)
+            finally:
+                if server._server is not None:
+                    server.stop()
+                session.close()
+
+    def test_webui_live_control_reports_transition_timeout_as_conflict(self):
+        class TimedOutSession:
+            def start_overlay(self) -> None:
+                raise TimeoutError("watcher did not stop; lifecycle transition cancelled")
+
+            def stop_overlay(self) -> None:
+                raise TimeoutError("watcher did not stop; lifecycle transition cancelled")
+
+            def status(self):
+                return SimpleNamespace(
+                    session_state="open",
+                    watcher_running=True,
+                    overlay_running=True,
+                    watcher_state="stopping",
+                    overlay_state="stopping",
+                    last_error="watcher did not stop",
+                    last_watcher_stats=None,
+                )
+
+        runtime = SimpleNamespace(session=TimedOutSession())
+
+        for action in ("start", "stop"):
+            with self.subTest(action=action):
+                body, status = control_live_overlay_from_payload(
+                    runtime,
+                    {"action": action},
+                )
+
+                self.assertEqual(status, 409)
+                self.assertIn("lifecycle transition cancelled", body["error"])
+                self.assertTrue(body["session"]["watcher_running"])
+                self.assertTrue(body["session"]["overlay_running"])
+                self.assertEqual(body["session"]["watcher_state"], "stopping")
+                self.assertEqual(body["session"]["overlay_state"], "stopping")
+
+    def test_webui_live_start_reports_closed_session_as_conflict(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session = WebUiRuntime.from_root(
+                tmp,
+                watch_vrc_logs_func=lambda **_kwargs: None,
+            ).session
+            session.close()
+            runtime = SimpleNamespace(session=session)
+
+            body, status = control_live_overlay_from_payload(
+                runtime,
+                {"action": "start"},
+            )
+
+        self.assertEqual(status, 409)
+        self.assertIn("closed", body["error"])
+        self.assertEqual(body["session"]["session_state"], "closed")
+        self.assertEqual(body["session"]["watcher_state"], "stopped")
 
     def test_webui_playback_review_endpoint_updates_timeline_decision(self):
         with tempfile.TemporaryDirectory() as tmp:

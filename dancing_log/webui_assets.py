@@ -2,7 +2,20 @@
 
 from __future__ import annotations
 
+import json
+
+
 CSRF_TOKEN_PLACEHOLDER = "__DANCING_LOG_CSRF_TOKEN__"
+ROUTES_PLACEHOLDER = "__DANCING_LOG_ROUTES__"
+WEBUI_ROUTE_BY_VIEW = {
+    "home": "/home",
+    "timeline": "/timeline",
+    "catalog": "/catalog",
+    "lists": "/lists",
+    "insights": "/insights",
+    "operations": "/data-operations",
+    "settings": "/settings",
+}
 WEBUI_HTML = r"""<!doctype html>
 <html lang="en">
 <head>
@@ -37,6 +50,8 @@ WEBUI_HTML = r"""<!doctype html>
   --primary-text: #ffffff;
   --code-bg: #111820;
   --code-text: #e7edf6;
+  --blue-line: #9fc2eb;
+  --blue-bg: #eef5ff;
   --green-line: #98d6c1;
   --green-bg: #eef9f5;
   --orange-line: #e5bf96;
@@ -74,6 +89,8 @@ WEBUI_HTML = r"""<!doctype html>
     --primary-text: #08111d;
     --code-bg: #0b1016;
     --code-text: #e7edf4;
+    --blue-line: rgba(120, 173, 243, 0.58);
+    --blue-bg: rgba(42, 78, 122, 0.28);
     --green-line: rgba(116, 199, 166, 0.55);
     --green-bg: rgba(30, 92, 72, 0.28);
     --orange-line: rgba(232, 164, 93, 0.58);
@@ -107,7 +124,7 @@ button { cursor: pointer; }
 .brand strong { font-size: 18px; font-weight: 700; }
 .brand span { color: var(--sidebar-muted); font-size: 12px; }
 .nav { display: grid; align-content: start; gap: 4px; }
-.nav button {
+.nav a {
   min-height: 40px;
   border: 1px solid transparent;
   border-radius: 7px;
@@ -115,9 +132,12 @@ button { cursor: pointer; }
   color: var(--sidebar-text);
   text-align: left;
   padding: 0 12px;
+  display: flex;
+  align-items: center;
+  text-decoration: none;
 }
-.nav button:hover { border-color: var(--sidebar-hover-line); background: var(--sidebar-hover); }
-.nav button.active { background: var(--nav-active-bg); color: var(--nav-active-text); }
+.nav a:hover { border-color: var(--sidebar-hover-line); background: var(--sidebar-hover); }
+.nav a.active { background: var(--nav-active-bg); color: var(--nav-active-text); }
 .sidebar-foot { color: var(--sidebar-muted); font-size: 12px; padding: 0 8px; overflow-wrap: anywhere; }
 .main { min-width: 0; padding: 22px; display: grid; gap: 16px; align-content: start; }
 .topbar {
@@ -261,6 +281,7 @@ h1 { margin: 0; font-size: 24px; line-height: 1.2; }
   font-size: 12px;
 }
 .pill.green { color: var(--green); border-color: var(--green-line); background: var(--green-bg); }
+.pill.blue { color: var(--blue); border-color: var(--blue-line); background: var(--blue-bg); }
 .pill.orange { color: var(--orange); border-color: var(--orange-line); background: var(--orange-bg); }
 .pill.red { color: var(--red); border-color: var(--red-line); background: var(--red-bg); }
 .pill.violet { color: var(--violet); border-color: var(--violet-line); background: var(--violet-bg); }
@@ -462,7 +483,7 @@ tr:last-child td { border-bottom: 0; }
   <main class="main">
     <div class="topbar">
       <div class="title-block">
-        <h1 id="view-title">Settings</h1>
+        <h1 id="view-title">Home</h1>
         <div class="subtitle" id="view-subtitle"></div>
       </div>
       <div class="top-actions">
@@ -470,19 +491,22 @@ tr:last-child td { border-bottom: 0; }
         <div class="toolbar" id="view-toolbar"></div>
       </div>
     </div>
-    <section class="view" id="view-home"></section>
+    <section class="view active" id="view-home"></section>
     <section class="view" id="view-timeline"></section>
     <section class="view" id="view-catalog"></section>
     <section class="view" id="view-lists"></section>
     <section class="view" id="view-insights"></section>
     <section class="view" id="view-operations"></section>
-    <section class="view active" id="view-settings"></section>
+    <section class="view" id="view-settings"></section>
   </main>
 </div>
 <script>
 const LANGUAGE_KEY = "dancing-log.language";
 const CSRF_TOKEN = "__DANCING_LOG_CSRF_TOKEN__";
 const NAV = ["home", "timeline", "catalog", "lists", "insights", "operations", "settings"];
+const LIVE_STATE_POLL_INTERVAL_MS = 250;
+const LIVE_STATE_POLL_LIMIT = 20;
+const ROUTES = __DANCING_LOG_ROUTES__;
 const TEXT = {
   en: {
     brandSubtitle: "Local Web UI",
@@ -603,6 +627,7 @@ const TEXT = {
     watcher: "Watcher",
     overlay: "Overlay",
     running: "Running",
+    stopping: "Stopping",
     stopped: "Stopped",
     refresh: "Refresh",
     startWatcher: "Start watcher",
@@ -739,6 +764,7 @@ const TEXT = {
     watcher: "Watcher",
     overlay: "Overlay",
     running: "\u8fd0\u884c\u4e2d",
+    stopping: "\u6b63\u5728\u505c\u6b62",
     stopped: "\u5df2\u505c\u6b62",
     refresh: "\u5237\u65b0",
     startWatcher: "\u542f\u52a8 watcher",
@@ -772,7 +798,7 @@ const FIELD_TEXT = {
   recordings_dir: { zh: { label: "录像目录", group: "外部数据源", summary: "sample-frame 工具使用的录像文件。" } },
   auto_start_watcher: { zh: { label: "自动启动 watcher", group: "运行默认值", summary: "应用工作流启动实时捕获时使用的默认偏好。" } },
   auto_start_overlay: { zh: { label: "自动启动 overlay", group: "运行默认值", summary: "启用后会同步启用 watcher 自动启动。" } },
-  overlay_port: { zh: { label: "Overlay 端口", group: "运行默认值", summary: "本地 OBS overlay 端口。" } }
+  overlay_port: { zh: { label: "独立 Overlay 端口", group: "高级设置", summary: "仅在 watcher 不通过 Web UI 提供 overlay 时使用的本机端口。" } }
 };
 const AUTOMATIC_SOURCE_PATH_KEYS = new Set(["vrcx_db_path", "vrc_log_dir"]);
 const DANCE_SYSTEM_LABELS = {
@@ -784,7 +810,7 @@ const DANCE_SYSTEM_LABELS = {
   vrdancing: "VRDancing"
 };
 const state = {
-  active: "settings",
+  active: viewFromPath(location.pathname),
   lang: initialLanguage(),
   configSnapshot: null,
   operationsSnapshot: null,
@@ -795,7 +821,9 @@ const state = {
   runningOperation: null,
   fieldErrors: {},
   pathPreviews: {},
-  previewTimers: {}
+  previewTimers: {},
+  timelineDate: "",
+  timelineSort: "asc"
 };
 
 const brandSubtitleNode = document.getElementById("brand-subtitle");
@@ -828,6 +856,30 @@ function ui(key) {
 
 function navLabel(key) {
   return ui(`nav_${key}`);
+}
+
+function viewFromPath(path) {
+  return Object.entries(ROUTES).find(([, route]) => route === path)?.[0] || "home";
+}
+
+function applyLocationState(view) {
+  if (view !== "timeline") return;
+  const params = new URLSearchParams(location.search);
+  const date = normalizeTimelineDateInput(params.get("date") || "");
+  state.timelineDate = isValidLocalDate(date) ? date : "";
+  state.timelineSort = params.get("sort") === "desc" ? "desc" : "asc";
+}
+
+function syncTimelineUrl() {
+  if (state.active !== "timeline") return;
+  const params = new URLSearchParams();
+  if (isValidLocalDate(state.timelineDate)) params.set("date", state.timelineDate);
+  if (state.timelineSort === "desc") params.set("sort", "desc");
+  const query = params.toString();
+  const target = `${ROUTES.timeline}${query ? `?${query}` : ""}`;
+  if (`${location.pathname}${location.search}` !== target) {
+    history.replaceState({}, "", target);
+  }
 }
 
 function viewTitle(key) {
@@ -953,13 +1005,22 @@ function api(path, options = {}) {
   });
 }
 
-function setView(next) {
+function setView(next, { navigate = false, syncLocation = false } = {}) {
+  if (!NAV.includes(next)) next = "home";
+  if (navigate) {
+    history.pushState({}, "", ROUTES[next]);
+    syncLocation = true;
+  }
+  if (syncLocation) applyLocationState(next);
   state.active = next;
   for (const key of NAV) {
     document.getElementById(`view-${key}`).classList.toggle("active", key === next);
   }
-  for (const button of navNode.querySelectorAll("button")) {
-    button.classList.toggle("active", button.dataset.view === next);
+  for (const link of navNode.querySelectorAll("a[data-view]")) {
+    const active = link.dataset.view === next;
+    link.classList.toggle("active", active);
+    if (active) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
   }
   const [title, subtitle] = viewTitle(next);
   titleNode.textContent = title;
@@ -970,10 +1031,14 @@ function setView(next) {
 
 function renderNav() {
   navNode.innerHTML = NAV.map(key => `
-    <button type="button" data-view="${key}" class="${key === state.active ? "active" : ""}">${esc(navLabel(key))}</button>
+    <a href="${ROUTES[key]}" data-view="${key}" class="${key === state.active ? "active" : ""}" ${key === state.active ? 'aria-current="page"' : ""}>${esc(navLabel(key))}</a>
   `).join("");
-  for (const button of navNode.querySelectorAll("button[data-view]")) {
-    button.onclick = () => setView(button.dataset.view);
+  for (const link of navNode.querySelectorAll("a[data-view]")) {
+    link.onclick = event => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      setView(link.dataset.view, { navigate: true });
+    };
   }
 }
 
@@ -1402,6 +1467,7 @@ async function renderHome() {
   if (state.active !== "home") return;
   toolbarNode.innerHTML = renderHomeToolbar(data.session || {});
   node.innerHTML = `
+    ${(data.startup_warnings || []).length ? `<div class="message show error">${data.startup_warnings.map(esc).join("<br>")}</div>` : ""}
     <div class="message" id="home-message"></div>
     <div class="grid summary-grid">
       ${metric(ui("danceTracks"), data.counts?.dance_tracks ?? 0, "blue")}
@@ -1435,17 +1501,48 @@ async function renderHome() {
 }
 
 function renderHomeToolbar(session) {
-  const watcherRunning = Boolean(session.watcher_running);
-  const overlayRunning = Boolean(session.overlay_running);
+  const watcherState = lifecycleState(session.watcher_state, session.watcher_running);
+  const overlayState = lifecycleState(session.overlay_state, session.overlay_running);
+  const watcherActive = watcherState !== "stopped";
+  const overlayActive = overlayState !== "stopped";
+  const overlayControlDisabled = watcherState === "stopping" || overlayState === "stopping";
   return `
     <button class="button" type="button" id="home-refresh">${esc(ui("refresh"))}</button>
-    <button class="button ${watcherRunning ? "danger" : "primary"}" type="button" data-live-control="watcher" data-live-action="${watcherRunning ? "stop" : "start"}">
-      ${esc(ui(watcherRunning ? "stopWatcher" : "startWatcher"))}
+    <button class="button ${watcherActive ? "danger" : "primary"}" type="button" data-live-control="watcher" data-live-action="${watcherActive ? "stop" : "start"}" ${watcherState === "stopping" ? "disabled" : ""}>
+      ${esc(ui(watcherActive ? "stopWatcher" : "startWatcher"))}
     </button>
-    <button class="button ${overlayRunning ? "danger" : "primary"}" type="button" data-live-control="overlay" data-live-action="${overlayRunning ? "stop" : "start"}">
-      ${esc(ui(overlayRunning ? "stopOverlay" : "startOverlay"))}
+    <button class="button ${overlayActive ? "danger" : "primary"}" type="button" data-live-control="overlay" data-live-action="${overlayActive ? "stop" : "start"}" ${overlayControlDisabled ? "disabled" : ""}>
+      ${esc(ui(overlayActive ? "stopOverlay" : "startOverlay"))}
     </button>
   `;
+}
+
+function renderHomeSession(session) {
+  toolbarNode.innerHTML = renderHomeToolbar(session);
+  bindHomeControls();
+  const liveStatus = document.getElementById("home-live-status");
+  if (liveStatus) liveStatus.outerHTML = renderLiveStatus(session);
+}
+
+function homeSessionIsStopping(session) {
+  return lifecycleState(session.watcher_state, session.watcher_running) === "stopping"
+    || lifecycleState(session.overlay_state, session.overlay_running) === "stopping";
+}
+
+async function pollHomeSessionToTerminalState(session) {
+  let current = session;
+  renderHomeSession(current);
+  for (let attempt = 0; attempt < LIVE_STATE_POLL_LIMIT; attempt += 1) {
+    if (!homeSessionIsStopping(current) || state.active !== "home") return;
+    await new Promise(resolve => setTimeout(resolve, LIVE_STATE_POLL_INTERVAL_MS));
+    try {
+      const summary = await api("/api/summary");
+      current = summary.session || {};
+      renderHomeSession(current);
+    } catch {
+      return;
+    }
+  }
 }
 
 function bindHomeControls() {
@@ -1468,6 +1565,9 @@ async function controlLive(kind, action) {
     await renderHome();
   } catch (error) {
     showMessage("home-message", `${ui("liveControlFailed")}: ${error.message}`, "error");
+    if (error.data?.session) {
+      await pollHomeSessionToTerminalState(error.data.session);
+    }
   } finally {
     for (const control of controls) control.disabled = false;
   }
@@ -1475,13 +1575,15 @@ async function controlLive(kind, action) {
 
 function renderLiveStatus(session) {
   const stats = session.last_watcher_stats;
+  const watcherState = lifecycleState(session.watcher_state, session.watcher_running);
+  const overlayState = lifecycleState(session.overlay_state, session.overlay_running);
   return `
-    <section class="panel">
+    <section class="panel" id="home-live-status">
       <div class="panel-head"><h2>${esc(ui("liveStatus"))}</h2></div>
       <div class="panel-body">
         <div class="status-grid">
-          ${statusItem(ui("watcher"), Boolean(session.watcher_running))}
-          ${statusItem(ui("overlay"), Boolean(session.overlay_running))}
+          ${statusItem(ui("watcher"), watcherState)}
+          ${statusItem(ui("overlay"), overlayState)}
         </div>
         ${session.last_error ? `<div class="message show error"><strong>${esc(ui("lastRuntimeError"))}</strong><br>${esc(session.last_error)}</div>` : ""}
         ${stats ? `<div><div class="resolved">${esc(ui("lastWatcherStats"))}</div><pre class="readonly-json">${esc(JSON.stringify(stats, null, 2))}</pre></div>` : `<div class="empty">${esc(ui("noWatcherStats"))}</div>`}
@@ -1490,11 +1592,18 @@ function renderLiveStatus(session) {
   `;
 }
 
-function statusItem(label, running) {
+function lifecycleState(value, running) {
+  const state = String(value || "").toLowerCase();
+  if (["running", "stopping", "stopped"].includes(state)) return state;
+  return running ? "running" : "stopped";
+}
+
+function statusItem(label, state) {
+  const color = state === "running" ? "green" : state === "stopping" ? "blue" : "orange";
   return `
     <div class="status-item">
       <span>${esc(label)}</span>
-      <strong><span class="pill ${running ? "green" : "orange"}">${esc(ui(running ? "running" : "stopped"))}</span></strong>
+      <strong><span class="pill ${color}">${esc(ui(state))}</span></strong>
     </div>
   `;
 }
@@ -1570,6 +1679,7 @@ async function renderTimeline() {
       dateInput.value = resolvedDate;
       datePicker.value = resolvedDate;
     }
+    syncTimelineUrl();
     currentRecords = data.records || [];
     renderRecords();
   }
@@ -1638,6 +1748,7 @@ async function renderTimeline() {
     sortButton.setAttribute("aria-label", timelineSortLabel());
     sortButton.setAttribute("aria-pressed", state.timelineSort === "desc" ? "true" : "false");
     sortButton.dataset.sort = state.timelineSort;
+    syncTimelineUrl();
     renderRecords();
   };
   copyButton.onclick = async () => {
@@ -2032,7 +2143,8 @@ async function runOperation(key, operations) {
 
 renderLanguageSwitch();
 renderNav();
-setView("settings");
+addEventListener("popstate", () => setView(viewFromPath(location.pathname), { syncLocation: true }));
+setView(viewFromPath(location.pathname), { syncLocation: true });
 </script>
 </body>
 </html>
@@ -2040,4 +2152,8 @@ setView("settings");
 
 def render_webui_html(csrf_token: str) -> str:
     """Render the single-page UI with the server-generated CSRF token."""
-    return WEBUI_HTML.replace(CSRF_TOKEN_PLACEHOLDER, csrf_token)
+    routes_json = json.dumps(WEBUI_ROUTE_BY_VIEW, ensure_ascii=True, separators=(",", ":"))
+    return WEBUI_HTML.replace(CSRF_TOKEN_PLACEHOLDER, csrf_token).replace(
+        ROUTES_PLACEHOLDER,
+        routes_json,
+    )

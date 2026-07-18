@@ -258,13 +258,13 @@ _CONFIG_FIELD_SPECS: tuple[ConfigField, ...] = (
     ConfigField(
         key="overlay_port",
         default=8765,
-        label="Overlay port",
-        group="Runtime defaults",
+        label="Standalone overlay port",
+        group="Advanced",
         field_type="integer",
         required=True,
         minimum=1,
         maximum=65535,
-        summary="Localhost OBS overlay port.",
+        summary="Localhost port used only when the watcher serves an overlay without the Web UI.",
     ),
 )
 

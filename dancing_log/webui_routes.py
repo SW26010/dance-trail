@@ -10,7 +10,13 @@ from urllib.parse import parse_qs, urlparse
 
 from dancing_log.app_paths import AppPaths
 from dancing_log.live_app_session import LiveAppSessionRuntime
-from dancing_log.webui_assets import render_webui_html
+from dancing_log.overlay_server import (
+    OVERLAY_PAGE_PATH,
+    OVERLAY_STATE_PATH,
+    OverlayState,
+    render_overlay_html,
+)
+from dancing_log.webui_assets import WEBUI_ROUTE_BY_VIEW, render_webui_html
 from dancing_log.webui_endpoints import (
     control_live_overlay_from_payload,
     control_live_watcher_from_payload,
@@ -35,6 +41,9 @@ class WebUiRouteRuntime(Protocol):
     app_root: Path
     csrf_token: str
     session: LiveAppSessionRuntime
+    overlay_state: OverlayState
+    live_state: OverlayState
+    startup_warnings: tuple[str, ...]
 
     @property
     def paths(self) -> AppPaths: ...
@@ -45,6 +54,7 @@ class WebUiRouteResponse:
     status: int
     content_type: str
     body: bytes
+    headers: tuple[tuple[str, str], ...] = ()
 
 
 GetRoute = Callable[[WebUiRouteRuntime, dict[str, list[str]]], dict]
@@ -79,6 +89,13 @@ def _get_operations(runtime: WebUiRouteRuntime, query: dict[str, list[str]]) -> 
     return load_operations_snapshot()
 
 
+def _get_overlay_state(runtime: WebUiRouteRuntime, query: dict[str, list[str]]) -> dict:
+    return runtime.overlay_state.snapshot()
+
+
+WEBUI_PAGE_PATHS = frozenset(WEBUI_ROUTE_BY_VIEW.values())
+
+
 GET_JSON_ROUTES: dict[str, GetRoute] = {
     "/api/config": _get_config,
     "/api/summary": _get_summary,
@@ -87,6 +104,7 @@ GET_JSON_ROUTES: dict[str, GetRoute] = {
     "/api/lists": _get_lists,
     "/api/insights": _get_insights,
     "/api/operations": _get_operations,
+    OVERLAY_STATE_PATH: _get_overlay_state,
 }
 
 POST_JSON_ROUTES: dict[str, PostRoute] = {
@@ -104,7 +122,17 @@ def handle_get_request(runtime: WebUiRouteRuntime, target: str) -> WebUiRouteRes
     parsed = urlparse(target)
     path = parsed.path
     if path in {"", "/"}:
+        return _redirect_response(_with_query(WEBUI_ROUTE_BY_VIEW["home"], parsed.query))
+    if path == "/operations":
+        return _redirect_response(
+            _with_query(WEBUI_ROUTE_BY_VIEW["operations"], parsed.query)
+        )
+    if path.endswith("/") and path[:-1] in WEBUI_PAGE_PATHS:
+        return _redirect_response(_with_query(path[:-1], parsed.query))
+    if path in WEBUI_PAGE_PATHS:
         return _html_response(200, render_webui_html(runtime.csrf_token))
+    if path == OVERLAY_PAGE_PATH:
+        return _html_response(200, render_overlay_html())
 
     handler = GET_JSON_ROUTES.get(path)
     if handler is None:
@@ -131,3 +159,16 @@ def _json_response(status: int, payload: dict) -> WebUiRouteResponse:
 
 def _html_response(status: int, html: str) -> WebUiRouteResponse:
     return WebUiRouteResponse(status, "text/html; charset=utf-8", html.encode("utf-8"))
+
+
+def _redirect_response(location: str) -> WebUiRouteResponse:
+    return WebUiRouteResponse(
+        302,
+        "text/plain; charset=utf-8",
+        f"Found: {location}\n".encode("utf-8"),
+        (("Location", location),),
+    )
+
+
+def _with_query(path: str, query: str) -> str:
+    return f"{path}?{query}" if query else path
