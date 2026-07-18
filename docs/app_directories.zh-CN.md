@@ -21,7 +21,7 @@
 ## 目录职责
 
 - `config/`：本机配置。`dancing-log.local.json` 被 git 忽略；`dancing-log.example.json` 记录支持的字段。
-- `data/`：长期用户数据，例如 `dancing_log.sqlite3`、`queued_self/`、喜欢清单输入文件。
+- `data/`：长期用户数据，例如 `dancing_log.sqlite3`、`queued_self/`、喜欢清单输入文件。持久存在的 `.dancing-log-watcher.lock` 提供操作系统级应用范围 watcher 锁；外部 SQLite 数据库旁的 `.<名称>.watcher.lock` 提供数据库范围排他。锁文件本身不表示运行状态，正常退出后也可以保留；真正的所有权来自当前进程持有的操作系统文件锁。
 - `logs/`：正常运行产生的输出。`watch-vrc-log` 默认写入 `logs/captures/`。增量源 VRChat 日志归档存放在 `logs/source-vrc-logs/`。
 - `analysis/`：开发和排查用实验区，例如 replay 基准、历史原始日志集合、一次性对比输出。它不属于未来 exe 的用户交付承诺。
 - `build/`：本机构建中间产物。
@@ -54,6 +54,6 @@
 
 配置中的相对路径都按应用根目录解析。绝对路径保持不变。`%USERPROFILE%` 这类环境变量会在解析前展开。
 
-`auto_start_watcher`、`auto_start_overlay` 和 `overlay_port` 是应用工作流的运行时默认值。`auto_start_overlay` 设为 `true` 时，也会保持 `auto_start_watcher` 启用，因为 overlay 依赖实时 watcher 状态。
+`auto_start_watcher` 和 `auto_start_overlay` 是应用工作流的运行时默认值。`auto_start_overlay` 设为 `true` 时，也会保持 `auto_start_watcher` 启用，因为 overlay 依赖实时 watcher 状态。`overlay_port` 是不启动 Web UI、由独立 watcher 提供 overlay 时使用的高级兼容配置；桌面/Web UI 模式在 Web UI 端口提供 `/overlay`。
 
 `data/local_config.json` 是旧配置位置。新配置不存在时，程序会兼容读取它，并把规范化后的配置写入 `config/dancing-log.local.json`。

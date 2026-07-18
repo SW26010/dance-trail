@@ -47,7 +47,11 @@ need `recordings_dir` when resolving relative recording file names.
 - `config/`: local machine configuration. `dancing-log.local.json` is ignored by
   git; `dancing-log.example.json` documents supported keys.
 - `data/`: long-lived local user data, including `dancing_log.sqlite3`,
-  `queued_self/`, and favorite-list input files.
+  `queued_self/`, and favorite-list input files. A persistent
+  `.dancing-log-watcher.lock` file provides the OS-backed application-scope
+  watcher lock; an external SQLite database has a sibling `.<name>.watcher.lock`
+  file for database-scope exclusion. The files contain no authoritative runtime
+  state and may remain after a clean exit; ownership is the live OS file lock.
 - `logs/`: runtime output from normal app use. `watch-vrc-log` captures now
   default to `logs/captures/`. Incremental source VRChat log archives are
   stored in `logs/source-vrc-logs/`.
@@ -86,9 +90,12 @@ Relative paths in this file are resolved from the application root. Absolute
 paths remain absolute. Environment variables such as `%USERPROFILE%` are
 expanded before resolution.
 
-`auto_start_watcher`, `auto_start_overlay`, and `overlay_port` are runtime
-defaults for app workflows. Setting `auto_start_overlay` to `true` also keeps
+`auto_start_watcher` and `auto_start_overlay` are runtime defaults for app
+workflows. Setting `auto_start_overlay` to `true` also keeps
 `auto_start_watcher` enabled because the overlay depends on live watcher state.
+`overlay_port` is an advanced compatibility setting used when a standalone
+watcher serves the overlay without the Web UI. Desktop/Web UI mode serves
+`/overlay` on the Web UI port.
 
 `data/local_config.json` is a legacy location. The app can read it when the new
 config file does not exist, then writes normalized config to

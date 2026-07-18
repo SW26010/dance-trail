@@ -17,11 +17,11 @@ The Web UI overview surface for current status, recent activity, pending attenti
 _Avoid_: landing page, dashboard module, catch-all page
 
 **OBS Overlay**:
-A viewer-facing display surface for live playback status in OBS. It is one feature exposed by the Web UI, not the main interaction surface.
+A viewer-facing display surface for live playback status in OBS. It is one feature exposed by the Web UI, not the main interaction surface. Stopping its standalone listener is terminal for that listener's accepted viewer connections: after stop returns, none may continue serving overlay state.
 _Avoid_: Web UI, control panel
 
 **Local Web UI**:
-The Web UI product boundary for one user operating `dancing-log` on their own machine. It is not a shared service, remote dashboard, or multi-user web app.
+The Web UI product boundary for one user operating `dancing-log` on their own machine. It is not a shared service, remote dashboard, or multi-user web app. Its HTTP boundary accepts only the expected localhost `Host`, including for read and event-stream requests.
 _Avoid_: hosted app, LAN dashboard, multi-user app
 
 **Dance Plan**:
@@ -85,7 +85,7 @@ A saved preference that affects how the VRChat log watcher should run when an ap
 _Avoid_: live watcher control, process manager
 
 **Overlay Default**:
-A saved preference that affects whether the local OBS overlay server should run when the watcher is started by an app workflow. Enabling overlay auto-start implies watcher auto-start, because the overlay depends on live watcher state.
+A saved preference that affects whether an app workflow should publish live watcher state to the OBS Overlay. Enabling overlay auto-start implies watcher auto-start, because the overlay depends on live watcher state. In a Local Web UI session the overlay route remains available on the Web UI origin even when publication is stopped.
 _Avoid_: OBS overlay page, live overlay control
 
 **Desktop Tray Entry**:
@@ -93,7 +93,7 @@ The Windows notification-area entry for running `dancing-log` as a local desktop
 _Avoid_: CLI command, Web UI navigation entry, background service
 
 **Live App Session Runtime**:
-The runtime module that owns immediate watcher and overlay lifecycle for the current local app session, including start, stop, status, recent errors, and recent watcher stats. CLI, Desktop Tray Entry, and future Web UI controls should call this runtime instead of each reimplementing watcher and overlay startup rules.
+The runtime module that owns immediate watcher and overlay lifecycle for the current local app session, including start, stop, status, recent errors, and recent watcher stats. Synchronous CLI and background entry points share one watcher owner, and all public watcher entry points enforce the same application/database lifetime exclusion. Lifecycle transitions are serialized and distinguish running, stopping, and stopped; a replacement cannot start until its predecessor has terminated. Closing is irreversible. Terminal shutdown must reject incomplete HTTP work without truncating an accepted write, watcher settlement, database commit, or capture finalization. CLI, Desktop Tray Entry, and Web UI controls use this runtime instead of reimplementing watcher and overlay transition rules.
 _Avoid_: parser runtime, saved configuration, background service
 
 **Live Watcher Control**:
@@ -101,7 +101,7 @@ An immediate start or stop command for the current VRChat log watcher process. I
 _Avoid_: watcher default, saved configuration, startup preference
 
 **Live Overlay Control**:
-An immediate start or stop command for the current OBS Overlay server. It depends on Live Watcher Control: turning overlay on keeps watcher on, and turning watcher off also turns overlay off.
+An immediate start or stop command for publishing current watcher state to the OBS Overlay. It depends on Live Watcher Control: turning overlay on keeps watcher on, and turning watcher off also turns overlay publication off. In a Local Web UI session it does not start a second HTTP server; the Web UI owns the shared localhost listener. The overlay state contract distinguishes stopped publication from enabled publication that has not captured a current playback event yet.
 _Avoid_: overlay default, saved configuration, OBS overlay page
 
 **Full Configuration Editor**:
@@ -165,7 +165,7 @@ A key found in the local app configuration file that is not part of the current 
 _Avoid_: hidden supported setting, raw JSON field
 
 **Live Status**:
-The Home surface for current watcher state, current playback, current session activity, overlay availability, and realtime capture health. Live Status is not a separate primary navigation area in the MVP.
+The Home surface for current watcher state, current playback, current session activity, overlay availability, and realtime capture health. Its current playback comes from an in-memory watcher state that remains current even when OBS Overlay publication is disabled; Overlay enablement gates the viewer-facing projection, not Home's watcher context. Live Status is not a separate primary navigation area in the MVP.
 _Avoid_: timeline, history, archive, primary navigation
 
 **Timeline**:

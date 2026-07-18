@@ -267,11 +267,34 @@ uv run python main.py webui
 uv run python main.py webui --port 8787 --no-open
 ```
 
-The Web UI binds only to `127.0.0.1`. The first implemented workflow is the
-Settings-first full configuration editor, with the settled navigation entries:
-Home, Timeline, Catalog, Lists, Insights, Data Operations, and Settings.
+The Web UI binds only to `127.0.0.1` and opens
+`http://127.0.0.1:8787/home` by default. Home, Timeline, Catalog, Lists,
+Insights, Data Operations, and Settings use `/home`, `/timeline`, `/catalog`,
+`/lists`, `/insights`, `/data-operations`, and `/settings`. Refresh and browser
+history preserve the current page, while Timeline stores its date and reverse
+sort selection in query parameters.
+
+In desktop/Web UI mode, the OBS overlay shares the same HTTP listener at
+`http://127.0.0.1:8787/overlay`; its state and SSE endpoints are
+`/api/overlay/state` and `/api/overlay/events`. This mode does not bind a second
+overlay port. When live overlay publication is stopped, the route explicitly
+shows `Overlay inactive`; `Waiting for playback` is reserved for an enabled
+overlay whose watcher has not captured a current playback event yet.
+Home continues to show the watcher's in-memory current playback while overlay
+publication is disabled; the overlay switch controls only the viewer-facing
+projection.
 Settings preserves unsupported local config keys as read-only values when it
 saves supported fields.
+
+Desktop shutdown first stops the Web UI listener, drains ordinary HTTP handlers,
+then irreversibly closes the live app session. Request headers and bodies have an
+absolute monotonic read deadline, and shutdown actively closes connections that
+have not entered an operation. Only complete, parsed requests receive the
+unbounded reliable drain. This lets ordinary writes and terminal watcher
+finalization finish without truncating SQLite commits, settlement, or capture
+artifacts. A permanently stuck accepted operation or finalizer keeps the process
+alive for diagnosis. SSE connections use a separate active close and bounded
+drain.
 Timeline opens on the latest local date that has playback records, then keeps
 calendar and arrow navigation scoped to the selected local date.
 The UI supports English and Chinese through a browser-local language switch.
@@ -289,14 +312,20 @@ write ignored artifacts under `analysis/`. `diff_report.md` compares folded
 playback events, watcher settlement results, the optional manual GT file, and
 an optional read-only VRCX row count for the manual window.
 
-For live local state, default automatic acceptance, and OBS overlay output:
+For a standalone watcher and OBS overlay without the Web UI:
 
 ```bash
 uv run python main.py watch-vrc-log --overlay-port 8765
 ```
 
-The local overlay page is available at `http://127.0.0.1:8765/overlay`. It is
+The standalone overlay page is available at `http://127.0.0.1:8765/overlay`. It is
 self-contained, binds only to localhost, and updates through server-sent events.
+Stopping this server closes accepted ordinary HTTP connections as well as SSE
+streams and waits for their handlers to drain before returning.
+Watcher processes take exclusive OS-backed locks for the application root and
+resolved SQLite database before startup maintenance. The locks remain held through
+settlement, database commits, capture artifact cleanup, and finalization, so CLI,
+Web UI, and tray workflows cannot run conflicting watchers against the same scope.
 Normal watcher evidence is persisted directly in `playback_records` using the
 logical source table `watcher_playback_events`. Normal Timeline reads the
 effective playback projection and shows accepted, pending, excluded, and
@@ -371,6 +400,9 @@ Supported keys:
   "overlay_port": 8765
 }
 ```
+
+`overlay_port` is an advanced compatibility setting for a standalone watcher
+overlay without the Web UI. Desktop/Web UI mode uses the Web UI port.
 
 ## Research Scripts
 

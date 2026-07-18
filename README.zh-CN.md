@@ -172,14 +172,19 @@ WannaDance。
 uv run python main.py watch-vrc-log
 ```
 
-启动本地 OBS overlay：
+不启动 Web UI、只运行 watcher 时，可以启动独立的本地 OBS overlay：
 
 ```bash
 uv run python main.py watch-vrc-log --overlay-port 8765
 ```
 
-overlay 地址是 `http://127.0.0.1:8765/overlay`。它只绑定本机，通过
-server-sent events 更新，不依赖外部字体、图片、CDN 或网络请求。
+此独立 CLI 模式的 overlay 地址是 `http://127.0.0.1:8765/overlay`。它只绑定本机，通过
+server-sent events 更新，不依赖外部字体、图片、CDN 或网络请求。停止 standalone overlay
+服务时，会同时关闭已接收的普通 HTTP 连接和 SSE 流，并在对应 handler 全部退出后才返回。
+
+watcher 会在启动维护前为应用根目录和实际 SQLite 数据库取得操作系统级排他锁，并持续持有
+到 settlement、数据库提交、capture artifact 清理和 finalizer 全部结束。因此 CLI、Web UI
+和托盘工作流不能在相同应用或数据库范围内并行启动冲突 watcher。
 
 普通 watcher 路径会在 folded event 有稳定 dance identity 后直接写入
 `playback_records`。新记录先是 `pending + counts_in_history=0`，后续 watcher
@@ -242,7 +247,11 @@ uv run python main.py webui
 uv run python main.py webui --port 8787 --no-open
 ```
 
-Web UI 只绑定到 `127.0.0.1`。第一版已实现 Settings-first 的完整配置编辑器，并保留既定的导航入口：Home、Timeline、Catalog、Lists、Insights、Data Operations、Settings。Settings 保存支持字段时，会把不认识的本地配置键作为只读值保留。UI 支持英语和中文，可在浏览器本地切换语言。
+Web UI 只绑定到 `127.0.0.1`，默认打开 `http://127.0.0.1:8787/home`。Home、Timeline、Catalog、Lists、Insights、Data Operations、Settings 分别使用 `/home`、`/timeline`、`/catalog`、`/lists`、`/insights`、`/data-operations`、`/settings`，刷新和浏览器前进后退都会保留当前页面。Timeline 的日期和倒序选择会写入查询参数。
+
+桌面/Web UI 模式的 OBS overlay 共用同一个 HTTP 服务，地址为 `http://127.0.0.1:8787/overlay`；状态和 SSE 接口位于 `/api/overlay/state` 和 `/api/overlay/events`。此模式不会再为 overlay 占用第二个端口。停止实时 overlay 发布后，该页面会明确显示 `Overlay inactive`；只有 overlay 已启用、watcher 尚未捕获当前播放时才显示 `Waiting for playback`。即使 overlay 发布已禁用，Home 仍从独立的内存 Live Status 状态显示 watcher 当前播放；开关只控制面向 OBS 的投影。Settings 保存支持字段时，会把不认识的本地配置键作为只读值保留。UI 支持英语和中文，可在浏览器本地切换语言。
+
+桌面应用退出时会先停止 Web UI 接收新请求并等待普通 HTTP handler 完成，再把实时会话不可逆地转入关闭状态。请求头和正文受单调时钟绝对期限约束；退出还会主动关闭尚未进入业务操作的连接。只有已收到并解析完整请求的 handler 才参与无界的可靠排空。这样可以等待同步 CLI watcher、后台 watcher 完成数据库提交、结算和 artifact 清理，而不会让慢速或半包请求永久卡住退出。SSE 连接使用独立的主动关闭和有界 drain；如果已受理的业务操作或 finalizer 永久卡住，进程会保留以便诊断，而不是冒险截断 SQLite 提交或留下不完整的 capture artifact。
 
 ## 应用目录与本地配置
 
@@ -269,6 +278,8 @@ Web UI 只绑定到 `127.0.0.1`。第一版已实现 Settings-first 的完整配
   "overlay_port": 8765
 }
 ```
+
+`overlay_port` 是不启动 Web UI 时供独立 watcher overlay 使用的高级兼容配置；桌面/Web UI 模式使用 Web UI 端口。
 
 ## 文档索引
 
