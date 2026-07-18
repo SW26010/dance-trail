@@ -3,18 +3,71 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import json
 from queue import Empty, Full, Queue
-import sys
+import socket
 import threading
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit
 
+from dancing_log.http_request_lifecycle import (
+    AcceptedOperationShutdown,
+    HttpShutdownParticipant,
+    ManagedLocalHTTPRequestHandler,
+    ManagedLocalHTTPServer,
+)
 from dancing_log.overlay_view_model import build_overlay_view_model
 from dancing_log.time_utils import now_utc_iso
 
 
 OVERLAY_HOST = "127.0.0.1"
+LOCAL_HTTP_HOSTS = frozenset({OVERLAY_HOST, "localhost"})
+OVERLAY_PAGE_PATH = "/overlay"
+OVERLAY_STATE_PATH = "/api/overlay/state"
+OVERLAY_EVENTS_PATH = "/api/overlay/events"
+EVENT_STREAM_DRAIN_TIMEOUT_SECONDS = 2.0
+_STOP_EVENT_STREAM = object()
+
+
+def is_allowed_local_http_host(value: str, *, port: int) -> bool:
+    """Accept only this localhost listener's expected Host header."""
+    try:
+        parsed = urlparse(f"//{value}")
+        request_port = _normalized_http_port(parsed.port)
+    except ValueError:
+        return False
+    return (
+        (parsed.hostname or "").lower() in LOCAL_HTTP_HOSTS
+        and parsed.username is None
+        and parsed.password is None
+        and not parsed.path
+        and not parsed.query
+        and not parsed.fragment
+        and request_port == port
+    )
+
+
+def is_allowed_local_http_origin(value: str, *, port: int) -> bool:
+    """Accept only an HTTP origin for this localhost listener."""
+    try:
+        parsed = urlsplit(value)
+        request_port = _normalized_http_port(parsed.port)
+    except ValueError:
+        return False
+    return (
+        parsed.scheme.lower() == "http"
+        and (parsed.hostname or "").lower() in LOCAL_HTTP_HOSTS
+        and parsed.username is None
+        and parsed.password is None
+        and not parsed.path
+        and not parsed.query
+        and not parsed.fragment
+        and request_port == port
+    )
+
+
+def _normalized_http_port(port: int | None) -> int:
+    return 80 if port is None else port
 
 
 @dataclass
@@ -22,6 +75,7 @@ class OverlayState:
     """Thread-safe in-memory state shared by HTTP and watcher threads."""
 
     max_events: int = 20
+    enabled: bool = True
     _events: dict[str, dict] = field(default_factory=dict)
     _status: dict | None = None
     _subscribers: list[Queue] = field(default_factory=list)
@@ -41,19 +95,17 @@ class OverlayState:
                 self._events[key] = stored
                 self._trim_locked()
             snapshot = self._snapshot_locked()
-            subscribers = list(self._subscribers)
-
-        for subscriber in subscribers:
-            try:
-                subscriber.put_nowait(snapshot)
-            except Full:
-                pass
+            for subscriber in self._subscribers:
+                _put_latest(subscriber, snapshot)
         return snapshot
 
     def publish_status(self, status: dict) -> dict:
         """Publish a non-playback status update such as room leave or shutdown."""
         with self._lock:
             stored = dict(status)
+            if "overlay_enabled" in stored:
+                self.enabled = bool(stored["overlay_enabled"])
+                stored["overlay_enabled"] = self.enabled
             self._sequence += 1
             stored["_overlay_sequence"] = self._sequence
             stored["received_at"] = _utc_now()
@@ -61,13 +113,8 @@ class OverlayState:
             if stored.get("clear_current"):
                 self._cleared_sequence = self._sequence
             snapshot = self._snapshot_locked()
-            subscribers = list(self._subscribers)
-
-        for subscriber in subscribers:
-            try:
-                subscriber.put_nowait(snapshot)
-            except Full:
-                pass
+            for subscriber in self._subscribers:
+                _put_latest(subscriber, snapshot)
         return snapshot
 
     def snapshot(self) -> dict:
@@ -75,9 +122,21 @@ class OverlayState:
         with self._lock:
             return self._snapshot_locked()
 
+    def clear(self) -> dict:
+        """Clear runtime-only playback context and notify state subscribers."""
+        with self._lock:
+            self._events.clear()
+            self._status = None
+            self._sequence += 1
+            self._cleared_sequence = self._sequence
+            snapshot = self._snapshot_locked()
+            for subscriber in self._subscribers:
+                _put_latest(subscriber, snapshot)
+        return snapshot
+
     def subscribe(self) -> Queue:
-        """Subscribe to future snapshots."""
-        subscriber: Queue = Queue(maxsize=10)
+        """Subscribe to future snapshots through a latest-state mailbox."""
+        subscriber: Queue = Queue(maxsize=1)
         with self._lock:
             self._subscribers.append(subscriber)
         return subscriber
@@ -87,6 +146,12 @@ class OverlayState:
         with self._lock:
             if subscriber in self._subscribers:
                 self._subscribers.remove(subscriber)
+
+    @property
+    def subscriber_count(self) -> int:
+        """Return the number of active SSE subscribers."""
+        with self._lock:
+            return len(self._subscribers)
 
     def _trim_locked(self) -> None:
         if len(self._events) <= self.max_events:
@@ -114,11 +179,160 @@ class OverlayState:
         )
         return {
             "generated_at": _utc_now(),
+            "sequence": self._sequence,
+            "overlay_enabled": self.enabled,
             "current": current,
             "current_view": build_overlay_view_model(current),
             "events": events,
             "status": self._status,
         }
+
+
+class MountedOverlayAdapter:
+    """Gate watcher publication to an overlay mounted on an existing server."""
+
+    def __init__(
+        self,
+        state: OverlayState,
+        *,
+        url: str,
+        live_state: OverlayState | None = None,
+    ) -> None:
+        self.state = state
+        self.live_state = live_state or OverlayState(max_events=state.max_events)
+        self.url = url
+        self._enabled = state.enabled
+        self._lock = threading.RLock()
+
+    @property
+    def enabled(self) -> bool:
+        with self._lock:
+            return self._enabled
+
+    def enable(self) -> dict:
+        """Enable publication and restore the latest watcher context."""
+        with self._lock:
+            if self._enabled:
+                return self.state.snapshot()
+            self._enabled = True
+            snapshot = self.state.publish_status(
+                {
+                    "event_type": "overlay-started",
+                    "message": "Waiting for playback",
+                    "overlay_enabled": True,
+                    "clear_current": True,
+                }
+            )
+            shadow = self.live_state.snapshot()
+            if shadow["current"] is not None:
+                snapshot = self.state.publish(shadow["current"])
+            elif shadow["status"] is not None:
+                snapshot = self.state.publish_status(shadow["status"])
+            return snapshot
+
+    def disable(self) -> dict:
+        """Stop publication without stopping or resetting the watcher."""
+        with self._lock:
+            if not self._enabled:
+                return self.state.snapshot()
+            self._enabled = False
+            return self.state.publish_status(
+                {
+                    "event_type": "overlay-stopped",
+                    "message": "Overlay inactive",
+                    "overlay_enabled": False,
+                    "clear_current": True,
+                }
+            )
+
+    def publish(self, event: dict) -> dict:
+        with self._lock:
+            self.live_state.publish(event)
+            if not self._enabled:
+                return self.state.snapshot()
+            return self.state.publish(event)
+
+    def publish_status(self, status: dict) -> dict:
+        with self._lock:
+            self.live_state.publish_status(status)
+            if not self._enabled:
+                return self.state.snapshot()
+            return self.state.publish_status(status)
+
+    def close(self) -> None:
+        with self._lock:
+            self.live_state.clear()
+            self.disable()
+
+    def borrow(self) -> "MountedOverlayPublisher":
+        """Return a watcher-facing publisher that does not own this adapter."""
+        return MountedOverlayPublisher(self)
+
+
+class MountedOverlayPublisher:
+    """Borrowed watcher view of a Web UI-owned mounted overlay adapter."""
+
+    def __init__(self, adapter: MountedOverlayAdapter) -> None:
+        self._adapter = adapter
+        self.url = adapter.url
+
+    def publish(self, event: dict) -> dict:
+        return self._adapter.publish(event)
+
+    def publish_status(self, status: dict) -> dict:
+        return self._adapter.publish_status(status)
+
+    def close(self) -> None:
+        """Release this borrowed view without closing the session-owned adapter."""
+        return None
+
+
+
+class OverlayEventStreams:
+    """Own SSE subscriptions for one HTTP server lifetime."""
+
+    def __init__(self, state: OverlayState) -> None:
+        self.state = state
+        self.stop_event = threading.Event()
+        self._lock = threading.Lock()
+        self._subscribers: dict[Queue, object] = {}
+        self._drained = threading.Event()
+        self._drained.set()
+
+    @property
+    def stopped(self) -> bool:
+        return self.stop_event.is_set()
+
+    def subscribe(self, connection: object) -> Queue | None:
+        with self._lock:
+            if self.stop_event.is_set():
+                return None
+            subscriber = self.state.subscribe()
+            self._subscribers[subscriber] = connection
+            self._drained.clear()
+            return subscriber
+
+    def unsubscribe(self, subscriber: Queue) -> None:
+        with self._lock:
+            if subscriber not in self._subscribers:
+                return
+            del self._subscribers[subscriber]
+            self.state.unsubscribe(subscriber)
+            if not self._subscribers:
+                self._drained.set()
+
+    def stop(self) -> None:
+        """Wake and stop every stream owned by this server."""
+        with self._lock:
+            self.stop_event.set()
+            for subscriber in self._subscribers:
+                _put_latest(subscriber, _STOP_EVENT_STREAM)
+            connections = list(self._subscribers.values())
+        for connection in connections:
+            _close_stream_connection(connection)
+
+    def wait_until_drained(self, timeout: float) -> bool:
+        return self._drained.wait(timeout=timeout)
 
 
 class OverlayServer:
@@ -137,26 +351,24 @@ class OverlayServer:
         self.port = port
         self.state = state or OverlayState()
         self._server: _OverlayHTTPServer | None = None
-        self._thread: threading.Thread | None = None
 
     @property
     def url(self) -> str:
-        return f"http://{self.host}:{self.port}/overlay"
+        return f"http://{self.host}:{self.port}{OVERLAY_PAGE_PATH}"
 
     def start(self) -> None:
-        self._server = _OverlayHTTPServer((self.host, self.port), _OverlayHandler, self.state)
-        self.port = int(self._server.server_address[1])
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
-        self._thread.start()
+        server = _OverlayHTTPServer((self.host, self.port), _OverlayHandler, self.state)
+        self.port = int(server.server_address[1])
+        server.start_http(thread_name="DancingLogOverlayHTTP")
+        self._server = server
 
     def stop(self) -> None:
         if self._server is not None:
-            self._server.shutdown()
-            self._server.server_close()
-            self._server = None
-        if self._thread is not None:
-            self._thread.join(timeout=2.0)
-            self._thread = None
+            server = self._server
+            try:
+                server.stop_http()
+            finally:
+                self._server = None
 
     def publish(self, event: dict) -> dict:
         return self.state.publish(event)
@@ -168,36 +380,49 @@ class OverlayServer:
         return self.state.snapshot()
 
 
-class _OverlayHTTPServer(ThreadingHTTPServer):
+class _OverlayHTTPServer(ManagedLocalHTTPServer):
     def __init__(self, server_address, request_handler_class, state: OverlayState) -> None:
-        super().__init__(server_address, request_handler_class)
         self.state = state
+        self.event_streams = OverlayEventStreams(state)
+        super().__init__(
+            server_address,
+            request_handler_class,
+            accepted_operation_shutdown=AcceptedOperationShutdown.CANCEL,
+            shutdown_participants=(
+                HttpShutdownParticipant(
+                    "overlay event streams",
+                    self.event_streams,
+                    EVENT_STREAM_DRAIN_TIMEOUT_SECONDS,
+                ),
+            ),
+        )
 
-    def handle_error(self, request, client_address) -> None:
-        exc = sys.exc_info()[1]
-        if isinstance(exc, (BrokenPipeError, ConnectionAbortedError, ConnectionResetError)):
-            return
-        if isinstance(exc, OSError) and getattr(exc, "winerror", None) in {10053, 10054}:
-            return
-        super().handle_error(request, client_address)
 
-
-class _OverlayHandler(BaseHTTPRequestHandler):
+class _OverlayHandler(ManagedLocalHTTPRequestHandler):
     server: _OverlayHTTPServer
 
     def do_GET(self) -> None:
+        if not is_allowed_local_http_host(
+            self.headers.get("Host", ""),
+            port=int(self.server.server_address[1]),
+        ):
+            self._send_bytes(403, "text/plain; charset=utf-8", b"invalid Host\n")
+            return
+        self.perform_operation(self._serve_overlay_request)
+
+    def _serve_overlay_request(self) -> None:
         path = urlparse(self.path).path
-        if path == "/overlay":
+        if path == OVERLAY_PAGE_PATH:
             self._send_bytes(200, "text/html; charset=utf-8", _OVERLAY_HTML.encode("utf-8"))
-        elif path == "/state":
+        elif path in {OVERLAY_STATE_PATH, "/state"}:
             payload = json.dumps(
                 self.server.state.snapshot(),
                 ensure_ascii=False,
                 separators=(",", ":"),
             ).encode("utf-8")
             self._send_bytes(200, "application/json; charset=utf-8", payload)
-        elif path == "/events":
-            self._send_events()
+        elif path in {OVERLAY_EVENTS_PATH, "/events"}:
+            send_overlay_events(self, self.server.event_streams)
         else:
             self._send_bytes(404, "text/plain; charset=utf-8", b"not found\n")
 
@@ -212,31 +437,77 @@ class _OverlayHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
-    def _send_events(self) -> None:
-        subscriber = self.server.state.subscribe()
-        try:
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-            self.send_header("Cache-Control", "no-cache")
-            self.send_header("Connection", "keep-alive")
-            self.end_headers()
-            self._write_sse(self.server.state.snapshot())
-            while True:
-                try:
-                    snapshot = subscriber.get(timeout=15)
-                    self._write_sse(snapshot)
-                except Empty:
-                    self.wfile.write(b": ping\n\n")
-                    self.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError, OSError):
-            pass
-        finally:
-            self.server.state.unsubscribe(subscriber)
 
-    def _write_sse(self, snapshot: dict) -> None:
-        payload = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))
-        self.wfile.write(f"event: state\ndata: {payload}\n\n".encode("utf-8"))
-        self.wfile.flush()
+
+def send_overlay_events(
+    handler: BaseHTTPRequestHandler,
+    event_streams: OverlayEventStreams,
+) -> None:
+    """Stream overlay snapshots through any localhost HTTP handler."""
+    subscriber = event_streams.subscribe(handler.connection)
+    if subscriber is None:
+        handler.send_response(503)
+        handler.send_header("Content-Length", "0")
+        handler.send_header("Connection", "close")
+        handler.end_headers()
+        handler.close_connection = True
+        return
+    try:
+        handler.send_response(200)
+        handler.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        handler.send_header("Cache-Control", "no-cache")
+        handler.send_header("Connection", "keep-alive")
+        handler.end_headers()
+        if event_streams.stopped:
+            return
+        _write_sse(handler, event_streams.state.snapshot())
+        while not event_streams.stopped:
+            try:
+                snapshot = subscriber.get(timeout=15)
+                if snapshot is _STOP_EVENT_STREAM or event_streams.stopped:
+                    break
+                _write_sse(handler, snapshot)
+            except Empty:
+                if event_streams.stopped:
+                    break
+                handler.wfile.write(b": ping\n\n")
+                handler.wfile.flush()
+    except (BrokenPipeError, ConnectionResetError, OSError):
+        pass
+    finally:
+        handler.close_connection = True
+        event_streams.unsubscribe(subscriber)
+
+
+def _put_latest(queue: Queue, item: object) -> None:
+    """Replace stale queued state so consumers always receive the latest item."""
+    while True:
+        try:
+            queue.put_nowait(item)
+            return
+        except Full:
+            try:
+                queue.get_nowait()
+            except Empty:
+                pass
+
+
+def _close_stream_connection(connection: object) -> None:
+    """Interrupt a stream handler blocked in socket write or flush."""
+    try:
+        connection.shutdown(socket.SHUT_RDWR)
+    except OSError:
+        pass
+    try:
+        connection.close()
+    except OSError:
+        pass
+
+
+def _write_sse(handler: BaseHTTPRequestHandler, snapshot: dict) -> None:
+    payload = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))
+    handler.wfile.write(f"event: state\ndata: {payload}\n\n".encode("utf-8"))
+    handler.wfile.flush()
 
 
 def _event_sort_key(event: dict) -> tuple[str, str, str]:
@@ -256,6 +527,11 @@ def _is_current_event(event: dict, *, cleared_sequence: int) -> bool:
 
 def _utc_now() -> str:
     return now_utc_iso()
+
+
+def render_overlay_html() -> str:
+    """Return the self-contained OBS overlay page."""
+    return _OVERLAY_HTML
 
 
 _OVERLAY_HTML = """<!doctype html>
@@ -336,12 +612,12 @@ body {
 <body>
 <main class="overlay" aria-live="polite">
   <div class="line iso-time" id="iso-time">0000-00-00T00:00:00+00:00</div>
-  <div class="line meta" id="meta">waiting</div>
-  <div class="line title-frame"><span class="title-text" id="title">Waiting for playback</span></div>
-  <div class="line source" id="source-player">source player: unknown</div>
+  <div class="line meta" id="meta">loading</div>
+  <div class="line title-frame"><span class="title-text" id="title">Loading overlay state</span></div>
+  <div class="line source" id="source-player">checking Live Overlay status</div>
 </main>
 <script>
-const state = { current: null, currentView: null };
+const state = { sequence: -1, current: null, currentView: null };
 const nodes = {
   isoTime: document.getElementById("iso-time"),
   meta: document.getElementById("meta"),
@@ -428,8 +704,21 @@ function visibleStatus(snapshot) {
 }
 
 function render(snapshot) {
+  const sequence = Number(snapshot.sequence || 0);
+  if (sequence < state.sequence) return;
+  state.sequence = sequence;
   state.current = snapshot.current || null;
   state.currentView = snapshot.current_view || null;
+  if (snapshot.overlay_enabled !== true) {
+    state.current = null;
+    state.currentView = null;
+    nodes.title.textContent = "Overlay inactive";
+    nodes.meta.textContent = "disabled";
+    nodes.sourcePlayer.textContent = "enable Live Overlay in WebUI";
+    requestAnimationFrame(updateTitleScroll);
+    updateClock();
+    return;
+  }
   const event = state.current;
   const view = state.currentView;
   if (!event || !view) {
@@ -438,7 +727,7 @@ function render(snapshot) {
       ? status.message
       : "Waiting for playback";
     nodes.meta.textContent = "waiting";
-    nodes.sourcePlayer.textContent = "source player: unknown";
+    nodes.sourcePlayer.textContent = "watcher active; no playback captured";
     requestAnimationFrame(updateTitleScroll);
     updateClock();
     return;
@@ -470,12 +759,12 @@ function updateMeta(view, elapsed) {
 }
 
 async function loadInitialState() {
-  const response = await fetch("/state", { cache: "no-store" });
+  const response = await fetch("/api/overlay/state", { cache: "no-store" });
   render(await response.json());
 }
 
 loadInitialState().catch(() => {});
-const events = new EventSource("/events");
+const events = new EventSource("/api/overlay/events");
 events.addEventListener("state", event => render(JSON.parse(event.data)));
 addEventListener("resize", updateTitleScroll);
 setInterval(updateClock, 250);

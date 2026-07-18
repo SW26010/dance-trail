@@ -387,29 +387,46 @@ class LivePlaybackRuntime:
         self.finalized_live_keys: set[str] = set()
         self.current_room_name: str | None = None
 
-        if self.store is None and self.live_store is None and (record_playback or live_db):
-            from dancing_log.storage import connect_db
+        try:
+            if self.store is None and self.live_store is None and (record_playback or live_db):
+                from dancing_log.storage import connect_db
 
-            conn = connect_db(app_db_path)
-            if record_playback:
-                self.store = SQLiteWatcherPlaybackStore(conn)
-            if live_db:
-                self.live_store = SQLiteLivePlaybackStore(conn)
-        else:
-            if self.store is None and record_playback:
-                self.store = SQLiteWatcherPlaybackStore.open(app_db_path)
-            if self.live_store is None and live_db:
-                self.live_store = SQLiteLivePlaybackStore.open(app_db_path)
-        if self.overlay is None and overlay_port is not None:
-            self.overlay = ObsOverlayAdapter.start(overlay_port)
-        if self.overlay is not None:
-            self.stats.overlay_url = self.overlay.url
+                conn = connect_db(app_db_path)
+                if record_playback:
+                    self.store = SQLiteWatcherPlaybackStore(conn)
+                if live_db:
+                    self.live_store = SQLiteLivePlaybackStore(conn)
+            else:
+                if self.store is None and record_playback:
+                    self.store = SQLiteWatcherPlaybackStore.open(app_db_path)
+                if self.live_store is None and live_db:
+                    self.live_store = SQLiteLivePlaybackStore.open(app_db_path)
+            if self.overlay is None and overlay_port is not None:
+                self.overlay = ObsOverlayAdapter.start(overlay_port)
+            if self.overlay is not None:
+                self.stats.overlay_url = self.overlay.url
+        except BaseException as primary_error:
+            try:
+                self.close()
+            except BaseException as cleanup_error:
+                raise BaseExceptionGroup(
+                    f"live playback initialization failed after {primary_error}",
+                    [primary_error, cleanup_error],
+                ) from None
+            raise
 
     def close(self) -> None:
-        if self.overlay is not None:
-            self.overlay.close()
-            self.overlay = None
+        cleanup_errors: list[Exception] = []
+        overlay = self.overlay
+        self.overlay = None
+        if overlay is not None:
+            try:
+                overlay.close()
+            except Exception as exc:
+                cleanup_errors.append(exc)
         stores = [store for store in (self.store, self.live_store) if store is not None]
+        self.store = None
+        self.live_store = None
         seen_conns: set[int] = set()
         for store in stores:
             conn = getattr(store, "conn", None)
@@ -417,9 +434,14 @@ class LivePlaybackRuntime:
             if key in seen_conns:
                 continue
             seen_conns.add(key)
-            store.close()
-        self.store = None
-        self.live_store = None
+            try:
+                store.close()
+            except Exception as exc:
+                cleanup_errors.append(exc)
+        if len(cleanup_errors) == 1:
+            raise cleanup_errors[0]
+        if cleanup_errors:
+            raise ExceptionGroup("live playback cleanup failed", cleanup_errors)
 
     def create_playback_builder(self) -> PlaybackEventBuilder:
         self.playback_builder = PlaybackEventBuilder(update_callback=self.observe_playback_event)

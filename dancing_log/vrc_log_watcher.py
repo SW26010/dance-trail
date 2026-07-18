@@ -5,11 +5,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import wraps
 from pathlib import Path
 import json
 import os
 import threading
 import time
+from typing import ParamSpec, TypeVar
 
 from dancing_log.app_paths import AppPaths
 from dancing_log.time_utils import now_utc_iso
@@ -19,7 +21,7 @@ from dancing_log.live_playback_folding import (
     PlaybackEventBuilder,
     playback_delay_metrics,
 )
-from dancing_log.live_playback_runtime import LivePlaybackRuntime
+from dancing_log.live_playback_runtime import LivePlaybackOverlay, LivePlaybackRuntime
 from dancing_log.live_playback_settlement import (
     COMPLETION_EPSILON_SECONDS,
     PROMOTION_COMPLETION_RATIO,
@@ -39,11 +41,14 @@ from dancing_log.vrc_log_parser import (
     parse_vrc_lifecycle_event,
     parse_vrc_log_line,
 )
+from dancing_log.watcher_lifetime_lock import WatcherLifetimeLease
 
 
 LOG_FILE_PATTERN = "output_log_*.txt"
 SOURCE_LOG_COPY_CHUNK_BYTES = 4 * 1024 * 1024
 REQUESTER_IDENTITY_PREREAD_MAX_BYTES = 4 * 1024 * 1024
+_WatchArgs = ParamSpec("_WatchArgs")
+_WatchResult = TypeVar("_WatchResult")
 
 __all__ = [
     "COMPLETION_EPSILON_SECONDS",
@@ -252,8 +257,36 @@ def default_vrc_log_dir() -> Path:
     return Path.home() / "AppData" / "LocalLow" / "VRChat" / "VRChat"
 
 
+def _owns_watcher_lifetime(
+    watch: Callable[_WatchArgs, _WatchResult],
+) -> Callable[_WatchArgs, _WatchResult]:
+    """Make the public watcher seam enforce app/database lifetime ownership."""
+
+    @wraps(watch)
+    def owned(*args: _WatchArgs.args, **kwargs: _WatchArgs.kwargs) -> _WatchResult:
+        app_root = kwargs.get("app_root")
+        app_paths = AppPaths.from_root(app_root)
+        app_db_path = kwargs.get("app_db_path") or app_paths.db_file
+        supplied = kwargs.pop("_watcher_lifetime_lease", None)
+        if supplied is not None:
+            supplied.verify_scope(
+                app_root=app_paths.app_root,
+                app_db_path=app_db_path,
+            )
+            return watch(*args, **kwargs)
+        with WatcherLifetimeLease.acquire(
+            app_root=app_paths.app_root,
+            app_db_path=app_db_path,
+        ):
+            return watch(*args, **kwargs)
+
+    return owned
+
+
+@_owns_watcher_lifetime
 def watch_vrc_logs(
     *,
+    app_root: Path | str | None = None,
     log_dir: Path | str | None = None,
     output_dir: Path | str | None = None,
     session_name: str | None = None,
@@ -263,6 +296,7 @@ def watch_vrc_logs(
     live_db: bool = False,
     record_playback: bool = False,
     overlay_port: int | None = None,
+    overlay: LivePlaybackOverlay | None = None,
     poll_seconds: float = 0.25,
     stop_after_idle_seconds: float | None = None,
     stop_event: threading.Event | None = None,
@@ -274,7 +308,7 @@ def watch_vrc_logs(
     """Tail VRChat output logs and write raw/candidate/parsed capture artifacts."""
     resolved_log_dir = Path(log_dir) if log_dir is not None else default_vrc_log_dir()
     _validate_log_dir(resolved_log_dir)
-    app_paths = AppPaths.from_root()
+    app_paths = AppPaths.from_root(app_root)
     capture_root = Path(output_dir) if output_dir is not None else app_paths.capture_dir
     resolved_source_log_dir = _resolve_source_log_dir(
         source_log_dir=source_log_dir,
@@ -303,6 +337,7 @@ def watch_vrc_logs(
         live_db=live_db,
         record_playback=record_playback,
         overlay_port=overlay_port,
+        overlay=overlay,
     )
     playback_builder = runtime.create_playback_builder()
     identity_enricher = RequesterIdentityEnricher(warnings=stats.warnings)
@@ -320,6 +355,7 @@ def watch_vrc_logs(
         else None
     )
     ended_normally = False
+    primary_error: BaseException | None = None
 
     try:
         if include_raw:
@@ -421,31 +457,42 @@ def watch_vrc_logs(
                 time.sleep(max(poll_seconds, 0.01))
         ended_normally = True
     except KeyboardInterrupt:
-        pass
+        # Ctrl-C is an explicit operator stop, not an unexpected watcher crash.
+        ended_normally = True
+    except BaseException as exc:
+        primary_error = exc
     finally:
+        cleanup_errors: list[Exception] = []
         stats.ended_at = _utc_now()
         if current_handle is not None:
-            current_handle.close()
+            _attempt_cleanup(cleanup_errors, current_handle.close)
         if source_mirror is not None and current_path is not None:
-            source_mirror.mirror_file(current_path, final=True)
-            stats.source_log_bytes = source_mirror.bytes_copied
-            stats.source_log_files = source_mirror.to_summary()
+            def finish_source_mirror() -> None:
+                source_mirror.mirror_file(current_path, final=True)
+                stats.source_log_bytes = source_mirror.bytes_copied
+                stats.source_log_files = source_mirror.to_summary()
+
+            _attempt_cleanup(cleanup_errors, finish_source_mirror)
         for handle in (raw_handle, candidates_handle, parsed_handle):
             if handle is not None:
-                handle.close()
-        if ended_normally:
-            _apply_identity_backfills(
-                playback_builder,
-                identity_enricher.release_session_end_expired(),
-            )
-        runtime.settle_graceful_stop()
-        playback_records = playback_builder.records()
-        stats.playback_events = len(playback_records)
-        stats.delay_metrics = playback_delay_metrics(playback_records)
-        stats.requester_identity = identity_enricher.summary()
-        _write_jsonl_file(session_dir / "playback_events.jsonl", playback_records)
-        _write_json(session_dir / "summary.json", stats.to_dict())
-        runtime.close()
+                _attempt_cleanup(cleanup_errors, handle.close)
+        _finalize_watcher_artifacts(
+            stats=stats,
+            runtime=runtime,
+            playback_builder=playback_builder,
+            identity_enricher=identity_enricher,
+            session_dir=session_dir,
+            ended_normally=ended_normally,
+            cleanup_errors=cleanup_errors,
+        )
+        _raise_finalization_errors(
+            "watcher finalization failed",
+            primary_error,
+            cleanup_errors,
+        )
+
+    if primary_error is not None:
+        raise primary_error
 
     return stats
 
@@ -494,6 +541,7 @@ def replay_vrc_log_files(
     candidates_handle = None
     parsed_handle = None
     ended_normally = False
+    primary_error: BaseException | None = None
 
     try:
         if include_raw:
@@ -532,24 +580,31 @@ def replay_vrc_log_files(
                     lifecycle_event_callback=runtime.observe_lifecycle_event,
                 )
         ended_normally = True
+    except BaseException as exc:
+        primary_error = exc
     finally:
+        cleanup_errors: list[Exception] = []
         stats.ended_at = _utc_now()
         for handle in (raw_handle, candidates_handle, parsed_handle):
             if handle is not None:
-                handle.close()
-        if ended_normally:
-            _apply_identity_backfills(
-                playback_builder,
-                identity_enricher.release_session_end_expired(),
-            )
-        runtime.settle_graceful_stop()
-        playback_records = playback_builder.records()
-        stats.playback_events = len(playback_records)
-        stats.delay_metrics = playback_delay_metrics(playback_records)
-        stats.requester_identity = identity_enricher.summary()
-        _write_jsonl_file(session_dir / "playback_events.jsonl", playback_records)
-        _write_json(session_dir / "summary.json", stats.to_dict())
-        runtime.close()
+                _attempt_cleanup(cleanup_errors, handle.close)
+        _finalize_watcher_artifacts(
+            stats=stats,
+            runtime=runtime,
+            playback_builder=playback_builder,
+            identity_enricher=identity_enricher,
+            session_dir=session_dir,
+            ended_normally=ended_normally,
+            cleanup_errors=cleanup_errors,
+        )
+        _raise_finalization_errors(
+            "replay finalization failed",
+            primary_error,
+            cleanup_errors,
+        )
+
+    if primary_error is not None:
+        raise primary_error
 
     return stats
 
@@ -819,6 +874,83 @@ def _write_jsonl_file(path: Path, values: list[dict]) -> None:
     with open(path, "w", encoding="utf-8") as handle:
         for value in values:
             _write_jsonl(handle, value)
+
+
+def _finalize_watcher_artifacts(
+    *,
+    stats: WatchStats,
+    runtime: LivePlaybackRuntime,
+    playback_builder: PlaybackEventBuilder,
+    identity_enricher: RequesterIdentityEnricher,
+    session_dir: Path,
+    ended_normally: bool,
+    cleanup_errors: list[Exception],
+) -> None:
+    """Finish settlement, artifacts, and owned resources independently."""
+    if ended_normally:
+        _attempt_cleanup(
+            cleanup_errors,
+            lambda: _apply_identity_backfills(
+                playback_builder,
+                identity_enricher.release_session_end_expired(),
+            ),
+        )
+        _attempt_cleanup(cleanup_errors, runtime.settle_graceful_stop)
+
+    playback_records: list[dict] | None = None
+    try:
+        playback_records = playback_builder.records()
+        stats.playback_events = len(playback_records)
+        stats.delay_metrics = playback_delay_metrics(playback_records)
+    except Exception as exc:
+        cleanup_errors.append(exc)
+    try:
+        stats.requester_identity = identity_enricher.summary()
+    except Exception as exc:
+        cleanup_errors.append(exc)
+    if playback_records is not None:
+        _attempt_cleanup(
+            cleanup_errors,
+            lambda: _write_jsonl_file(
+                session_dir / "playback_events.jsonl",
+                playback_records,
+            ),
+        )
+    _attempt_cleanup(
+        cleanup_errors,
+        lambda: _write_json(session_dir / "summary.json", stats.to_dict()),
+    )
+    _attempt_cleanup(cleanup_errors, runtime.close)
+
+
+def _attempt_cleanup(errors: list[Exception], action: Callable[[], object]) -> None:
+    try:
+        action()
+    except Exception as exc:
+        errors.append(exc)
+
+
+def _raise_cleanup_errors(label: str, errors: list[Exception]) -> None:
+    if len(errors) == 1:
+        raise errors[0]
+    if errors:
+        raise ExceptionGroup(label, errors)
+
+
+def _raise_finalization_errors(
+    label: str,
+    primary_error: BaseException | None,
+    cleanup_errors: list[Exception],
+) -> None:
+    if primary_error is None:
+        _raise_cleanup_errors(label, cleanup_errors)
+        return
+    if cleanup_errors:
+        cleanup_summary = "; ".join(str(error) for error in cleanup_errors)
+        raise BaseExceptionGroup(
+            f"{label} after {primary_error}; cleanup errors: {cleanup_summary}",
+            [primary_error, *cleanup_errors],
+        ) from None
 
 
 def _record_error(errors: list[str], message: str) -> None:

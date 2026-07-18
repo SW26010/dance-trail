@@ -1,5 +1,10 @@
+import socket
+import sqlite3
+import tempfile
 import unittest
 from dataclasses import dataclass, field
+from pathlib import Path
+from unittest.mock import patch
 
 from dancing_log.live_playback_runtime import LivePlaybackRuntime
 from dancing_log.watcher_playback_materializer import make_watcher_playback_event_key
@@ -164,6 +169,72 @@ def stored_key(playback_event_key: str = "wannadance:3114#1") -> str:
 
 
 class LivePlaybackRuntimeModuleTest(unittest.TestCase):
+    def test_overlay_bind_failure_closes_store_acquired_during_init(self):
+        connections: list[sqlite3.Connection] = []
+
+        def connect_tracking_db(_path):
+            conn = sqlite3.connect(":memory:")
+            connections.append(conn)
+            return conn
+
+        occupied = socket.socket()
+        occupied.bind(("127.0.0.1", 0))
+        occupied.listen()
+        port = occupied.getsockname()[1]
+        try:
+            with (
+                tempfile.TemporaryDirectory() as tmp,
+                patch(
+                    "dancing_log.storage.connect_db",
+                    side_effect=connect_tracking_db,
+                ),
+                self.assertRaises(OSError),
+            ):
+                LivePlaybackRuntime(
+                    stats=RuntimeStats(),
+                    app_db_path=Path(tmp) / "app.sqlite3",
+                    record_playback=True,
+                    overlay_port=port,
+                )
+        finally:
+            occupied.close()
+
+        self.assertEqual(len(connections), 1)
+        try:
+            connections[0].execute("SELECT 1")
+        except sqlite3.ProgrammingError:
+            closed = True
+        else:
+            closed = False
+            connections[0].close()
+        self.assertTrue(closed, "SQLite connection leaked after overlay bind failure")
+
+    def test_close_attempts_overlay_and_store_cleanup_and_preserves_errors(self):
+        class FailingOverlay(RecordingOverlay):
+            def close(self) -> None:
+                self.closed = True
+                raise RuntimeError("overlay close failed")
+
+        class FailingStore(FakeLivePlaybackStore):
+            def close(self) -> None:
+                self.closed = True
+                raise RuntimeError("store close failed")
+
+        overlay = FailingOverlay()
+        store = FailingStore()
+        runtime = LivePlaybackRuntime(
+            stats=RuntimeStats(),
+            store=store,
+            overlay=overlay,
+        )
+
+        with self.assertRaises(ExceptionGroup) as context:
+            runtime.close()
+
+        self.assertTrue(overlay.closed)
+        self.assertTrue(store.closed)
+        self.assertEqual(len(context.exception.exceptions), 2)
+
     def test_room_left_interrupts_pending_event_and_clears_overlay(self):
         stats = RuntimeStats()
         store = FakeLivePlaybackStore()

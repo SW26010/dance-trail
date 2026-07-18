@@ -4,13 +4,19 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+import dancing_log.vrc_log_watcher as vrc_log_watcher_module
 from dancing_log.storage import DUDU_SYSTEM_KEY, WANNA_SYSTEM_KEY, connect_db
 from dancing_log.vrc_log_watcher import (
     parse_vrc_lifecycle_event,
     parse_vrc_log_line,
     replay_vrc_log_files,
     watch_vrc_logs,
+)
+from dancing_log.watcher_lifetime_lock import (
+    WatcherLifetimeLease,
+    WatcherLifetimeLockUnavailable,
 )
 
 
@@ -19,6 +25,197 @@ def read_jsonl(path: Path) -> list[dict]:
 
 
 class VrcLogParserTest(unittest.TestCase):
+    def test_public_watcher_cannot_bypass_lifetime_lock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            app_db_path = root / "app.sqlite3"
+
+            with WatcherLifetimeLease.acquire(
+                app_root=None,
+                app_db_path=app_db_path,
+            ):
+                with self.assertRaises(WatcherLifetimeLockUnavailable):
+                    watch_vrc_logs(
+                        log_dir=log_dir,
+                        output_dir=root / "capture",
+                        app_db_path=app_db_path,
+                        stop_after_idle_seconds=0.01,
+                        archive_source_logs=False,
+                    )
+
+            self.assertFalse((root / "capture").exists())
+
+    def test_watcher_groups_main_failure_with_cleanup_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            (log_dir / "output_log_test.txt").write_text(
+                "2026.05.17 15:30:00 Log - test\n",
+                encoding="utf-8",
+            )
+
+            with (
+                patch(
+                    "dancing_log.vrc_log_watcher._drain_handle",
+                    side_effect=RuntimeError("watch loop failed"),
+                ),
+                patch(
+                    "dancing_log.vrc_log_watcher._write_json",
+                    side_effect=OSError("summary write failed"),
+                ),
+                self.assertRaises(ExceptionGroup) as context,
+            ):
+                watch_vrc_logs(
+                    log_dir=log_dir,
+                    output_dir=root / "capture",
+                    session_name="main-and-cleanup-error",
+                    from_start=True,
+                    archive_source_logs=False,
+                )
+
+        self.assertEqual(len(context.exception.exceptions), 2)
+        self.assertIsInstance(context.exception.exceptions[0], RuntimeError)
+        self.assertEqual(str(context.exception.exceptions[0]), "watch loop failed")
+        self.assertIsInstance(context.exception.exceptions[1], OSError)
+        self.assertEqual(str(context.exception.exceptions[1]), "summary write failed")
+        self.assertIn("watch loop failed", str(context.exception))
+        self.assertIn("summary write failed", str(context.exception))
+
+    def test_unexpected_watcher_failure_keeps_live_record_pending(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            db_path = root / "app.sqlite3"
+            (log_dir / "output_log_0001.txt").write_text(
+                '2026.05.17 15:30:00 Debug - [VRCX] VideoPlay(PyPyDance) '
+                '"https://api.udon.dance/Api/Songs/play?id=3114",0,10,'
+                '"$3114. Long Song (Alice)"\n'
+                "2026.05.17 15:30:00 Debug - "
+                "[<color=#9C6994>USharpVideo (WannaDance)</color>] "
+                "DelayedVideoReady: Time's up, let's play\n",
+                encoding="utf-8",
+            )
+            original_drain_handle = vrc_log_watcher_module._drain_handle
+            drain_calls = 0
+
+            def fail_after_first_drain(**kwargs):
+                nonlocal drain_calls
+                drain_calls += 1
+                if drain_calls > 1:
+                    raise RuntimeError("watch loop failed")
+                return original_drain_handle(**kwargs)
+
+            with (
+                patch.object(
+                    vrc_log_watcher_module,
+                    "_drain_handle",
+                    side_effect=fail_after_first_drain,
+                ),
+                self.assertRaisesRegex(RuntimeError, "watch loop failed"),
+            ):
+                watch_vrc_logs(
+                    log_dir=log_dir,
+                    output_dir=root / "capture",
+                    session_name="unexpected-record-exit",
+                    app_db_path=db_path,
+                    from_start=True,
+                    record_playback=True,
+                    poll_seconds=0.01,
+                    archive_source_logs=False,
+                )
+
+            with connect_db(db_path) as conn:
+                row = conn.execute("SELECT * FROM playback_records").fetchone()
+                origin = conn.execute(
+                    "SELECT origin_json FROM playback_record_origins"
+                ).fetchone()
+
+        self.assertIsNotNone(row)
+        self.assertEqual(row["default_acceptance_status"], "pending")
+        self.assertEqual(row["observation_status"], "pending")
+        self.assertIsNone(row["observation_reason"])
+        self.assertEqual(
+            json.loads(origin["origin_json"])["legacy_status_reason"],
+            "live_observation_pending",
+        )
+
+    def test_unexpected_watcher_failure_does_not_settle_as_graceful_stop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            (log_dir / "output_log_test.txt").write_text(
+                "2026.05.17 15:30:00 Log - test\n",
+                encoding="utf-8",
+            )
+
+            with (
+                patch(
+                    "dancing_log.vrc_log_watcher._drain_handle",
+                    side_effect=RuntimeError("watch loop failed"),
+                ),
+                patch(
+                    "dancing_log.vrc_log_watcher.LivePlaybackRuntime.settle_graceful_stop"
+                ) as settle_graceful_stop,
+                self.assertRaisesRegex(RuntimeError, "watch loop failed"),
+            ):
+                watch_vrc_logs(
+                    log_dir=log_dir,
+                    output_dir=root / "capture",
+                    session_name="unexpected-exit",
+                    from_start=True,
+                    archive_source_logs=False,
+                )
+
+        settle_graceful_stop.assert_not_called()
+
+    def test_watcher_closes_overlay_when_artifact_write_fails(self):
+        class RecordingOverlay:
+            url = "http://127.0.0.1:8787/overlay"
+
+            def __init__(self) -> None:
+                self.closed = False
+
+            def publish(self, event: dict) -> dict:
+                return event
+
+            def publish_status(self, status: dict) -> dict:
+                return status
+
+            def close(self) -> None:
+                self.closed = True
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "logs"
+            log_dir.mkdir()
+            (log_dir / "output_log_test.txt").write_text("", encoding="utf-8")
+            stop_event = threading.Event()
+            stop_event.set()
+            overlay = RecordingOverlay()
+
+            with (
+                patch(
+                    "dancing_log.vrc_log_watcher._write_jsonl_file",
+                    side_effect=OSError("artifact write failed"),
+                ),
+                self.assertRaisesRegex(OSError, "artifact write failed"),
+            ):
+                watch_vrc_logs(
+                    log_dir=log_dir,
+                    output_dir=root / "capture",
+                    session_name="finalizer-error",
+                    stop_event=stop_event,
+                    overlay=overlay,
+                    archive_source_logs=False,
+                )
+
+        self.assertTrue(overlay.closed)
+
     def test_parses_video_playback_resolve_and_classifies_wanna(self):
         events = parse_vrc_log_line(
             "2026.05.17 15:30:00 Log - [Video Playback] "

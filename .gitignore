@@ -33,5 +33,9 @@ config/*.local.json
 *.db-wal
 *.db-shm
 
+# Runtime watcher lifetime locks
+.dancing-log-watcher.lock
+*.watcher.lock
+
 # Progress/temp files
 .match_progress.json
