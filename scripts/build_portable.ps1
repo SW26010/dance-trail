@@ -56,7 +56,7 @@ function Invoke-ProjectPython {
     param([string[]]$Arguments = @())
 
     if (-not $NoUv -and (Get-Command uv -ErrorAction SilentlyContinue)) {
-        & uv run python @Arguments
+        & uv run --cache-dir (Join-Path $RepoRoot ".uv-cache") python @Arguments
     }
     else {
         & $Python @Arguments
@@ -67,7 +67,7 @@ function Invoke-PyInstaller {
     param([string[]]$Arguments = @())
 
     if (-not $NoUv -and (Get-Command uv -ErrorAction SilentlyContinue)) {
-        & uv run --with $PyInstallerSpec pyinstaller @Arguments
+        & uv run --cache-dir (Join-Path $RepoRoot ".uv-cache") --with $PyInstallerSpec pyinstaller @Arguments
     }
     else {
         & $Python -m PyInstaller @Arguments

@@ -147,6 +147,8 @@ Catalog 里的加号应该表示“把这个舞蹈条目加入当前目标舞蹈
 
 本地日期不是简单的自然日。所有 daily history、plan view、`intended_local_date` 和 fulfillment 匹配都应该使用 Local Dance Day Boundary。默认边界是 00:00；如果用户设为 03:00，则本地 2026-06-27 02:00 的播放仍属于 2026-06-26 这个跳舞日。
 
+Local Dance Day 使用操作系统的真实本地时区规则，不假设固定 UTC offset。若春季 DST 跳变使配置的墙钟分界不存在，使用不早于该配置值的第一个有效墙钟时刻；若秋季 DST 使分界重复，第一次到达（`fold=0`）即进入新跳舞日。归属按解析后的 UTC 瞬间比较，回拨后不会退回前一个跳舞日。
+
 Local Dance Day Boundary 是本地配置项，不是 `dance_plans` 或 `dance_plan_items` 的字段。配置字段名使用 `dance_day_boundary_time`，值为 `HH:MM` 本地时分字符串；第一版允许范围为 `00:00` 到 `06:00`，默认建议值为 `00:00`。系统每次计算跳舞日归属时读取当前配置；如果用户修改 boundary，相关历史分组和 plan 匹配视图会随之改变。为了避免用户无意中改变行为，第一次使用 plan 相关功能时必须显式提醒并引导用户去 Settings 设置；计划界面本身不承载完整设置表单。提醒必须显示当前 `dance_day_boundary_time` 值，并提供“使用当前设置”操作，让用户一次性确认当前 boundary 设置。
 
 建议规则：

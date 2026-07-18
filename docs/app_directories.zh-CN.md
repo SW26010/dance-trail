@@ -46,6 +46,7 @@
   "vrc_log_dir": null,
   "wanna_cache_dir": null,
   "recordings_dir": null,
+  "dance_day_boundary_time": "00:00",
   "auto_start_watcher": false,
   "auto_start_overlay": false,
   "overlay_port": 8765
@@ -53,6 +54,8 @@
 ```
 
 配置中的相对路径都按应用根目录解析。绝对路径保持不变。`%USERPROFILE%` 这类环境变量会在解析前展开。
+
+`dance_day_boundary_time` 是必填的本地墙钟 `HH:MM` 值，允许范围为 `00:00` 至 `06:00`。Local Dance Day 计算使用操作系统的真实本地时区规则。
 
 `auto_start_watcher` 和 `auto_start_overlay` 是应用工作流的运行时默认值。`auto_start_overlay` 设为 `true` 时，也会保持 `auto_start_watcher` 启用，因为 overlay 依赖实时 watcher 状态。`overlay_port` 是不启动 Web UI、由独立 watcher 提供 overlay 时使用的高级兼容配置；桌面/Web UI 模式在 Web UI 端口提供 `/overlay`。
 

@@ -12,7 +12,8 @@ from dancing_log.storage import (
     load_dance_log as load_dance_events_from_db,
     load_dance_tracks as load_dance_tracks_from_db,
 )
-from dancing_log.time_utils import VRCHAT_LOCAL_TZ, normalize_timestamp, now_utc_iso, parse_timestamp
+from dancing_log.local_dance_day import LocalDanceDayBoundary
+from dancing_log.time_utils import normalize_timestamp, now_utc_iso
 
 
 SOURCE_QUEUED_SELF = "queued_self"
@@ -74,6 +75,7 @@ def add_dance_record(
     timestamp: str | None = None,
     auto_detect: bool = True,
     db_path: str | None = None,
+    dance_day_boundary: LocalDanceDayBoundary | None = None,
 ) -> str:
     """Add one dance event for a system-specific dance track."""
     if timestamp is None:
@@ -86,7 +88,8 @@ def add_dance_record(
         tracks = load_dance_tracks(db_path)
         if existing_track and tracks:
             records = load_dance_log(db_path)
-            today = parse_timestamp(normalized_timestamp).astimezone(VRCHAT_LOCAL_TZ).date()
+            boundary = dance_day_boundary or LocalDanceDayBoundary.from_config({})
+            today = boundary.date_for(normalized_timestamp)
             playlist_ids = get_daily_playlist_track_ids(
                 tracks,
                 records,
@@ -184,10 +187,12 @@ def generate_daily_playlist(
     dance_log: list[dict],
     count: int = 20,
     target_date: date | None = None,
+    dance_day_boundary: LocalDanceDayBoundary | None = None,
 ) -> list[dict]:
     """Generate a deterministic daily recommendation playlist."""
     if target_date is None:
-        target_date = datetime.now(timezone.utc).astimezone().date()
+        boundary = dance_day_boundary or LocalDanceDayBoundary.from_config({})
+        target_date = boundary.current_date()
 
     ranked = compute_recommendation(tracks, dance_log)
     seed = _playlist_seed(target_date)

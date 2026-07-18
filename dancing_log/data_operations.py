@@ -504,6 +504,7 @@ def _run_sync_queued_self(
         app_db_path=config.path("app_db", override=params.get("app_db")),
         manifest_dir=config.path("queued_self_dir", override=params.get("manifest_dir")),
         system_key=params.get("system") or params.get("system_key") or DEFAULT_QUEUED_SYSTEM,
+        dance_day_boundary=config.dance_day_boundary,
     )
     lines = [
         "queued_self sync complete",
@@ -579,6 +580,7 @@ def _run_rebuild_data(
         app_db_path=db_path,
         manifest_dir=config.queued_self_dir,
         system_key=params.get("queued_system") or DEFAULT_QUEUED_SYSTEM,
+        dance_day_boundary=config.dance_day_boundary,
     )
     lines.extend(
         [

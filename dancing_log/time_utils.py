@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from datetime import datetime, timedelta, timezone, tzinfo
+from datetime import datetime, timezone, tzinfo
 from typing import Any
+
+from tzlocal import get_localzone
 
 
 UTC = timezone.utc
-VRCHAT_LOCAL_TZ = timezone(timedelta(hours=8))
 SQLITE_UTC_NOW = "strftime('%Y-%m-%dT%H:%M:%SZ','now')"
 
 VRCHAT_TIMESTAMP_FORMATS = (
@@ -25,7 +26,7 @@ def now_utc_iso() -> str:
 def normalize_timestamp(
     value: object,
     *,
-    local_tz: tzinfo = VRCHAT_LOCAL_TZ,
+    local_tz: tzinfo | None = None,
 ) -> str:
     """Normalize supported source timestamps to UTC ISO 8601 text with ``Z``.
 
@@ -39,7 +40,7 @@ def normalize_timestamp(
 def normalize_optional_timestamp(
     value: object,
     *,
-    local_tz: tzinfo = VRCHAT_LOCAL_TZ,
+    local_tz: tzinfo | None = None,
 ) -> str | None:
     if value in (None, ""):
         return None
@@ -50,7 +51,7 @@ def normalize_timestamp_fields(
     values: Mapping[str, Any],
     field_names: Iterable[str],
     *,
-    local_tz: tzinfo = VRCHAT_LOCAL_TZ,
+    local_tz: tzinfo | None = None,
 ) -> dict[str, Any]:
     normalized = dict(values)
     for field_name in field_names:
@@ -65,7 +66,7 @@ def normalize_timestamp_fields(
 def parse_timestamp(
     value: object,
     *,
-    local_tz: tzinfo = VRCHAT_LOCAL_TZ,
+    local_tz: tzinfo | None = None,
 ) -> datetime:
     if isinstance(value, datetime):
         parsed = value
@@ -78,7 +79,7 @@ def parse_timestamp(
             raise ValueError(f"unsupported timestamp: {value}")
 
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=local_tz)
+        parsed = parsed.replace(tzinfo=local_tz or get_localzone())
     return parsed
 
 

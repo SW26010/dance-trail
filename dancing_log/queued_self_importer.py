@@ -9,11 +9,15 @@ import re
 import sqlite3
 
 from dancing_log.app_paths import QUEUED_SELF_DIR
+from dancing_log.local_dance_day import LocalDanceDayBoundary
+from dancing_log.playback_projection import (
+    accepted_playback_where_sql,
+    playback_projection_join_sql,
+)
 from dancing_log.storage import connect_db
 
 
 SOURCE_QUEUED_SELF = "queued_self"
-LOCAL_PLAYED_DATE_OFFSET_SQL = "'+8 hours'"
 
 DATE_RE = re.compile(r"^\s*#*\s*(\d{4}-\d{2}-\d{2})\s*$")
 BARE_DOTTED_TRACK_REF_RE = re.compile(
@@ -171,10 +175,12 @@ def sync_queued_self_manifests(
     app_db_path: Path | str | None = None,
     manifest_dir: Path | str | None = None,
     system_key: str | None = None,
+    dance_day_boundary: LocalDanceDayBoundary | None = None,
 ) -> QueuedSelfImportStats:
     """Apply queued-self manifests as a source override on existing records."""
     root = Path(manifest_dir) if manifest_dir is not None else QUEUED_SELF_DIR
     entries = load_queued_self_entries(root, default_system_key=system_key)
+    boundary = dance_day_boundary or LocalDanceDayBoundary.from_config({})
 
     with connect_db(app_db_path) as conn:
         deleted = 0
@@ -188,7 +194,11 @@ def sync_queued_self_manifests(
                 unmatched_entries += 1
                 continue
 
-            matched_existing = _matching_existing_record_count(conn, entry)
+            matched_existing = _matching_existing_record_count(
+                conn,
+                entry,
+                boundary,
+            )
             if matched_existing == 0:
                 unmatched_entries += 1
                 continue
@@ -214,26 +224,36 @@ def sync_queued_self_manifests(
 def _matching_existing_record_count(
     conn: sqlite3.Connection,
     entry: QueuedSelfEntry,
+    dance_day_boundary: LocalDanceDayBoundary,
 ) -> int:
-    row = conn.execute(
-        """
-        SELECT COUNT(*)
+    projection_join = playback_projection_join_sql(conn)
+    target_range = dance_day_boundary.range_for(entry.played_date)
+    rows = conn.execute(
+        f"""
+        SELECT pr.played_at
         FROM playback_records pr
+        {projection_join}
         JOIN dance_tracks dt ON dt.id = pr.dance_track_id
         JOIN dance_systems ds ON ds.id = dt.system_id
         WHERE
             ds.key = ?
             AND dt.external_id = ?
-            AND """ + _played_at_local_date_sql("pr.played_at") + """ = ?
-            AND pr.default_acceptance_status = 'accepted'
+            AND {accepted_playback_where_sql(conn)}
         """,
         (
             entry.system_key,
             entry.external_id,
-            entry.played_date.isoformat(),
         ),
-    ).fetchone()
-    return int(row[0])
+    ).fetchall()
+    matched = 0
+    for row in rows:
+        try:
+            played_at = dance_day_boundary.local_datetime(row["played_at"])
+        except (TypeError, ValueError):
+            continue
+        if target_range.contains(played_at):
+            matched += 1
+    return matched
 
 
 def _normalize_system_key(system_key: str | None) -> str | None:
@@ -243,12 +263,3 @@ def _normalize_system_key(system_key: str | None) -> str | None:
     if not normalized:
         raise ValueError("system key must not be empty")
     return normalized
-
-
-def _played_at_local_date_sql(column: str) -> str:
-    return (
-        "CASE "
-        f"WHEN {column} LIKE '____.__.__ %' THEN replace(substr({column}, 1, 10), '.', '-') "
-        f"ELSE date(replace({column}, 'Z', '+00:00'), {LOCAL_PLAYED_DATE_OFFSET_SQL}) "
-        "END"
-    )

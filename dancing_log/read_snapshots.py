@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import date, datetime, tzinfo
+from datetime import UTC, date, datetime
 from pathlib import Path
 import re
 import sqlite3
 
 from dancing_log.app_paths import AppRuntimeConfig
+from dancing_log.local_dance_day import LocalDanceDayBoundary
 from dancing_log.models import generate_daily_playlist
 from dancing_log.playback_evidence import (
     count_playback_records,
@@ -81,10 +82,13 @@ class LocalReadSnapshots:
         return summary
 
     def timeline(self, query: dict[str, list[str]]) -> dict:
+        config = self.config
+        dance_day_boundary = config.dance_day_boundary
+        current_dance_date = dance_day_boundary.current_date()
         requested_date = _query_optional_value(query, "date")
-        selected_date = requested_date or date.today().isoformat()
+        selected_date = requested_date or current_dance_date.isoformat()
         source = _timeline_source(_query_value(query, "source", "all"))
-        db_path = self.config.app_db_path
+        db_path = config.app_db_path
         if not db_path.exists():
             return {
                 "date": selected_date,
@@ -101,21 +105,28 @@ class LocalReadSnapshots:
                 target = date.fromisoformat(requested_date)
                 selected_date = target.isoformat()
             except ValueError:
-                target = date.today()
+                target = current_dance_date
                 selected_date = target.isoformat()
 
         if target is None:
-            selected_date = date.today().isoformat()
+            selected_date = current_dance_date.isoformat()
 
         try:
             with _open_readonly_db(db_path) as conn:
                 rows = read_timeline_playback_rows(conn, source=source)
                 if target is None:
-                    target = _latest_playback_local_date(rows) or date.today()
+                    target = (
+                        _latest_playback_local_date(rows, dance_day_boundary)
+                        or current_dance_date
+                    )
                     selected_date = target.isoformat()
-                dances = _daily_dances_from_rows(rows, target)
+                dances = _daily_dances_from_rows(
+                    rows,
+                    target,
+                    dance_day_boundary=dance_day_boundary,
+                )
         except sqlite3.Error as exc:
-            target = date.today()
+            target = current_dance_date
             selected_date = target.isoformat()
             return {
                 "date": selected_date,
@@ -202,7 +213,8 @@ class LocalReadSnapshots:
         }
 
     def insights(self) -> dict:
-        db_path = self.config.app_db_path
+        config = self.config
+        db_path = config.app_db_path
         if not db_path.exists():
             return {
                 "database_exists": False,
@@ -222,6 +234,7 @@ class LocalReadSnapshots:
                 tracks,
                 dance_log,
                 count=10,
+                target_date=config.dance_day_boundary.current_date(),
             )
         except (sqlite3.Error, ValueError) as exc:
             return {
@@ -275,30 +288,38 @@ def load_daily_dances(
     target_date: date,
     path: Path | str | None = None,
     *,
-    local_tz: tzinfo | None = None,
+    dance_day_boundary: LocalDanceDayBoundary | None = None,
 ) -> list[DailyDance]:
-    """Return accepted playback records that fall on the requested local date."""
+    """Return accepted playback records for the requested Local Dance Day."""
     db_path = _daily_db_path(path)
     if not db_path.exists():
         return []
     with _open_readonly_db(db_path) as conn:
         rows = _readonly_daily_accepted_rows(conn)
-    return _daily_dances_from_rows(rows, target_date, local_tz=local_tz)
+    return _daily_dances_from_rows(
+        rows,
+        target_date,
+        dance_day_boundary=dance_day_boundary,
+    )
 
 
 def load_daily_live_dances(
     target_date: date,
     path: Path | str | None = None,
     *,
-    local_tz: tzinfo | None = None,
+    dance_day_boundary: LocalDanceDayBoundary | None = None,
 ) -> list[DailyDance]:
-    """Return live playback rows observed on the requested local date."""
+    """Return live playback rows observed on the requested Local Dance Day."""
     db_path = _daily_db_path(path)
     if not db_path.exists():
         return []
     with _open_readonly_db(db_path) as conn:
         rows = _readonly_daily_live_rows(conn)
-    return _daily_dances_from_rows(rows, target_date, local_tz=local_tz)
+    return _daily_dances_from_rows(
+        rows,
+        target_date,
+        dance_day_boundary=dance_day_boundary,
+    )
 
 
 def format_daily_dance_line(dance: DailyDance) -> str:
@@ -309,23 +330,17 @@ def format_daily_dance_line(dance: DailyDance) -> str:
 def parse_played_at_local(
     value: str | None,
     *,
-    local_tz: tzinfo | None = None,
+    dance_day_boundary: LocalDanceDayBoundary | None = None,
 ) -> datetime | None:
     """Parse supported stored timestamps and return local time."""
     text = (value or "").strip()
     if not text:
         return None
-
-    iso_text = text[:-1] + "+00:00" if text.endswith("Z") else text
+    boundary = dance_day_boundary or LocalDanceDayBoundary.from_config({})
     try:
-        parsed = datetime.fromisoformat(iso_text)
+        return boundary.local_datetime(text)
     except ValueError:
-        parsed = _parse_vrc_local_timestamp(text)
-    if parsed is None:
         return None
-    if parsed.tzinfo is not None:
-        return parsed.astimezone(local_tz)
-    return parsed
 
 
 def _daily_db_path(path: Path | str | None) -> Path:
@@ -447,21 +462,21 @@ def _readonly_dance_log(conn: sqlite3.Connection) -> list[dict]:
     return read_accepted_playback_history(conn)
 
 
-def _readonly_daily_dances(conn: sqlite3.Connection, target_date: date, source: str) -> list[DailyDance]:
-    rows = read_timeline_playback_rows(conn, source=source)
-    return _daily_dances_from_rows(rows, target_date)
-
-
-def _latest_playback_local_date(rows: list[dict]) -> date | None:
+def _latest_playback_local_date(
+    rows: list[dict],
+    dance_day_boundary: LocalDanceDayBoundary,
+) -> date | None:
     latest: datetime | None = None
     for row in rows:
-        played_at_local = parse_played_at_local(row.get("played_at"))
+        played_at_local = parse_played_at_local(
+            row.get("played_at"),
+            dance_day_boundary=dance_day_boundary,
+        )
         if played_at_local is None:
             continue
-        played_at_order = played_at_local.replace(tzinfo=None)
-        if latest is None or played_at_order > latest:
-            latest = played_at_order
-    return latest.date() if latest is not None else None
+        if latest is None or played_at_local.astimezone(UTC) > latest.astimezone(UTC):
+            latest = played_at_local
+    return dance_day_boundary.date_for(latest) if latest is not None else None
 
 
 def _readonly_daily_accepted_rows(conn: sqlite3.Connection) -> list[dict]:
@@ -476,12 +491,17 @@ def _daily_dances_from_rows(
     rows: list[dict],
     target_date: date,
     *,
-    local_tz: tzinfo | None = None,
+    dance_day_boundary: LocalDanceDayBoundary | None = None,
 ) -> list[DailyDance]:
+    boundary = dance_day_boundary or LocalDanceDayBoundary.from_config({})
+    target_range = boundary.range_for(target_date)
     dances = []
     for row in rows:
-        played_at_local = parse_played_at_local(row.get("played_at"), local_tz=local_tz)
-        if played_at_local is None or played_at_local.date() != target_date:
+        played_at_local = parse_played_at_local(
+            row.get("played_at"),
+            dance_day_boundary=boundary,
+        )
+        if played_at_local is None or not target_range.contains(played_at_local):
             continue
         review_status = str(
             row.get("effective_playback_status")
@@ -506,7 +526,7 @@ def _daily_dances_from_rows(
                 requester_user_id=_optional_text(row.get("requester_user_id")),
             )
         )
-    dances.sort(key=lambda dance: (dance.played_at_local.replace(tzinfo=None), dance.event_id))
+    dances.sort(key=lambda dance: (dance.played_at_local.astimezone(UTC), dance.event_id))
     return dances
 
 
@@ -544,17 +564,6 @@ def _has_external_id_prefix(value: str, external_id: str) -> bool:
     if not external_id:
         return False
     return bool(re.match(rf"^{re.escape(external_id)}(?:\.|\s)", value))
-
-
-def _parse_vrc_local_timestamp(value: str) -> datetime | None:
-    for fmt in ("%Y.%m.%d %H:%M:%S.%f", "%Y.%m.%d %H:%M:%S"):
-        try:
-            return datetime.strptime(value, fmt)
-        except ValueError:
-            pass
-    return None
-
-
 def _current_live_event(conn: sqlite3.Connection) -> dict | None:
     if not _table_exists(conn, "live_playback_events"):
         return None

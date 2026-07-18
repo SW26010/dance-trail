@@ -5,6 +5,7 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import closing
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,6 +16,7 @@ from dancing_log.models import (
     generate_daily_playlist,
 )
 from dancing_log.favorite_importer import FavoriteImportError, import_favorites_file
+from dancing_log.local_dance_day import LocalDanceDayBoundary
 from dancing_log.queued_self_importer import sync_queued_self_manifests
 from dancing_log.playback_projection import (
     EFFECTIVE_PLAYBACK_ACCEPTED,
@@ -959,6 +961,28 @@ class SQLiteRuntimeTest(unittest.TestCase):
             self.assertEqual(playlist[0]["system_key"], WANNA_SYSTEM_KEY)
             self.assertNotIn("popularity", playlist[0])
 
+    def test_recommendation_seed_uses_current_local_dance_day(self):
+        fixed_now = datetime(2026, 6, 17, 18, 30, tzinfo=timezone.utc)
+
+        class BoundaryAtFixedInstant(LocalDanceDayBoundary):
+            def current_date(self, *, now=None):
+                return super().current_date(now=fixed_now)
+
+        boundary = BoundaryAtFixedInstant.from_config(
+            {"dance_day_boundary_time": "03:00"},
+            time_zone=timezone(timedelta(hours=8)),
+        )
+
+        with patch("dancing_log.models._playlist_seed", return_value=0) as seed:
+            playlist = generate_daily_playlist(
+                [],
+                [],
+                dance_day_boundary=boundary,
+            )
+
+        self.assertEqual(playlist, [])
+        seed.assert_called_once_with(date(2026, 6, 17))
+
     def test_import_favorites_replaces_system_favorites_by_default(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1483,6 +1507,10 @@ class SQLiteRuntimeTest(unittest.TestCase):
                 app_db_path=app_path,
                 manifest_dir=manifest_dir,
                 system_key=WANNA_SYSTEM_KEY,
+                dance_day_boundary=LocalDanceDayBoundary.from_config(
+                    {},
+                    time_zone=timezone(timedelta(hours=8)),
+                ),
             )
             reimport_stats = import_vrcx_database(vrcx_path, app_db_path=app_path)
 
@@ -1536,6 +1564,10 @@ class SQLiteRuntimeTest(unittest.TestCase):
                 app_db_path=db_path,
                 manifest_dir=manifest_dir,
                 system_key=WANNA_SYSTEM_KEY,
+                dance_day_boundary=LocalDanceDayBoundary.from_config(
+                    {},
+                    time_zone=timezone(timedelta(hours=8)),
+                ),
             )
 
             self.assertEqual(stats.entries_with_track_ref, 2)
@@ -1547,7 +1579,7 @@ class SQLiteRuntimeTest(unittest.TestCase):
                 source = conn.execute("SELECT request_type FROM playback_records").fetchone()[0]
             self.assertEqual(source, "other")
 
-    def test_queued_self_matches_iso_playback_by_configured_local_date(self):
+    def test_queued_self_matches_aware_playback_by_local_date(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             db_path = root / "app.sqlite3"
@@ -1557,7 +1589,7 @@ class SQLiteRuntimeTest(unittest.TestCase):
                 system_key=WANNA_SYSTEM_KEY,
                 external_id="5038",
                 source="other",
-                played_at="2026.05.18 00:22:59",
+                played_at="2026-05-18T00:22:59+08:00",
                 event_source="manual",
                 path=db_path,
             )
@@ -1570,6 +1602,10 @@ class SQLiteRuntimeTest(unittest.TestCase):
                 app_db_path=db_path,
                 manifest_dir=manifest_dir,
                 system_key=WANNA_SYSTEM_KEY,
+                dance_day_boundary=LocalDanceDayBoundary.from_config(
+                    {},
+                    time_zone=timezone(timedelta(hours=8)),
+                ),
             )
 
             with connect_db(db_path) as conn:
@@ -1594,7 +1630,71 @@ class SQLiteRuntimeTest(unittest.TestCase):
             origins_by_source = {origin["origin_source"]: origin for origin in origins}
             manual_json = json.loads(origins_by_source["manual_log"]["origin_json"])
             self.assertEqual(set(origins_by_source), {"manual_log"})
-            self.assertEqual(manual_json["original_played_at"], "2026.05.18 00:22:59")
+            self.assertEqual(
+                manual_json["original_played_at"],
+                "2026-05-18T00:22:59+08:00",
+            )
+
+    def test_queued_self_uses_dance_day_boundary_and_effective_acceptance(self):
+        boundary = LocalDanceDayBoundary.from_config(
+            {"dance_day_boundary_time": "03:00"},
+            time_zone=timezone(timedelta(hours=8)),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "app.sqlite3"
+            manifest_dir = root / "queued_self"
+            manifest_dir.mkdir()
+            add_dance_event(
+                system_key=WANNA_SYSTEM_KEY,
+                external_id="5038",
+                source="other",
+                played_at="2026-05-18T02:00:00+08:00",
+                event_source="manual",
+                path=db_path,
+            )
+            (manifest_dir / "playlist.md").write_text(
+                "# 2026-05-17\n5038 Good Time\n",
+                encoding="utf-8",
+            )
+
+            natural_day_stats = sync_queued_self_manifests(
+                app_db_path=db_path,
+                manifest_dir=manifest_dir,
+                system_key=WANNA_SYSTEM_KEY,
+                dance_day_boundary=LocalDanceDayBoundary.from_config(
+                    {"dance_day_boundary_time": "00:00"},
+                    time_zone=timezone(timedelta(hours=8)),
+                ),
+            )
+            accepted_stats = sync_queued_self_manifests(
+                app_db_path=db_path,
+                manifest_dir=manifest_dir,
+                system_key=WANNA_SYSTEM_KEY,
+                dance_day_boundary=boundary,
+            )
+
+            with connect_db(db_path) as conn:
+                playback_record_id = conn.execute(
+                    "SELECT id FROM playback_records"
+                ).fetchone()[0]
+                set_manual_playback_decision(
+                    conn,
+                    playback_record_id,
+                    EFFECTIVE_PLAYBACK_EXCLUDED,
+                )
+                conn.commit()
+
+            excluded_stats = sync_queued_self_manifests(
+                app_db_path=db_path,
+                manifest_dir=manifest_dir,
+                system_key=WANNA_SYSTEM_KEY,
+                dance_day_boundary=boundary,
+            )
+
+            self.assertEqual(natural_day_stats.matched_entries, 0)
+            self.assertEqual(accepted_stats.matched_entries, 1)
+            self.assertEqual(excluded_stats.matched_entries, 0)
 
     def test_archive_existing_data_keeps_config_and_manifest_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from dancing_log.time_utils import VRCHAT_LOCAL_TZ, parse_timestamp
+from dancing_log.time_utils import parse_timestamp
 
 KNOWN_OUTPUTS = (
     "raw_output_log.txt",
@@ -113,6 +113,7 @@ PLAYBACK_RECORD_COLUMNS = (
     "origin_json",
 )
 MANUAL_GT_DATE = (2026, 5, 17)
+MANUAL_GT_TIME_ZONE = timezone(timedelta(hours=8))
 MANUAL_MATCH_TOLERANCE_SECONDS = 90
 MANUAL_DIAGNOSTIC_TOLERANCE_SECONDS = 600
 
@@ -827,7 +828,7 @@ def _manual_window_utc(manual_gt: str | None) -> tuple[str, str]:
             17,
             int(row["time"][:2]),
             int(row["time"][3:]),
-            tzinfo=VRCHAT_LOCAL_TZ,
+            tzinfo=MANUAL_GT_TIME_ZONE,
         )
         for row in rows
     ]
@@ -960,7 +961,7 @@ def _display_number(value) -> str:
 def _manual_local_datetime(row: dict) -> datetime | None:
     try:
         hour, minute = row["time"].split(":", 1)
-        return datetime(*MANUAL_GT_DATE, int(hour), int(minute), tzinfo=VRCHAT_LOCAL_TZ)
+        return datetime(*MANUAL_GT_DATE, int(hour), int(minute), tzinfo=MANUAL_GT_TIME_ZONE)
     except (KeyError, TypeError, ValueError):
         return None
 
@@ -969,7 +970,9 @@ def _parse_vrc_local_datetime(value: str | None) -> datetime | None:
     if not value:
         return None
     try:
-        return parse_timestamp(value).astimezone(VRCHAT_LOCAL_TZ)
+        return parse_timestamp(value, local_tz=MANUAL_GT_TIME_ZONE).astimezone(
+            MANUAL_GT_TIME_ZONE
+        )
     except ValueError:
         return None
 

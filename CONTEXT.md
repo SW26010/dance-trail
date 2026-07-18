@@ -41,7 +41,7 @@ A Dance Plan item the user removed from the active plan while the system keeps e
 _Avoid_: active planned item, skipped item, physical database deletion
 
 **Local Dance Day Boundary**:
-The user-configured time-of-day that separates one local dance day from the next for daily history, Dance Plan views, intended dates, and fulfillment matching. The default boundary is 00:00 local time, but the user may move it later, such as 01:00 or 03:00, so late-night dances still belong to the previous dance day.
+The user-configured time-of-day that separates one local dance day from the next for daily history, Dance Plan views, intended dates, and fulfillment matching. The default boundary is 00:00 in the operating system's local time zone, but the user may move it later, such as 01:00 or 03:00, so late-night dances still belong to the previous dance day. A missing spring-DST boundary advances to the first valid wall-clock minute; a repeated autumn-DST boundary starts on its first occurrence, and membership is compared as UTC instants so the day never moves backward during a fold.
 _Avoid_: timezone, playback timestamp, plan identity
 
 **Catalog**:

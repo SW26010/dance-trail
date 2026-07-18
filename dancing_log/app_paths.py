@@ -9,6 +9,12 @@ import os
 import sys
 from typing import Any
 
+from dancing_log.local_dance_day import (
+    DANCE_DAY_BOUNDARY_CONFIG_KEY,
+    DEFAULT_DANCE_DAY_BOUNDARY_TIME,
+    LocalDanceDayBoundary,
+)
+
 
 CONFIG_FILENAME = "dancing-log.local.json"
 EXAMPLE_CONFIG_FILENAME = "dancing-log.example.json"
@@ -94,8 +100,8 @@ class ConfigField:
     summary: str
     picker: str | None = None
     placeholder: str | None = None
-    minimum: int | None = None
-    maximum: int | None = None
+    minimum: int | str | None = None
+    maximum: int | str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         field = {
@@ -236,6 +242,17 @@ _CONFIG_FIELD_SPECS: tuple[ConfigField, ...] = (
         picker="directory",
         required=False,
         summary="Recording files used by sample-frame tools.",
+    ),
+    ConfigField(
+        key=DANCE_DAY_BOUNDARY_CONFIG_KEY,
+        default=DEFAULT_DANCE_DAY_BOUNDARY_TIME,
+        label="Dance day boundary",
+        group="Runtime defaults",
+        field_type="time",
+        required=True,
+        minimum="00:00",
+        maximum="06:00",
+        summary="Local wall-clock time when a new dance day begins.",
     ),
     ConfigField(
         key="auto_start_watcher",
@@ -422,6 +439,10 @@ class AppRuntimeConfig:
     def auto_start_overlay(self) -> bool:
         return bool(self.config.get("auto_start_overlay"))
 
+    @property
+    def dance_day_boundary(self) -> LocalDanceDayBoundary:
+        return LocalDanceDayBoundary.from_config(self.config)
+
     def get(self, key: str, default: Any = None) -> Any:
         return self.config.get(key, default)
 
@@ -591,6 +612,8 @@ def validate_supported_config(raw: dict[str, Any]) -> tuple[dict[str, Any], dict
                 config[key] = bool(default)
         elif field_type == "integer":
             config[key] = _validate_integer_field(field, value, errors)
+        elif field_type == "time":
+            config[key] = _validate_time_field(field, value, errors)
         else:
             config[key] = value
     if config.get("auto_start_overlay"):
@@ -639,6 +662,15 @@ def _validate_integer_field(field: dict[str, Any], value: Any, errors: dict[str,
         errors[key] = f"value must be between {minimum} and {maximum}"
         return default
     return value
+
+
+def _validate_time_field(field: dict[str, Any], value: Any, errors: dict[str, str]) -> str:
+    key = field["key"]
+    try:
+        return LocalDanceDayBoundary.from_config({key: value}).config_value
+    except (TypeError, ValueError):
+        errors[key] = f"time must be between {field['min']} and {field['max']}"
+        return str(DEFAULT_CONFIG[key])
 
 
 def _read_config(path: Path) -> dict[str, Any]:

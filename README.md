@@ -395,11 +395,17 @@ Supported keys:
   "vrc_log_dir": null,
   "wanna_cache_dir": null,
   "recordings_dir": null,
+  "dance_day_boundary_time": "00:00",
   "auto_start_watcher": false,
   "auto_start_overlay": false,
   "overlay_port": 8765
 }
 ```
+
+`dance_day_boundary_time` is the local wall-clock start of a dance day. It uses
+the operating system's local time zone, accepts `00:00` through `06:00`, and is
+shared by Timeline, day reports, queued-self matching, and daily recommendation
+seeding.
 
 `overlay_port` is an advanced compatibility setting for a standalone watcher
 overlay without the Web UI. Desktop/Web UI mode uses the Web UI port.

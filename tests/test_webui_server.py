@@ -11,7 +11,7 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from dancing_log.app_paths import DEFAULT_CONFIG
+from dancing_log.app_paths import DEFAULT_CONFIG, save_app_config
 from dancing_log.data_operations import DataOperationResult, operation_catalog_snapshot
 from dancing_log.live_app_session import LiveAppSessionRuntime
 from dancing_log.playback_projection import (
@@ -610,6 +610,11 @@ class WebUiServerTest(unittest.TestCase):
                     snapshot = json.loads(response.read().decode("utf-8"))
                 self.assertEqual(snapshot["config"]["app_db"], "data/dancing_log.sqlite3")
                 self.assertIn("overlay_port", snapshot["config"])
+                self.assertEqual(
+                    snapshot["config"]["dance_day_boundary_time"],
+                    "00:00",
+                )
+                self.assertIn('input type="time"', html)
             finally:
                 server.stop()
 
@@ -1449,6 +1454,71 @@ class WebUiServerTest(unittest.TestCase):
                 [record["display"] for record in timeline["records"]],
                 ["202. Latest Song - Latest Artist"],
             )
+
+    def test_timeline_uses_configured_local_dance_day_boundary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            save_app_config(
+                {"dance_day_boundary_time": "00:00"},
+                app_root=root,
+            )
+            db_path = root / "data" / "dancing_log.sqlite3"
+            with connect_db(db_path) as conn:
+                late_night_track = ensure_dance_track(
+                    conn,
+                    WANNA_SYSTEM_KEY,
+                    "203",
+                    {"title": "Late Night Song"},
+                )
+                insert_playback_record(
+                    conn,
+                    track_id=late_night_track,
+                    played_at="2026-06-23T02:30:00",
+                    source_type="self",
+                )
+                conn.commit()
+
+            runtime = WebUiRuntime.from_root(root)
+            natural_day_before_change = load_timeline_snapshot(
+                runtime,
+                {"date": ["2026-06-23"]},
+            )
+            with connect_db(db_path) as conn:
+                stored_timestamp_before_change = conn.execute(
+                    "SELECT played_at FROM playback_records"
+                ).fetchone()[0]
+            save_app_config(
+                {"dance_day_boundary_time": "03:00"},
+                app_root=root,
+            )
+            previous_day = load_timeline_snapshot(
+                runtime,
+                {"date": ["2026-06-22"]},
+            )
+            natural_day = load_timeline_snapshot(
+                runtime,
+                {"date": ["2026-06-23"]},
+            )
+            latest = load_timeline_snapshot(runtime, {})
+            with connect_db(db_path) as conn:
+                stored_timestamp = conn.execute(
+                    "SELECT played_at FROM playback_records"
+                ).fetchone()[0]
+
+            self.assertEqual(
+                [
+                    record["display"]
+                    for record in natural_day_before_change["records"]
+                ],
+                ["203. Late Night Song"],
+            )
+            self.assertEqual(
+                [record["display"] for record in previous_day["records"]],
+                ["203. Late Night Song"],
+            )
+            self.assertEqual(natural_day["records"], [])
+            self.assertEqual(latest["date"], "2026-06-22")
+            self.assertEqual(stored_timestamp, stored_timestamp_before_change)
 
     def test_webui_read_snapshots_use_playback_records_not_legacy_tables(self):
         with tempfile.TemporaryDirectory() as tmp:

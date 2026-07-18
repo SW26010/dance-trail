@@ -11,6 +11,7 @@
   "vrc_log_dir": null,
   "wanna_cache_dir": null,
   "recordings_dir": null,
+  "dance_day_boundary_time": "00:00",
   "auto_start_watcher": false,
   "auto_start_overlay": false,
   "overlay_port": 8765

@@ -103,7 +103,12 @@ def cmd_recommend():
         sys.exit(1)
 
     dance_log = load_dance_log(db_path)
-    playlist = generate_daily_playlist(tracks, dance_log, count=args.count)
+    playlist = generate_daily_playlist(
+        tracks,
+        dance_log,
+        count=args.count,
+        dance_day_boundary=config.dance_day_boundary,
+    )
 
     print(f"Daily playlist (Top {args.count}):\n")
     for i, track in enumerate(playlist, 1):
@@ -151,7 +156,11 @@ def cmd_day():
     )
 
     loader = load_daily_live_dances if args.live else load_daily_dances
-    for dance in loader(target_date, db_path):
+    for dance in loader(
+        target_date,
+        db_path,
+        dance_day_boundary=config.dance_day_boundary,
+    ):
         print(format_daily_dance_line(dance))
 
 
@@ -213,6 +222,7 @@ def cmd_log():
         timestamp=args.time,
         auto_detect=auto_detect,
         db_path=db_path,
+        dance_day_boundary=config.dance_day_boundary,
     )
     print(
         f"Added dance record ({args.system}:{args.external_id}, "

@@ -91,6 +91,26 @@ class AppPathTests(unittest.TestCase):
     def test_config_fields_describe_default_config_keys(self):
         self.assertEqual([field["key"] for field in CONFIG_FIELDS], list(DEFAULT_CONFIG))
 
+    def test_dance_day_boundary_config_defaults_and_validates(self):
+        runtime = AppRuntimeConfig.from_config({})
+
+        self.assertEqual(DEFAULT_CONFIG["dance_day_boundary_time"], "00:00")
+        self.assertEqual(runtime.dance_day_boundary.config_value, "00:00")
+
+        config, errors = validate_supported_config(
+            {"dance_day_boundary_time": "03:30"}
+        )
+        self.assertEqual(errors, {})
+        self.assertEqual(config["dance_day_boundary_time"], "03:30")
+
+        _, errors = validate_supported_config(
+            {"dance_day_boundary_time": "06:01"}
+        )
+        self.assertEqual(
+            errors["dance_day_boundary_time"],
+            "time must be between 00:00 and 06:00",
+        )
+
     def test_validate_supported_config_preserves_overlay_watcher_dependency(self):
         config, errors = validate_supported_config(
             {

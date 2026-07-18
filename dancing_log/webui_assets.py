@@ -796,6 +796,7 @@ const FIELD_TEXT = {
   vrc_log_dir: { zh: { label: "VRChat 日志目录", group: "外部数据源", summary: "包含 VRChat output_log 文件的目录。" } },
   wanna_cache_dir: { zh: { label: "WannaDance 缓存", group: "外部数据源", summary: "用于离线目录同步的本地 WannaDance 缓存。" } },
   recordings_dir: { zh: { label: "录像目录", group: "外部数据源", summary: "sample-frame 工具使用的录像文件。" } },
+  dance_day_boundary_time: { zh: { label: "跳舞日分界", group: "运行默认值", summary: "本地时间到达该时刻时开始新的跳舞日。" } },
   auto_start_watcher: { zh: { label: "自动启动 watcher", group: "运行默认值", summary: "应用工作流启动实时捕获时使用的默认偏好。" } },
   auto_start_overlay: { zh: { label: "自动启动 overlay", group: "运行默认值", summary: "启用后会同步启用 watcher 自动启动。" } },
   overlay_port: { zh: { label: "独立 Overlay 端口", group: "高级设置", summary: "仅在 watcher 不通过 Web UI 提供 overlay 时使用的本机端口。" } }
@@ -1191,6 +1192,11 @@ function renderFieldControl(field, value) {
   if (field.type === "integer") {
     return `
       <input type="number" data-key="${esc(field.key)}" min="${esc(field.min)}" max="${esc(field.max)}" value="${esc(value)}">
+    `;
+  }
+  if (field.type === "time") {
+    return `
+      <input type="time" data-key="${esc(field.key)}" min="${esc(field.min)}" max="${esc(field.max)}" step="60" value="${esc(value)}">
     `;
   }
   if (field.type === "path") {

@@ -273,11 +273,14 @@ Web UI 只绑定到 `127.0.0.1`，默认打开 `http://127.0.0.1:8787/home`。Ho
   "vrc_log_dir": null,
   "wanna_cache_dir": null,
   "recordings_dir": null,
+  "dance_day_boundary_time": "00:00",
   "auto_start_watcher": false,
   "auto_start_overlay": false,
   "overlay_port": 8765
 }
 ```
+
+`dance_day_boundary_time` 是一个跳舞日开始的本地墙钟时刻，使用操作系统的真实本地时区，可设置为 `00:00` 至 `06:00`。Timeline、day report、queued-self 匹配和每日推荐种子共同使用这一分界。
 
 `overlay_port` 是不启动 Web UI 时供独立 watcher overlay 使用的高级兼容配置；桌面/Web UI 模式使用 Web UI 端口。
 

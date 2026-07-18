@@ -40,7 +40,6 @@ def promote_request_type(
     played_local_date: str,
     request_type: str,
     origin: PlaybackRecordOriginWrite | None = None,
-    local_date_modifier: str = "+8 hours",
     batch_id: str = RUNTIME_BATCH_ID,
 ) -> int:
     """Deferred request-type mutation hook.

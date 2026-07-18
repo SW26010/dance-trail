@@ -9,6 +9,7 @@ from dancing_log.daily_report import (
     load_daily_live_dances,
     parse_played_at_local,
 )
+from dancing_log.local_dance_day import LocalDanceDayBoundary
 from dancing_log.playback_projection import (
     EFFECTIVE_PLAYBACK_ACCEPTED,
     EFFECTIVE_PLAYBACK_EXCLUDED,
@@ -136,12 +137,68 @@ class DailyReportTest(unittest.TestCase):
                 ],
             )
 
+    def test_daily_report_uses_configured_dance_day_boundary(self):
+        boundary = LocalDanceDayBoundary.from_config(
+            {"dance_day_boundary_time": "03:00"},
+            time_zone=timezone(timedelta(hours=8)),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "app.sqlite3"
+            with connect_db(db_path) as conn:
+                before_boundary = ensure_dance_track(
+                    conn,
+                    WANNA_SYSTEM_KEY,
+                    "100",
+                    {"title": "Before Boundary"},
+                )
+                at_boundary = ensure_dance_track(
+                    conn,
+                    WANNA_SYSTEM_KEY,
+                    "200",
+                    {"title": "At Boundary"},
+                )
+                insert_playback_record(
+                    conn,
+                    track_id=before_boundary,
+                    played_at="2026-06-08T02:59:59+08:00",
+                )
+                insert_playback_record(
+                    conn,
+                    track_id=at_boundary,
+                    played_at="2026-06-08T03:00:00+08:00",
+                )
+                conn.commit()
+
+            dances = load_daily_dances(
+                date(2026, 6, 7),
+                db_path,
+                dance_day_boundary=boundary,
+            )
+            natural_day_dances = load_daily_dances(
+                date(2026, 6, 8),
+                db_path,
+                dance_day_boundary=LocalDanceDayBoundary.from_config(
+                    {"dance_day_boundary_time": "00:00"},
+                    time_zone=timezone(timedelta(hours=8)),
+                ),
+            )
+
+            self.assertEqual(
+                [format_daily_dance_line(dance) for dance in dances],
+                ["02:59:59 100. Before Boundary"],
+            )
+            self.assertEqual(
+                [dance.display_name for dance in natural_day_dances],
+                ["100. Before Boundary", "200. At Boundary"],
+            )
+
     def test_timezone_aware_timestamps_are_converted_to_local_time(self):
         local_tz = timezone(timedelta(hours=8))
+        boundary = LocalDanceDayBoundary.from_config({}, time_zone=local_tz)
 
         parsed = parse_played_at_local(
             "2026-06-07T10:04:57.000Z",
-            local_tz=local_tz,
+            dance_day_boundary=boundary,
         )
 
         self.assertEqual(parsed.date(), date(2026, 6, 7))
@@ -149,6 +206,7 @@ class DailyReportTest(unittest.TestCase):
 
     def test_daily_report_sorts_mixed_local_and_timezone_aware_timestamps(self):
         local_tz = timezone(timedelta(hours=8))
+        boundary = LocalDanceDayBoundary.from_config({}, time_zone=local_tz)
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "app.sqlite3"
             with connect_db(db_path) as conn:
@@ -176,7 +234,11 @@ class DailyReportTest(unittest.TestCase):
                 )
                 conn.commit()
 
-            dances = load_daily_dances(date(2026, 6, 7), db_path, local_tz=local_tz)
+            dances = load_daily_dances(
+                date(2026, 6, 7),
+                db_path,
+                dance_day_boundary=boundary,
+            )
 
             self.assertEqual(
                 [format_daily_dance_line(dance) for dance in dances],
