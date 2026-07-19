@@ -176,22 +176,40 @@ class WebUiServer:
         self._server = server
         self._mounted_overlay = overlay
 
-    def stop(self) -> None:
+    def stop(self, *, deadline: float | None = None) -> None:
         cleanup_errors: list[Exception] = []
         if self._server is not None:
             server = self._server
-            _attempt_webui_cleanup(cleanup_errors, server.stop_http)
+            if deadline is None:
+                _attempt_webui_cleanup(cleanup_errors, server.stop_http)
+            else:
+                _attempt_webui_cleanup(
+                    cleanup_errors,
+                    lambda: server.stop_http(deadline=deadline),
+                )
             self._server = None
         if getattr(self, "_mounted_overlay", None) is not None:
             overlay = self._mounted_overlay
             try:
-                self.runtime.session.unmount_overlay(overlay)
+                if deadline is None:
+                    self.runtime.session.unmount_overlay(overlay)
+                else:
+                    self.runtime.session.unmount_overlay(
+                        overlay,
+                        deadline=deadline,
+                    )
             except Exception as exc:
                 cleanup_errors.append(exc)
             finally:
                 self._mounted_overlay = None
         if self._owns_session:
-            _attempt_webui_cleanup(cleanup_errors, self.runtime.session.close)
+            if deadline is None:
+                _attempt_webui_cleanup(cleanup_errors, self.runtime.session.close)
+            else:
+                _attempt_webui_cleanup(
+                    cleanup_errors,
+                    lambda: self.runtime.session.close(deadline=deadline),
+                )
         if len(cleanup_errors) == 1:
             raise cleanup_errors[0]
         if cleanup_errors:

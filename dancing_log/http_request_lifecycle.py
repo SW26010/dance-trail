@@ -40,6 +40,20 @@ class ManagedLocalHTTPServer(ThreadingHTTPServer):
     """Own listener, handler, operation, thread, and shutdown lifecycles."""
 
     daemon_threads = True
+    serve_poll_interval_seconds = 0.05
+
+    def server_bind(self) -> None:
+        if sys.platform == "win32" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            # HTTPServer enables SO_REUSEADDR. On Windows that can let two local
+            # processes share one port, so desktop services need the exclusive
+            # socket option instead.
+            self.allow_reuse_address = False
+            self.socket.setsockopt(
+                socket.SOL_SOCKET,
+                socket.SO_EXCLUSIVEADDRUSE,
+                1,
+            )
+        super().server_bind()
 
     def __init__(
         self,
@@ -73,7 +87,9 @@ class ManagedLocalHTTPServer(ThreadingHTTPServer):
     def start_http(self, *, thread_name: str) -> None:
         """Start serving transactionally; a failed thread start releases the listener."""
         thread = threading.Thread(
-            target=self.serve_forever,
+            target=lambda: self.serve_forever(
+                poll_interval=self.serve_poll_interval_seconds
+            ),
             name=thread_name,
             daemon=True,
         )
@@ -94,7 +110,7 @@ class ManagedLocalHTTPServer(ThreadingHTTPServer):
             raise
         self._serve_thread = thread
 
-    def stop_http(self) -> None:
+    def stop_http(self, *, deadline: float | None = None) -> None:
         """Reject new work, apply shutdown policy, and drain every owned lifecycle."""
         with self._stop_lock:
             if self._stopped:
@@ -113,12 +129,29 @@ class ManagedLocalHTTPServer(ThreadingHTTPServer):
                 _attempt_cleanup(errors, participant.lifecycle.stop)
             if self._serve_thread is not None:
                 _attempt_cleanup(errors, self.shutdown)
-            _attempt_cleanup(errors, self._requests.wait_until_drained)
+            try:
+                requests_drained = self._requests.wait_until_drained(
+                    timeout=_remaining_deadline_seconds(deadline)
+                )
+            except Exception as exc:
+                errors.append(exc)
+            else:
+                if not requests_drained:
+                    errors.append(
+                        TimeoutError(
+                            "accepted HTTP operations did not drain before the "
+                            "shutdown deadline"
+                        )
+                    )
             _attempt_cleanup(errors, self.server_close)
             for participant in self._shutdown_participants:
+                participant_timeout = participant.timeout_seconds
+                remaining = _remaining_deadline_seconds(deadline)
+                if remaining is not None:
+                    participant_timeout = min(participant_timeout, remaining)
                 try:
                     drained = participant.lifecycle.wait_until_drained(
-                        participant.timeout_seconds
+                        participant_timeout
                     )
                 except Exception as exc:
                     errors.append(exc)
@@ -127,12 +160,16 @@ class ManagedLocalHTTPServer(ThreadingHTTPServer):
                         errors.append(
                             TimeoutError(
                                 f"{participant.label} did not drain within "
-                                f"{participant.timeout_seconds:g} seconds"
+                                f"{participant_timeout:g} seconds"
                             )
                         )
             if self._serve_thread is not None:
                 thread = self._serve_thread
-                _attempt_cleanup(errors, lambda: thread.join(timeout=2.0))
+                join_timeout = 2.0
+                remaining = _remaining_deadline_seconds(deadline)
+                if remaining is not None:
+                    join_timeout = min(join_timeout, remaining)
+                _attempt_cleanup(errors, lambda: thread.join(timeout=join_timeout))
                 if thread.is_alive():
                     errors.append(TimeoutError("HTTP serve thread did not stop"))
                 self._serve_thread = None
@@ -335,10 +372,18 @@ class _OrdinaryHttpRequests:
             if not self._active:
                 self._condition.notify_all()
 
-    def wait_until_drained(self) -> None:
+    def wait_until_drained(self, *, timeout: float | None = None) -> bool:
         with self._condition:
+            deadline = None if timeout is None else time.monotonic() + timeout
             while self._active:
-                self._condition.wait()
+                if deadline is None:
+                    self._condition.wait()
+                    continue
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._condition.wait(timeout=remaining)
+            return True
 
     @property
     def active_count(self) -> int:
@@ -366,6 +411,12 @@ class _InterruptibleSocketReader(io.RawIOBase):
                     raise
             except OSError:
                 return 0
+
+
+def _remaining_deadline_seconds(deadline: float | None) -> float | None:
+    if deadline is None:
+        return None
+    return max(deadline - time.monotonic(), 0.0)
 
 
 def _close_http_connection(connection: object) -> None:

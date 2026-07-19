@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import ctypes
 from ctypes import wintypes
+import time
 import webbrowser
 
 from dancing_log.tray_app import (
@@ -26,6 +28,8 @@ LPVOID = getattr(wintypes, "LPVOID", ctypes.c_void_p)
 LRESULT = getattr(wintypes, "LRESULT", wintypes.LPARAM)
 
 WM_DESTROY = 0x0002
+WM_QUERYENDSESSION = 0x0011
+WM_ENDSESSION = 0x0016
 WM_COMMAND = 0x0111
 WM_USER = 0x0400
 WM_TRAYICON = WM_USER + 1
@@ -48,6 +52,7 @@ MB_ICONERROR = 0x00000010
 IDI_APPLICATION = 32512
 SW_HIDE = 0
 DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
+END_SESSION_SHUTDOWN_TIMEOUT_SECONDS = 4.0
 
 
 class POINT(ctypes.Structure):
@@ -185,6 +190,11 @@ def _enable_dpi_awareness() -> bool:
     return bool(set_context(ctypes.c_void_p(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)))
 
 
+def show_error_message(message: str) -> None:
+    """Show a visible startup error for the windowed executable."""
+    user32.MessageBoxW(None, message, "DancingLog", MB_OK | MB_ICONERROR)
+
+
 def _int_resource(resource_id: int):
     return ctypes.cast(ctypes.c_void_p(resource_id), wintypes.LPCWSTR)
 
@@ -192,9 +202,16 @@ def _int_resource(resource_id: int):
 class WindowsTrayApp:
     """Own the hidden tray window and message loop for one Web UI server."""
 
-    def __init__(self, server: WebUiServer, runtime: TrayRuntime) -> None:
+    def __init__(
+        self,
+        server: WebUiServer,
+        runtime: TrayRuntime,
+        *,
+        shutdown: Callable[..., None],
+    ) -> None:
         self.server = server
         self.runtime = runtime
+        self._shutdown = shutdown
         self._class_name = f"DancingLogTrayWindow{id(self)}"
         self._wndproc = WNDPROC(self._window_proc)
         self._hinstance = kernel32.GetModuleHandleW(None)
@@ -273,11 +290,26 @@ class WindowsTrayApp:
     def _window_proc(self, hwnd, message, wparam, lparam):
         try:
             return self._dispatch_window_message(hwnd, message, wparam, lparam)
-        except Exception as error:
-            self._show_callback_error(error)
+        except BaseException as error:
+            if message != WM_ENDSESSION:
+                self._show_callback_error(error)
             return 0
 
     def _dispatch_window_message(self, hwnd, message, wparam, lparam):
+        if message == WM_QUERYENDSESSION:
+            return 1
+        if message == WM_ENDSESSION:
+            if bool(wparam):
+                try:
+                    self._shutdown(
+                        deadline=(
+                            time.monotonic() + END_SESSION_SHUTDOWN_TIMEOUT_SECONDS
+                        )
+                    )
+                finally:
+                    self._remove_tray_icon()
+                    user32.PostQuitMessage(0)
+            return 0
         if message == WM_TRAYICON:
             if int(lparam) == WM_LBUTTONDBLCLK:
                 self._open_webui()
@@ -301,7 +333,7 @@ class WindowsTrayApp:
             return 0
         return user32.DefWindowProcW(hwnd, message, wparam, lparam)
 
-    def _show_callback_error(self, error: Exception) -> None:
+    def _show_callback_error(self, error: BaseException) -> None:
         """Keep Python exceptions inside WNDPROC and provide visible feedback."""
         message = f"{type(error).__name__}: {error}"
         try:

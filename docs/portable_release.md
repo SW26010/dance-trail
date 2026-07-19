@@ -23,8 +23,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1
 
 The script builds the Fluent React Web UI, runs the unit tests, and uses the
 locked `release` dependency group from `uv.lock` and the pnpm lockfile to build
-PyInstaller onedir desktop and console apps. It then runs an exe smoke test and
-writes:
+PyInstaller onedir desktop and console apps. It then runs CLI smoke coverage and
+a frozen-GUI single-instance acceptance test. The GUI test verifies one 8787
+listener, exact `/home` browser activation by a quickly exiting second process,
+mutex reacquisition after the first process exits, and takeover by a waiting
+process when a synthetic startup owner releases the mutex before becoming
+ready. The build writes:
 
 ```text
 dist/releases/DancingLog-v<version>-win-x64-portable.zip
@@ -82,7 +86,12 @@ included in the release zip.
 Double-clicking `DancingLog.exe` starts the desktop tray entry and activates the
 Local Web UI on `http://127.0.0.1:8787/` without opening a console window. Use
 the tray menu to open the Web UI again, start or stop the live watcher and OBS
-overlay, or quit the background app session.
+overlay, or quit the background app session. The tray entry is single-instance
+within the current Windows session: double-clicking the executable again opens
+the existing Web UI in the default browser and exits without starting another
+app session or HTTP listener. If the previous owner exits during startup, the
+waiting process recontends the mutex and becomes the replacement owner instead
+of leaving the session with no desktop instance.
 
 `start-watch-vrc-log.bat` starts the common OBS overlay workflow:
 

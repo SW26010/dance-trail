@@ -559,6 +559,53 @@ class LiveAppSessionRuntimeTest(unittest.TestCase):
         self.assertTrue(cleanup_finished.is_set())
         self.assertFalse(runtime.watcher_running)
 
+    def test_terminal_close_bounds_stuck_watcher_join_by_deadline(self):
+        watcher_started = threading.Event()
+        release_watcher = threading.Event()
+
+        def stuck_watch_vrc_logs(**kwargs):
+            watcher_started.set()
+            kwargs["stop_event"].wait(timeout=2.0)
+            release_watcher.wait(timeout=2.0)
+            return {"closed": True}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = LiveAppSessionRuntime(
+                app_root=tmp,
+                watch_vrc_logs_func=stuck_watch_vrc_logs,
+            )
+            runtime.start_watcher()
+            self.assertTrue(watcher_started.wait(timeout=1.0))
+
+            started = time.monotonic()
+            try:
+                with self.assertRaisesRegex(TimeoutError, "shutdown deadline"):
+                    runtime.close(deadline=started + 0.05)
+                elapsed = time.monotonic() - started
+            finally:
+                release_watcher.set()
+            settle_deadline = time.monotonic() + 1.0
+            while runtime.watcher_running and time.monotonic() < settle_deadline:
+                time.sleep(0.01)
+
+        self.assertLess(elapsed, 0.3)
+        self.assertFalse(runtime.watcher_running)
+
+    def test_terminal_close_bounds_wait_for_an_active_lifecycle_transition(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = LiveAppSessionRuntime(app_root=tmp)
+            runtime._transition_lock.acquire()
+            try:
+                started = time.monotonic()
+                with self.assertRaisesRegex(TimeoutError, "shutdown deadline"):
+                    runtime.close(deadline=started + 0.05)
+                elapsed = time.monotonic() - started
+            finally:
+                runtime._transition_lock.release()
+                runtime.close()
+
+        self.assertLess(elapsed, 0.3)
+
     def test_mounted_overlay_deactivates_when_watcher_start_fails(self):
         def fake_watch_vrc_logs(**_kwargs):
             raise RuntimeError("watch failed")
