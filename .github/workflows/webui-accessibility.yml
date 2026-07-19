@@ -31,6 +31,11 @@ jobs:
       - name: Sync Python environment
         run: uv sync --locked --cache-dir .uv-cache
 
+      - name: Check Python lint and types
+        run: |
+          uv run --locked --cache-dir .uv-cache ruff check dancing_log tests scripts
+          uv run --locked --cache-dir .uv-cache ty check dancing_log
+
       - name: Run Python unit tests
         run: uv run --locked --cache-dir .uv-cache python -m unittest discover
 
@@ -70,6 +75,9 @@ jobs:
 
       - name: Run Web UI accessibility acceptance
         run: pnpm test:a11y
+
+      - name: Run Web UI development-mode acceptance
+        run: pnpm test:webui-dev
 
       - name: Upload Playwright report on failure
         if: failure()

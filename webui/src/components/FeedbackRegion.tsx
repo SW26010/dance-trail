@@ -13,9 +13,8 @@ type FeedbackRegionProps = {
 };
 
 /**
- * Keeps both ARIA live-region containers mounted before asynchronous feedback
- * arrives. Fluent MessageBar supplies the visual treatment inside the stable
- * container; only its content is inserted or cleared.
+ * Keeps a stable visual container mounted before asynchronous feedback arrives.
+ * Fluent MessageBar owns the single announcement path through useAnnounce.
  */
 export function FeedbackRegion({ message, title, intent = "info" }: FeedbackRegionProps) {
   const present = message !== null && message !== undefined;
@@ -29,14 +28,5 @@ export function FeedbackRegion({ message, title, intent = "info" }: FeedbackRegi
     </MessageBar>
   ) : null;
 
-  return (
-    <>
-      <div role="status" aria-live="polite" aria-atomic="true" data-live-region="status">
-        {!assertive ? content : null}
-      </div>
-      <div role="alert" aria-live="assertive" aria-atomic="true" data-live-region="alert">
-        {assertive ? content : null}
-      </div>
-    </>
-  );
+  return <div data-feedback-region data-feedback-intent={intent}>{content}</div>;
 }

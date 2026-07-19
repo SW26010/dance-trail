@@ -10,7 +10,7 @@ export default defineConfig({
     emptyOutDir: true,
     assetsDir: "",
     sourcemap: false,
-    rollupOptions: {
+    rolldownOptions: {
       output: {
         // Python serves an explicit asset allow-list. If Vite starts emitting
         // chunks or CSS, update WEBUI_ASSET_CONTENT_TYPES and its route tests.

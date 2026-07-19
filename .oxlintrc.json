@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error"
+  },
+  "plugins": ["eslint", "typescript", "react"],
+  "env": {
+    "browser": true,
+    "node": true
+  },
+  "ignorePatterns": [
+    "dancing_log/webui_dist/**",
+    "node_modules/**",
+    "playwright-report/**",
+    "test-results/**"
+  ],
+  "rules": {
+    "react/exhaustive-deps": "error",
+    "react/react-in-jsx-scope": "off",
+    "react/rules-of-hooks": "error"
+  }
+}

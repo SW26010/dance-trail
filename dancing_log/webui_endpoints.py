@@ -5,8 +5,9 @@ from __future__ import annotations
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 import sqlite3
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
+from dancing_log.app_data_lifetime_lock import AppDataLifetimeLockUnavailable
 from dancing_log.app_paths import AppPaths, AppRuntimeConfig
 from dancing_log.data_operations import (
     DataOperationError,
@@ -35,15 +36,32 @@ from dancing_log.webui_settings import load_config_snapshot
 from dancing_log.watcher_lifetime_lock import WatcherLifetimeLockUnavailable
 
 
+WEBUI_DATA_OPERATION_KEYS = frozenset(
+    {"import-vrcx", "sync-wanna", "sync-queued-self"}
+)
+
+
 class LiveStateSnapshot(Protocol):
     def snapshot(self) -> dict: ...
 
 
+@runtime_checkable
+class DictSnapshot(Protocol):
+    def to_dict(self) -> object: ...
+
+
 class WebUiEndpointRuntime(Protocol):
-    app_root: Path
-    session: LiveAppSessionRuntime
-    live_state: LiveStateSnapshot
-    startup_warnings: tuple[str, ...]
+    @property
+    def app_root(self) -> Path: ...
+
+    @property
+    def session(self) -> LiveAppSessionRuntime: ...
+
+    @property
+    def live_state(self) -> LiveStateSnapshot: ...
+
+    @property
+    def startup_warnings(self) -> tuple[str, ...]: ...
 
     @property
     def paths(self) -> AppPaths: ...
@@ -127,9 +145,9 @@ def live_session_status_snapshot(status: LiveAppSessionStatus) -> dict:
 def _watcher_stats_snapshot(stats: object | None) -> object | None:
     if stats is None:
         return None
-    if hasattr(stats, "to_dict"):
+    if isinstance(stats, DictSnapshot):
         return _json_safe_value(stats.to_dict())
-    if is_dataclass(stats):
+    if is_dataclass(stats) and not isinstance(stats, type):
         return _json_safe_value(asdict(stats))
     if isinstance(stats, dict):
         return _json_safe_value(stats)
@@ -173,7 +191,13 @@ def load_insights_snapshot(runtime: WebUiEndpointRuntime) -> dict:
 
 
 def load_operations_snapshot() -> dict:
-    return operation_catalog_snapshot()
+    snapshot = operation_catalog_snapshot()
+    snapshot["operations"] = [
+        operation
+        for operation in snapshot["operations"]
+        if operation["key"] in WEBUI_DATA_OPERATION_KEYS
+    ]
+    return snapshot
 
 
 def run_operation_from_payload(
@@ -181,9 +205,20 @@ def run_operation_from_payload(
     payload: dict,
 ) -> tuple[dict, int]:
     try:
+        requested_key = payload.get("operation")
+        if (
+            isinstance(requested_key, str)
+            and requested_key.strip()
+            and requested_key.strip() not in WEBUI_DATA_OPERATION_KEYS
+        ):
+            raise DataOperationError(
+                f"{requested_key.strip()} is not available in the Web UI"
+            )
         request = build_data_operation_request_from_payload(payload)
         config = AppRuntimeConfig.load(app_root=runtime.app_root, migrate_legacy=True)
         result = run_data_operation_request(request, config=config)
+    except AppDataLifetimeLockUnavailable as exc:
+        return {"error": str(exc)}, 409
     except DataOperationError as exc:
         return {"error": str(exc)}, 400
     return {"result": result.as_dict()}, 200
@@ -194,7 +229,16 @@ def update_playback_review_from_payload(
     payload: dict,
 ) -> tuple[dict, int]:
     action = str(payload.get("action") or "").strip().lower()
-    playback_record_id = payload.get("playback_record_id")
+    raw_playback_record_id = payload.get("playback_record_id")
+    if isinstance(raw_playback_record_id, bool) or not isinstance(
+        raw_playback_record_id,
+        (int, str),
+    ):
+        return {"error": "playback_record_id must be an integer"}, 400
+    try:
+        playback_record_id = int(raw_playback_record_id)
+    except (TypeError, ValueError):
+        return {"error": "playback_record_id must be an integer"}, 400
     note = str(payload.get("note") or "")
     status_by_action = {
         "accept": EFFECTIVE_PLAYBACK_ACCEPTED,

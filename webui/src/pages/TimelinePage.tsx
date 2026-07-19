@@ -14,30 +14,16 @@ import {
 } from "@fluentui/react-components";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, postJson } from "../api";
+import {
+  playbackReviewResponseSchema,
+  timelineSnapshotSchema,
+  type TimelineRecord,
+} from "../apiContracts";
 import { FeedbackRegion } from "../components/FeedbackRegion";
 import { useAppStyles } from "../styles";
 import type { PageProps } from "./types";
 import { errorMessage } from "./types";
 
-type TimelineRecord = Record<string, unknown> & {
-  id: number;
-  time?: string;
-  display?: string;
-  line?: string;
-  review_status?: string;
-  effective_playback_status?: string;
-  default_playback_status?: string;
-  manual_decision_status?: string;
-  source_type?: string;
-  requester_display_name?: string;
-  source_display_name?: string;
-  requester_user_id?: string;
-  dance_system_key?: string;
-  system_key?: string;
-  dance_system_name?: string;
-};
-
-type TimelineSnapshot = { date?: string; records?: TimelineRecord[] };
 type SortOrder = "asc" | "desc";
 
 const systemLabels: Record<string, string> = {
@@ -129,7 +115,10 @@ export function TimelinePage({ t }: PageProps) {
     setLoading(true);
     setMessage(null);
     try {
-      const snapshot = await api<TimelineSnapshot>(valid ? `/api/timeline?date=${encodeURIComponent(normalized)}` : "/api/timeline");
+      const snapshot = await api(
+        valid ? `/api/timeline?date=${encodeURIComponent(normalized)}` : "/api/timeline",
+        timelineSnapshotSchema,
+      );
       if (requestId !== loadRequest.current) return;
       const nextDate = normalizeDateInput(snapshot.date ?? normalized);
       if (localDateParts(nextDate)) {
@@ -147,7 +136,8 @@ export function TimelinePage({ t }: PageProps) {
     }
   }, [date, sort, syncUrl, t]);
 
-  useEffect(() => { void load(date); }, []); // Initial URL state is intentionally loaded once.
+  // oxlint-disable-next-line react/exhaustive-deps -- Initial URL state is intentionally loaded once.
+  useEffect(() => { void load(date); }, []);
 
   const visibleRecords = sort === "desc" ? [...records].reverse() : records;
   const accepted = records.filter((row) => (row.review_status ?? row.effective_playback_status) === "accepted");
@@ -156,7 +146,10 @@ export function TimelinePage({ t }: PageProps) {
     const normalized = normalizeDateInput(next);
     setDate(normalized);
     if (localDateParts(normalized)) void load(normalized);
-    else loadRequest.current += 1;
+    else {
+      loadRequest.current += 1;
+      setLoading(false);
+    }
   };
 
   const stepDate = (unit: "day" | "month", amount: number) => {
@@ -188,7 +181,7 @@ export function TimelinePage({ t }: PageProps) {
     setUpdatingId(row.id);
     setMessage(null);
     try {
-      await postJson("/api/playback-review", { playback_record_id: row.id, action });
+      await postJson("/api/playback-review", playbackReviewResponseSchema, { playback_record_id: row.id, action });
       await load(resolvedDate || date);
       requestAnimationFrame(() => {
         const buttons = [...document.querySelectorAll<HTMLButtonElement>(`[data-playback-id="${row.id}"]`)];

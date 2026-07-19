@@ -12,7 +12,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from dancing_log.app_paths import DEFAULT_CONFIG, save_app_config
-from dancing_log.data_operations import DataOperationResult, operation_catalog_snapshot
+from dancing_log.data_operations import DataOperationResult
 from dancing_log.live_app_session import LiveAppSessionRuntime
 from dancing_log.playback_projection import (
     EFFECTIVE_PLAYBACK_ACCEPTED,
@@ -52,6 +52,7 @@ from dancing_log.windows_picker import (
     _file_dialog_options,
     _run_windows_picker,
 )
+from dancing_log.watcher_lifetime_lock import WatcherLifetimeLockUnavailable
 from tests.playback_record_helpers import insert_playback_record
 
 
@@ -1752,10 +1753,133 @@ class WebUiServerTest(unittest.TestCase):
     def test_webui_operations_snapshot_uses_shared_catalog(self):
         snapshot = load_operations_snapshot()
 
-        self.assertEqual(snapshot, operation_catalog_snapshot())
         operations = {operation["key"]: operation for operation in snapshot["operations"]}
-        self.assertEqual(operations["rebuild-data"]["parameters"][0]["key"], "archive_existing")
+        self.assertNotIn("rebuild-data", operations)
         self.assertEqual(operations["sync-wanna"]["text"]["zh"]["risk"], "更新目录记录")
+
+    def test_webui_rejects_hidden_rebuild_operation_before_runner(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server = WebUiServer(port=0, app_root=tmp)
+            server.start()
+            try:
+                token = self._csrf_token(server)
+                with patch("dancing_log.webui_endpoints.run_data_operation_request") as runner:
+                    request = self._json_request(
+                        server,
+                        "api/operations/run",
+                        {
+                            "operation": "rebuild-data",
+                            "parameters": {"archive_existing": True},
+                        },
+                        token=token,
+                        origin=server.url.rstrip("/"),
+                    )
+                    error = self._http_error_json(request, 400)
+            finally:
+                server.stop()
+
+            self.assertIn("not available in the Web UI", error["error"])
+            runner.assert_not_called()
+
+    def test_webui_data_operation_lifetime_conflict_returns_409(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server = WebUiServer(port=0, app_root=tmp)
+            server.start()
+            try:
+                token = self._csrf_token(server)
+                with patch(
+                    "dancing_log.webui_endpoints.run_data_operation_request",
+                    side_effect=WatcherLifetimeLockUnavailable("data lifetime is active"),
+                ):
+                    request = self._json_request(
+                        server,
+                        "api/operations/run",
+                        {
+                            "operation": "sync-wanna",
+                            "parameters": {"offline": True},
+                        },
+                        token=token,
+                        origin=server.url.rstrip("/"),
+                    )
+                    error = self._http_error_json(request, 409)
+            finally:
+                server.stop()
+
+            self.assertIn("data lifetime is active", error["error"])
+
+    def test_webui_parallel_data_operation_request_returns_409(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server = WebUiServer(port=0, app_root=tmp)
+            server.start()
+            release = threading.Event()
+            started = threading.Event()
+            first_payload: list[dict] = []
+            worker_errors: list[BaseException] = []
+
+            def blocking_runner(operation, _config, _params):
+                started.set()
+                if not release.wait(2):
+                    raise TimeoutError("test operation was not released")
+                return DataOperationResult(
+                    operation_key=operation.key,
+                    title=operation.title,
+                    status="completed",
+                    summary="done",
+                    lines=("done",),
+                )
+
+            try:
+                token = self._csrf_token(server)
+
+                def run_first_request():
+                    try:
+                        request = self._json_request(
+                            server,
+                            "api/operations/run",
+                            {
+                                "operation": "sync-wanna",
+                                "parameters": {"offline": True},
+                            },
+                            token=token,
+                            origin=server.url.rstrip("/"),
+                        )
+                        with urlopen(request, timeout=3) as response:
+                            first_payload.append(
+                                json.loads(response.read().decode("utf-8"))
+                            )
+                    except BaseException as exc:
+                        worker_errors.append(exc)
+
+                with patch.dict(
+                    "dancing_log.data_operations._RUNNERS",
+                    {"sync-wanna": blocking_runner},
+                ):
+                    worker = threading.Thread(target=run_first_request)
+                    worker.start()
+                    self.assertTrue(started.wait(1))
+                    try:
+                        request = self._json_request(
+                            server,
+                            "api/operations/run",
+                            {
+                                "operation": "sync-wanna",
+                                "parameters": {"offline": True},
+                            },
+                            token=token,
+                            origin=server.url.rstrip("/"),
+                        )
+                        error = self._http_error_json(request, 409)
+                    finally:
+                        release.set()
+                        worker.join(3)
+            finally:
+                release.set()
+                server.stop()
+
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(worker_errors, [])
+            self.assertEqual(first_payload[0]["result"]["operation_key"], "sync-wanna")
+            self.assertIn("app data lifetime is already active", error["error"])
 
     def test_webui_runs_operation_through_shared_request(self):
         with tempfile.TemporaryDirectory() as tmp:

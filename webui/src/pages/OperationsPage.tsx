@@ -13,33 +13,18 @@ import {
 } from "@fluentui/react-components";
 import { useEffect, useState } from "react";
 import { api, postJson } from "../api";
+import {
+  operationsSnapshotSchema,
+  runOperationResponseSchema,
+  type Operation,
+  type OperationParameter,
+  type OperationResult,
+} from "../apiContracts";
 import { FeedbackRegion } from "../components/FeedbackRegion";
 import { useAppStyles } from "../styles";
 import type { Language } from "../i18n";
 import type { JsonObject, PageProps } from "./types";
 import { errorMessage } from "./types";
-
-type OperationParameter = {
-  key: string;
-  label: string;
-  summary?: string;
-  type: "boolean" | "integer" | "choice" | "text";
-  required?: boolean;
-  default?: unknown;
-  choices?: string[];
-};
-
-type Operation = {
-  key: string;
-  title?: string;
-  summary?: string;
-  risk?: string;
-  command?: string;
-  text?: Partial<Record<Language, { title?: string; summary?: string; risk?: string }>>;
-  parameters?: OperationParameter[];
-};
-
-type OperationResult = { summary?: string; lines?: string[] };
 
 function operationText(operation: Operation, language: Language, part: "title" | "summary" | "risk") {
   return operation.text?.[language]?.[part] ?? operation[part] ?? "";
@@ -48,7 +33,11 @@ function operationText(operation: Operation, language: Language, part: "title" |
 function initialDraft(operation: Operation) {
   return Object.fromEntries((operation.parameters ?? []).map((parameter) => [
     parameter.key,
-    parameter.type === "boolean" ? Boolean(parameter.default) : (parameter.default ?? ""),
+    parameter.type === "boolean"
+      ? Boolean(parameter.default)
+      : parameter.type === "integer"
+        ? (parameter.default ?? null)
+        : (parameter.default ?? ""),
   ]));
 }
 
@@ -62,8 +51,8 @@ export function OperationsPage({ language, t }: PageProps) {
   const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
-    api<{ operations?: Operation[] }>("/api/operations").then((data) => {
-      const next = data.operations ?? [];
+    api("/api/operations", operationsSnapshotSchema).then((data) => {
+      const next = data.operations;
       setOperations(next);
       setDrafts(Object.fromEntries(next.map((operation) => [operation.key, initialDraft(operation)])));
     }).catch((error) => setLoadError(errorMessage(error)));
@@ -93,7 +82,7 @@ export function OperationsPage({ language, t }: PageProps) {
       else if (value !== "" && value !== null && value !== undefined) parameters[parameter.key] = value;
     }
     try {
-      const response = await postJson<{ result: OperationResult }>("/api/operations/run", { operation: operation.key, parameters });
+      const response = await postJson("/api/operations/run", runOperationResponseSchema, { operation: operation.key, parameters });
       setResults((value) => ({ ...value, [operation.key]: response.result }));
     } catch (runError) {
       setErrors((value) => ({ ...value, [operation.key]: errorMessage(runError) }));
@@ -169,10 +158,24 @@ function OperationField({ operationKey, parameter, value, setValue, t }: {
   const styles = useAppStyles();
   const control = (() => {
     if (parameter.type === "boolean") {
-      return <Switch aria-label={parameter.label} checked={Boolean(value)} label={t(Boolean(value) ? "enabled" : "disabled")} onChange={(_, data) => setValue(operationKey, parameter.key, data.checked)} />;
+      return <Switch aria-label={parameter.label} checked={Boolean(value)} label={t(value ? "enabled" : "disabled")} onChange={(_, data) => setValue(operationKey, parameter.key, data.checked)} />;
     }
     if (parameter.type === "integer") {
-      return <SpinButton aria-label={parameter.label} value={Number(value ?? 0)} onChange={(_, data) => setValue(operationKey, parameter.key, data.value ?? 0)} />;
+      return (
+        <SpinButton
+          aria-label={parameter.label}
+          value={typeof value === "number" ? value : null}
+          onChange={(_, data) => {
+            if (data.value !== undefined) {
+              setValue(operationKey, parameter.key, data.value);
+              return;
+            }
+            const displayValue = data.displayValue?.trim() ?? "";
+            const parsed = displayValue === "" ? Number.NaN : Number(displayValue);
+            setValue(operationKey, parameter.key, Number.isInteger(parsed) ? parsed : null);
+          }}
+        />
+      );
     }
     if (parameter.type === "choice") {
       return (

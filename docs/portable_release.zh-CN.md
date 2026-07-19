@@ -32,7 +32,7 @@ dist/releases/DancingLog-v<version>-win-x64-portable.zip.sha256
 常用选项：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1 -Version 0.1.0
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1 -Version 0.7.0
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1 -SkipTests
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1 -SkipSmoke
 ```
@@ -48,8 +48,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1
 推送版本 tag：
 
 ```powershell
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.7.0
+git push origin v0.7.0
 ```
 
 `Release Portable` workflow 会先验证对应无障碍报告并运行 Web UI 无障碍验收，

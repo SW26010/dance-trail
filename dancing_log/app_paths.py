@@ -7,6 +7,7 @@ from pathlib import Path
 import json
 import os
 import sys
+import tempfile
 from typing import Any
 
 from dancing_log.local_dance_day import (
@@ -565,9 +566,33 @@ def save_app_config(
     config_path = Path(path) if path is not None else paths.local_config_file
     config_path.parent.mkdir(parents=True, exist_ok=True)
     normalized = normalize_config(config)
-    with config_path.open("w", encoding="utf-8") as handle:
-        json.dump(normalized, handle, ensure_ascii=False, indent=2)
-        handle.write("\n")
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            newline="\n",
+            dir=config_path.parent,
+            prefix=f".{config_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temp_path = Path(handle.name)
+            json.dump(normalized, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, config_path)
+    except BaseException as primary:
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except BaseException as cleanup:
+                raise BaseExceptionGroup(
+                    f"config write failed after {primary}",
+                    [primary, cleanup],
+                ) from None
+        raise
     return config_path
 
 

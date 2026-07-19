@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from dancing_log.app_data_lifetime_lock import AppDataLifetimeLease
 from dancing_log.app_paths import AppRuntimeConfig
 from dancing_log.local_config import CONFIG_FILE
 
@@ -407,7 +408,13 @@ def run_data_operation_request(
 ) -> DataOperationResult:
     operation = _require_operation(request.operation_key)
     runtime_config = config or AppRuntimeConfig.load(migrate_legacy=True)
-    return _RUNNERS[operation.key](operation, runtime_config, dict(request.params))
+    params = dict(request.params)
+    app_db_path = runtime_config.path("app_db", override=params.get("app_db"))
+    with AppDataLifetimeLease.acquire(
+        app_root=runtime_config.app_root,
+        app_db_path=app_db_path,
+    ):
+        return _RUNNERS[operation.key](operation, runtime_config, params)
 
 
 def _run_import_vrcx(

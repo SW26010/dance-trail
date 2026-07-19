@@ -23,8 +23,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1
 
 The script builds the Fluent React Web UI, runs the unit tests, and uses the
 locked `release` dependency group from `uv.lock` and the pnpm lockfile to build
-PyInstaller onedir desktop and console apps. It then runs an exe smoke test and
-writes:
+PyInstaller onedir desktop and console apps. It then runs an exe smoke test,
+including frozen Web UI requests to `/home` and `/assets/app.js`, and writes:
 
 ```text
 dist/releases/DancingLog-v<version>-win-x64-portable.zip
@@ -34,7 +34,7 @@ dist/releases/DancingLog-v<version>-win-x64-portable.zip.sha256
 Useful options:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1 -Version 0.1.0
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1 -Version 0.7.0
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1 -SkipTests
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1 -SkipSmoke
 ```
@@ -50,8 +50,8 @@ observations are advisory and are not required for release.
 Push a version tag:
 
 ```powershell
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.7.0
+git push origin v0.7.0
 ```
 
 The `Release Portable` workflow verifies the matching accessibility report, runs the

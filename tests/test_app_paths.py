@@ -74,6 +74,27 @@ class AppPathTests(unittest.TestCase):
             self.assertEqual(raw["app_db"], "data/custom.sqlite3")
             self.assertEqual(raw["unknown"], "keep me")
 
+    def test_save_app_config_keeps_existing_file_when_atomic_replace_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "config" / "dancing-log.local.json"
+            config_path.parent.mkdir(parents=True)
+            original = '{"app_db":"data/original.sqlite3"}\n'
+            config_path.write_text(original, encoding="utf-8")
+
+            with patch(
+                "dancing_log.app_paths.os.replace",
+                side_effect=OSError("replace failed"),
+            ):
+                with self.assertRaisesRegex(OSError, "replace failed"):
+                    save_app_config(
+                        {"app_db": "data/replacement.sqlite3"},
+                        path=config_path,
+                    )
+
+            self.assertEqual(config_path.read_text(encoding="utf-8"), original)
+            self.assertEqual(list(config_path.parent.glob("*.tmp")), [])
+
     def test_overlay_auto_start_implies_watcher_auto_start(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -42,12 +42,23 @@ from dancing_log.webui_settings import (
 
 
 class WebUiRouteRuntime(Protocol):
-    app_root: Path
-    csrf_token: str
-    session: LiveAppSessionRuntime
-    overlay_state: OverlayState
-    live_state: OverlayState
-    startup_warnings: tuple[str, ...]
+    @property
+    def app_root(self) -> Path: ...
+
+    @property
+    def csrf_token(self) -> str: ...
+
+    @property
+    def session(self) -> LiveAppSessionRuntime: ...
+
+    @property
+    def overlay_state(self) -> OverlayState: ...
+
+    @property
+    def live_state(self) -> OverlayState: ...
+
+    @property
+    def startup_warnings(self) -> tuple[str, ...]: ...
 
     @property
     def paths(self) -> AppPaths: ...

@@ -15,6 +15,13 @@ import {
 } from "@fluentui/react-components";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
+import {
+  catalogSnapshotSchema,
+  insightsSnapshotSchema,
+  listsSnapshotSchema,
+  type InsightsSnapshot,
+  type ListsSnapshot,
+} from "../apiContracts";
 import { useAppStyles } from "../styles";
 import type { JsonObject, PageProps } from "./types";
 import { errorMessage } from "./types";
@@ -25,18 +32,18 @@ export function CatalogPage({ t }: PageProps) {
   const [rows, setRows] = useState<JsonObject[] | null>(null);
   const [error, setError] = useState("");
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (requestedQuery: string) => {
     setError("");
     try {
-      const data = await api<{ tracks?: JsonObject[] }>(`/api/catalog?q=${encodeURIComponent(query)}&limit=100`);
-      setRows(data.tracks ?? []);
+      const data = await api(`/api/catalog?q=${encodeURIComponent(requestedQuery)}&limit=100`, catalogSnapshotSchema);
+      setRows(data.tracks);
     } catch (loadError) {
       setError(errorMessage(loadError));
       setRows([]);
     }
-  }, [query]);
+  }, []);
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void load(""); }, [load]);
 
   return (
     <div id="view-catalog" className={styles.page}>
@@ -46,9 +53,9 @@ export function CatalogPage({ t }: PageProps) {
           placeholder={t("searchCatalog")}
           value={query}
           onChange={(_, data) => setQuery(data.value)}
-          onKeyDown={(event) => { if (event.key === "Enter") void load(); }}
+          onKeyDown={(event) => { if (event.key === "Enter") void load(query); }}
         />
-        <Button onClick={() => void load()}>{t("search")}</Button>
+        <Button onClick={() => void load(query)}>{t("search")}</Button>
       </div>
       <Card className="panel">
         {error ? <Text>{error}</Text> : rows === null ? <Spinner label={t("loading")} /> : <CatalogTable rows={rows} t={t} />}
@@ -59,11 +66,11 @@ export function CatalogPage({ t }: PageProps) {
 
 export function ListsPage({ t }: PageProps) {
   const styles = useAppStyles();
-  const [data, setData] = useState<{ exists?: boolean; queued_self_dir?: string; manifests?: JsonObject[] } | null>(null);
+  const [data, setData] = useState<ListsSnapshot | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    api<typeof data>("/api/lists").then(setData).catch((loadError) => setError(errorMessage(loadError)));
+    api("/api/lists", listsSnapshotSchema).then(setData).catch((loadError) => setError(errorMessage(loadError)));
   }, []);
 
   return (
@@ -96,11 +103,11 @@ export function ListsPage({ t }: PageProps) {
 
 export function InsightsPage({ t }: PageProps) {
   const styles = useAppStyles();
-  const [data, setData] = useState<{ source_distribution?: JsonObject[]; top_tracks?: JsonObject[]; recommendations?: JsonObject[] } | null>(null);
+  const [data, setData] = useState<InsightsSnapshot | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    api<typeof data>("/api/insights").then(setData).catch((loadError) => setError(errorMessage(loadError)));
+    api("/api/insights", insightsSnapshotSchema).then(setData).catch((loadError) => setError(errorMessage(loadError)));
   }, []);
 
   if (error) return <Text>{error}</Text>;

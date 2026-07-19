@@ -12,34 +12,21 @@ import {
 } from "@fluentui/react-components";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, api, postJson } from "../api";
+import {
+  configSnapshotSchema,
+  pickPathResponseSchema,
+  resolvePathResponseSchema,
+  saveConfigResponseSchema,
+  type ConfigField,
+  type ConfigSnapshot,
+  type DetectedSource,
+  type PathPreview,
+} from "../apiContracts";
 import { FeedbackRegion } from "../components/FeedbackRegion";
 import { useAppStyles } from "../styles";
 import type { Language } from "../i18n";
 import type { JsonObject, PageProps } from "./types";
 import { errorMessage } from "./types";
-
-type PathPreview = { resolved?: string | null; exists?: boolean | null; kind?: string; error?: string };
-type DetectedSource = PathPreview & { field: string; label: string; value: string };
-type ConfigField = {
-  key: string;
-  label: string;
-  group: string;
-  summary?: string;
-  type: "readonly" | "boolean" | "integer" | "time" | "path" | "text";
-  required?: boolean;
-  min?: number | string;
-  max?: number | string;
-  placeholder?: string;
-  picker?: "file" | "directory";
-  path?: PathPreview;
-};
-type ConfigSnapshot = {
-  config_path: string;
-  config: JsonObject;
-  fields: ConfigField[];
-  unsupported?: JsonObject;
-  detected_sources?: DetectedSource[];
-};
 
 const automaticFields = new Set(["vrcx_db_path", "vrc_log_dir"]);
 
@@ -86,18 +73,21 @@ export function SettingsPage({ language, t, onConfigPath }: PageProps & { onConf
     setSnapshot(next);
     setDraft({ ...next.config });
     setFieldErrors({});
-    setPreviews(Object.fromEntries(next.fields.filter((field) => field.path).map((field) => [field.key, field.path ?? {}])));
+    setPreviews(Object.fromEntries(next.fields.flatMap((field) => (
+      field.path ? [[field.key, field.path] as const] : []
+    ))));
     onConfigPath(next.config_path);
   }, [onConfigPath]);
 
   const load = useCallback(async () => {
-    const next = await api<ConfigSnapshot>("/api/config");
+    const next = await api("/api/config", configSnapshotSchema);
     applySnapshot(next);
   }, [applySnapshot]);
 
   useEffect(() => {
+    const timers = previewTimers.current;
     void load().catch((loadError) => setMessage({ text: errorMessage(loadError), error: true }));
-    return () => Object.values(previewTimers.current).forEach(clearTimeout);
+    return () => Object.values(timers).forEach(clearTimeout);
   }, [load]);
 
   const detected = (key: string) => snapshot?.detected_sources?.find((candidate) => candidate.field === key);
@@ -113,9 +103,9 @@ export function SettingsPage({ language, t, onConfigPath }: PageProps & { onConf
     }
     previewTimers.current[field.key] = window.setTimeout(async () => {
       try {
-        const result = await postJson<{ path?: PathPreview }>("/api/resolve-path", { field: field.key, current_value: value });
+        const result = await postJson("/api/resolve-path", resolvePathResponseSchema, { field: field.key, current_value: value });
         if (previewSequence.current[field.key] !== sequence) return;
-        setPreviews((current) => ({ ...current, [field.key]: result.path ?? {} }));
+        setPreviews((current) => ({ ...current, [field.key]: result.path }));
       } catch (previewError) {
         if (previewSequence.current[field.key] !== sequence) return;
         setPreviews((current) => ({
@@ -138,8 +128,8 @@ export function SettingsPage({ language, t, onConfigPath }: PageProps & { onConf
   const pickPath = async (field: ConfigField) => {
     setMessage(null);
     try {
-      const result = await postJson<{ cancelled?: boolean; value?: string }>("/api/pick-path", { field: field.key, current_value: draft[field.key] });
-      if (!result.cancelled && result.value) updateDraft(field, result.value);
+      const result = await postJson("/api/pick-path", pickPathResponseSchema, { field: field.key, current_value: draft[field.key] });
+      if (!("cancelled" in result)) updateDraft(field, result.value);
     } catch (pickError) {
       setMessage({ text: errorMessage(pickError), error: true });
     }
@@ -149,7 +139,7 @@ export function SettingsPage({ language, t, onConfigPath }: PageProps & { onConf
     setBusy(true);
     setMessage(null);
     try {
-      const result = await postJson<{ snapshot: ConfigSnapshot }>("/api/config", { config: draft });
+      const result = await postJson("/api/config", saveConfigResponseSchema, { config: draft });
       applySnapshot(result.snapshot);
       setMessage({ text: t("saved") });
     } catch (saveError) {
@@ -266,7 +256,7 @@ function ConfigFieldEditor({ field, language, value, savedValue, error, preview,
   const control = (() => {
     if (field.type === "readonly") return <Input {...shared} readOnly value={String(value ?? "")} />;
     if (field.type === "boolean") {
-      return <Switch {...shared} checked={Boolean(value)} label={t(Boolean(value) ? "enabled" : "disabled")} onChange={(_, data) => update(field, data.checked)} />;
+      return <Switch {...shared} checked={Boolean(value)} label={t(value ? "enabled" : "disabled")} onChange={(_, data) => update(field, data.checked)} />;
     }
     if (field.type === "integer") {
       return <SpinButton {...shared} value={Number(value ?? 0)} min={Number(field.min)} max={Number(field.max)} onChange={(_, data) => update(field, data.value ?? 0)} />;

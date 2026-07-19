@@ -11,7 +11,7 @@ import json
 import os
 import threading
 import time
-from typing import ParamSpec, TypeVar
+from typing import ParamSpec, TypeVar, cast
 
 from dancing_log.app_paths import AppPaths
 from dancing_log.time_utils import now_utc_iso
@@ -264,10 +264,13 @@ def _owns_watcher_lifetime(
 
     @wraps(watch)
     def owned(*args: _WatchArgs.args, **kwargs: _WatchArgs.kwargs) -> _WatchResult:
-        app_root = kwargs.get("app_root")
+        app_root = cast(Path | str | None, kwargs.get("app_root"))
         app_paths = AppPaths.from_root(app_root)
-        app_db_path = kwargs.get("app_db_path") or app_paths.db_file
-        supplied = kwargs.pop("_watcher_lifetime_lease", None)
+        app_db_path = cast(Path | str | None, kwargs.get("app_db_path")) or app_paths.db_file
+        supplied = cast(
+            WatcherLifetimeLease | None,
+            kwargs.pop("_watcher_lifetime_lease", None),
+        )
         if supplied is not None:
             supplied.verify_scope(
                 app_root=app_paths.app_root,

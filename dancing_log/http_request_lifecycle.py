@@ -29,6 +29,14 @@ class BoundedHttpLifecycle(Protocol):
     def wait_until_drained(self, timeout: float) -> bool: ...
 
 
+class InterruptibleHttpConnection(Protocol):
+    """Socket-like connection that can be interrupted during shutdown."""
+
+    def shutdown(self, how: int) -> object: ...
+
+    def close(self) -> object: ...
+
+
 @dataclass(frozen=True)
 class HttpShutdownParticipant:
     label: str
@@ -265,11 +273,11 @@ class ManagedLocalHTTPRequestHandler(BaseHTTPRequestHandler):
 class _OrdinaryHttpRequests:
     def __init__(self) -> None:
         self._condition = threading.Condition()
-        self._active: dict[int, object] = {}
+        self._active: dict[int, InterruptibleHttpConnection] = {}
         self._pre_operation: dict[int, object] = {}
         self._accepting = True
 
-    def register(self, request: object) -> bool:
+    def register(self, request: InterruptibleHttpConnection) -> bool:
         with self._condition:
             if not self._accepting:
                 return False
@@ -368,7 +376,7 @@ class _InterruptibleSocketReader(io.RawIOBase):
                 return 0
 
 
-def _close_http_connection(connection: object) -> None:
+def _close_http_connection(connection: InterruptibleHttpConnection) -> None:
     try:
         connection.shutdown(2)
     except OSError:

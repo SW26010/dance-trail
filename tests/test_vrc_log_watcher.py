@@ -1385,7 +1385,7 @@ class VrcLogWatcherTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            stats = watch_vrc_logs(
+            watch_vrc_logs(
                 log_dir=log_dir,
                 output_dir=root / "capture",
                 session_name="wanna-duration-room-left",
@@ -1520,7 +1520,7 @@ class VrcLogWatcherTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            stats = watch_vrc_logs(
+            watch_vrc_logs(
                 log_dir=log_dir,
                 output_dir=root / "capture",
                 session_name="early-stop-no-promote",
@@ -1617,7 +1617,7 @@ class VrcLogWatcherTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            stats = watch_vrc_logs(
+            watch_vrc_logs(
                 log_dir=log_dir,
                 output_dir=root / "capture",
                 session_name="cut-song-no-promote",
@@ -1666,7 +1666,7 @@ class VrcLogWatcherTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            stats = watch_vrc_logs(
+            watch_vrc_logs(
                 log_dir=log_dir,
                 output_dir=root / "capture",
                 session_name="mid-play-no-promote",

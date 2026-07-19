@@ -23,7 +23,8 @@ from dancing_log.windows_picker import pick_windows_path
 
 
 class WebUiSettingsRuntime(Protocol):
-    app_root: Path
+    @property
+    def app_root(self) -> Path: ...
 
     @property
     def paths(self) -> AppPaths: ...

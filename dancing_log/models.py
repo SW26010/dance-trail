@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import math
 from datetime import date, datetime, timezone
+from typing import cast
 
 from dancing_log.storage import (
     add_dance_event,
@@ -178,7 +179,7 @@ def compute_recommendation(
             }
         )
 
-    results.sort(key=lambda item: item["_weight"], reverse=True)
+    results.sort(key=lambda item: cast(float, item["_weight"]), reverse=True)
     return results
 
 

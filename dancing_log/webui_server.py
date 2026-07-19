@@ -182,8 +182,8 @@ class WebUiServer:
             server = self._server
             _attempt_webui_cleanup(cleanup_errors, server.stop_http)
             self._server = None
-        if getattr(self, "_mounted_overlay", None) is not None:
-            overlay = self._mounted_overlay
+        overlay = self._mounted_overlay
+        if overlay is not None:
             try:
                 self.runtime.session.unmount_overlay(overlay)
             except Exception as exc:

@@ -325,6 +325,7 @@ class WindowsTrayApp:
                 if _is_separator(item):
                     user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
                 else:
+                    assert item.command_id is not None
                     user32.AppendMenuW(menu, MF_STRING, int(item.command_id), item.label)
             point = POINT()
             user32.GetCursorPos(ctypes.byref(point))

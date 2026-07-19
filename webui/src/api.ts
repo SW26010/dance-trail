@@ -1,3 +1,7 @@
+import { z } from "zod";
+
+import { apiErrorResponseSchema } from "./apiContracts";
+
 export type ViewKey =
   | "home"
   | "timeline"
@@ -52,7 +56,18 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+export class ApiContractError extends Error {
+  constructor(path: string, cause: unknown) {
+    super(`Invalid API response from ${path}`, { cause });
+    this.name = "ApiContractError";
+  }
+}
+
+export async function api<Schema extends z.ZodType>(
+  path: string,
+  schema: Schema,
+  options: RequestInit = {},
+): Promise<z.output<Schema>> {
   const headers = new Headers(options.headers);
   const init: RequestInit = { ...options, headers };
   if (init.body && typeof init.body !== "string") {
@@ -64,15 +79,33 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   }
 
   const response = await fetch(path, init);
-  const data = (await response.json()) as Record<string, unknown>;
-  if (!response.ok) {
-    throw new ApiError(String(data.error ?? "request failed"), data);
+  let data: unknown;
+  try {
+    data = await response.json();
+  } catch (error) {
+    throw new ApiContractError(path, error);
   }
-  return data as T;
+  if (!response.ok) {
+    const errorData = apiErrorResponseSchema.safeParse(data);
+    if (!errorData.success) {
+      throw new ApiContractError(path, errorData.error);
+    }
+    const message = typeof errorData.data.error === "string" ? errorData.data.error : "request failed";
+    throw new ApiError(message, errorData.data);
+  }
+  const parsed = schema.safeParse(data);
+  if (!parsed.success) {
+    throw new ApiContractError(path, parsed.error);
+  }
+  return parsed.data;
 }
 
-export function postJson<T>(path: string, body: Record<string, unknown>): Promise<T> {
-  return api<T>(path, { method: "POST", body: body as unknown as BodyInit });
+export function postJson<Schema extends z.ZodType>(
+  path: string,
+  schema: Schema,
+  body: Record<string, unknown>,
+): Promise<z.output<Schema>> {
+  return api(path, schema, { method: "POST", body: body as unknown as BodyInit });
 }
 
 export function viewFromPath(pathname: string): ViewKey {

@@ -19,6 +19,28 @@ const primaryPages = [
   ["/settings", "Settings", "[data-field=overlay_port]"],
 ] as const;
 
+function summaryPayload(session: Record<string, unknown> = {}) {
+  return {
+    database_path: "C:/tmp/dancing-log.sqlite3",
+    database_exists: true,
+    counts: {},
+    recent: [],
+    current_live: null,
+    config_warnings: [],
+    startup_warnings: [],
+    session: {
+      session_state: "idle",
+      watcher_running: false,
+      overlay_running: false,
+      watcher_state: "stopped",
+      overlay_state: "stopped",
+      last_error: null,
+      last_watcher_stats: null,
+      ...session,
+    },
+  };
+}
+
 async function openSettledPage(
   page: Page,
   path: string,
@@ -94,29 +116,44 @@ async function mockTimeline(page: Page) {
       contentType: "application/json",
       json: {
         date: "2026-07-18",
+        source: "all",
+        database_exists: true,
         records: [
           {
             id: 1,
             time: "18:10:00",
+            played_at: "2026-07-18T18:10:00+08:00",
             display: "First dance",
             line: "18:10:00 First dance",
             review_status: "needs_attention",
-            effective_playback_status: "needs_attention",
             default_playback_status: "needs_attention",
+            manual_decision_status: null,
+            effective_playback_status: "needs_attention",
+            has_manual_decision: false,
             dance_system_key: "wannadance",
+            dance_system_name: "WannaDance",
             source_type: "random",
+            source_display_name: null,
+            requester_display_name: null,
+            requester_user_id: null,
           },
           {
             id: 2,
             time: "20:20:00",
+            played_at: "2026-07-18T20:20:00+08:00",
             display: "Second dance",
             line: "20:20:00 Second dance",
             review_status: "accepted",
-            effective_playback_status: "accepted",
             default_playback_status: "accepted",
+            manual_decision_status: null,
+            effective_playback_status: "accepted",
+            has_manual_decision: false,
             dance_system_key: "pypydance",
+            dance_system_name: "PyPyDance",
             source_type: "self",
+            source_display_name: null,
             requester_display_name: "Local user",
+            requester_user_id: null,
           },
         ],
       },
@@ -163,6 +200,7 @@ test("application shell preserves accessible roles, names, hierarchy, and state"
   await expect(page.getByRole("button", { name: "EN" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("link", { name: "Home" })).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("combobox", { name: "Theme" })).toHaveValue("system");
+  await expect(page.locator("#home-live-status")).not.toHaveAttribute("aria-live");
 });
 
 test("Home can retry an initial summary failure and clears the stale error", async ({ page }) => {
@@ -179,21 +217,17 @@ test("Home can retry an initial summary failure and clears the stale error", asy
     }
     await route.fulfill({
       contentType: "application/json",
-      json: {
-        counts: {},
-        session: { watcher_state: "stopped", overlay_state: "stopped" },
-        recent: [],
-      },
+      json: summaryPayload(),
     });
   });
 
   await page.goto("/home");
-  const alertRegion = page.locator('[data-live-region="alert"]').first();
-  await expect(alertRegion).toContainText("Summary temporarily unavailable");
+  const feedbackRegion = page.locator('[data-feedback-region]').first();
+  await expect(feedbackRegion).toContainText("Summary temporarily unavailable");
   await page.getByRole("button", { name: "Refresh" }).click();
 
   await expect(page.locator("#home-live-status")).toBeVisible();
-  await expect(alertRegion).toBeEmpty();
+  await expect(feedbackRegion).toBeEmpty();
 });
 
 test("Home commits a terminal session returned by the final stopping poll", async ({ page }) => {
@@ -203,11 +237,7 @@ test("Home commits a terminal session returned by the final stopping poll", asyn
     if (!polling) {
       await route.fulfill({
         contentType: "application/json",
-        json: {
-          counts: {},
-          session: { watcher_state: "running", overlay_state: "stopped" },
-          recent: [],
-        },
+        json: summaryPayload({ watcher_running: true, watcher_state: "running" }),
       });
       return;
     }
@@ -215,15 +245,10 @@ test("Home commits a terminal session returned by the final stopping poll", asyn
     const terminal = pollRequests === 20;
     await route.fulfill({
       contentType: "application/json",
-      json: {
-        counts: {},
-        session: {
+      json: summaryPayload({
           watcher_running: !terminal,
           watcher_state: terminal ? "stopped" : "stopping",
-          overlay_state: "stopped",
-        },
-        recent: [],
-      },
+      }),
     });
   });
   await page.route("**/api/live/watcher", async (route) => {
@@ -233,7 +258,7 @@ test("Home commits a terminal session returned by the final stopping poll", asyn
       contentType: "application/json",
       json: {
         error: "Watcher is stopping",
-        session: { watcher_running: true, watcher_state: "stopping", overlay_state: "stopped" },
+        session: summaryPayload({ watcher_running: true, watcher_state: "stopping" }).session,
       },
     });
   });
@@ -255,6 +280,35 @@ test("keyboard navigation moves focus to the destination heading", async ({ page
   await expect(page).toHaveURL(/\/timeline(?:\?.*)?$/);
   await expect(heading).toBeFocused();
   await expect(timelineLink).toHaveAttribute("aria-current", "page");
+});
+
+test("success responses with a drifted shape fail at the HTTP contract boundary", async ({ page }) => {
+  await page.route("**/api/summary", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      json: { counts: {} },
+    });
+  });
+
+  await page.goto("/home");
+  await expect(page.locator("[data-feedback-region]").first()).toContainText(
+    "Invalid API response from /api/summary",
+  );
+});
+
+test("error responses with a drifted shape fail at the HTTP contract boundary", async ({ page }) => {
+  await page.route("**/api/summary", async (route) => {
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      json: { message: "renamed error field" },
+    });
+  });
+
+  await page.goto("/home");
+  await expect(page.locator("[data-feedback-region]").first()).toContainText(
+    "Invalid API response from /api/summary",
+  );
 });
 
 test("navigation scrolls the focused heading into a 320 by 225 CSS-pixel viewport", async ({ page }) => {
@@ -333,6 +387,22 @@ test("timeline table and toggle button preserve accessible structure and state",
   await expectNoWcag22AAViolations(page);
 });
 
+test("timeline clears loading when an invalid date cancels an in-flight request", async ({ page }) => {
+  await page.route("**/api/timeline*", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    await route.fulfill({
+      contentType: "application/json",
+      json: { date: "2026-07-18", source: "all", database_exists: true, records: [] },
+    });
+  });
+
+  await page.goto("/timeline?date=2026-07-18");
+  await expect(page.locator("#view-timeline .panel")).toContainText("Loading");
+  await page.getByRole("textbox", { name: "Timeline date" }).fill("2026-07-");
+
+  await expect(page.locator("#view-timeline .panel")).not.toContainText("Loading");
+});
+
 test("timeline preserves headers and local keyboard scrolling at 320 CSS pixels", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 900 });
   await mockTimeline(page);
@@ -385,7 +455,7 @@ test("settings validation associates errors and moves focus to the invalid field
   await port.fill("70000");
   await page.getByRole("button", { name: "Save", exact: true }).click();
 
-  await expect(page.getByRole("alert").filter({ hasText: "Save failed" })).toBeVisible();
+  await expect(page.locator("[data-feedback-region]").filter({ hasText: "Save failed" })).toBeVisible();
   await expect(port).toHaveAttribute("aria-invalid", "true");
   await expect(port).toBeFocused();
   await expectNoWcag22AAViolations(page);
@@ -401,19 +471,56 @@ test("operation failure is announced and returns focus to its trigger", async ({
   });
   await openSettledPage(page, "/data-operations", "Data Operations", "#view-operations .panel");
   const runButton = page.getByRole("button", { name: "Run" }).first();
-  const alertRegion = page.locator(".panel").first().locator('[data-live-region="alert"]');
-  await expect(alertRegion).toBeEmpty();
-  await alertRegion.evaluate((node) => {
-    (window as Window & { __operationAlertRegion?: Element }).__operationAlertRegion = node;
+  const feedbackRegion = page.locator(".panel").first().locator("[data-feedback-region]");
+  await expect(feedbackRegion).toBeEmpty();
+  await feedbackRegion.evaluate((node) => {
+    (window as Window & { operationFeedbackRegion?: Element }).operationFeedbackRegion = node;
   });
   await runButton.click();
 
-  await expect(alertRegion).toContainText("Test operation was intentionally rejected");
-  expect(await alertRegion.evaluate(
-    (node) => node === (window as Window & { __operationAlertRegion?: Element }).__operationAlertRegion,
+  await expect(feedbackRegion).toContainText("Test operation was intentionally rejected");
+  expect(await feedbackRegion.evaluate(
+    (node) => node === (window as Window & { operationFeedbackRegion?: Element }).operationFeedbackRegion,
   )).toBe(true);
+  await expect(feedbackRegion).not.toHaveAttribute("role");
+  await expect(feedbackRegion).not.toHaveAttribute("aria-live");
+  await expect(page.locator(".panel").first().locator("[data-live-region]")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Run" }).first()).toBeFocused();
   await expectNoWcag22AAViolations(page);
+});
+
+test("optional operation row limits stay blank until explicitly set", async ({ page }) => {
+  const payloads: Array<Record<string, unknown>> = [];
+  await page.route("**/api/operations/run", async (route) => {
+    payloads.push(route.request().postDataJSON() as Record<string, unknown>);
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        result: {
+          operation_key: "import-vrcx",
+          title: "Import VRCX history",
+          status: "completed",
+          summary: "done",
+          lines: [],
+          metrics: {},
+        },
+      },
+    });
+  });
+  await openSettledPage(page, "/data-operations", "Data Operations", "#view-operations .panel");
+  const operation = page.locator(".panel").filter({ hasText: "Import VRCX history" });
+  const limit = operation.getByRole("spinbutton", { name: "Row limit" });
+
+  await expect(limit).toHaveValue("");
+  await operation.getByRole("button", { name: "Run" }).click();
+  await expect.poll(() => payloads.length).toBe(1);
+  expect(payloads[0]).toMatchObject({ operation: "import-vrcx", parameters: {} });
+  expect((payloads[0].parameters as Record<string, unknown>).limit).toBeUndefined();
+
+  await limit.fill("0");
+  await operation.getByRole("button", { name: "Run" }).click();
+  await expect.poll(() => payloads.length).toBe(2);
+  expect(payloads[1]).toMatchObject({ operation: "import-vrcx", parameters: { limit: 0 } });
 });
 
 test("forced-colors mode keeps the primary page operable", async ({ page }) => {

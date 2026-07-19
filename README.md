@@ -307,6 +307,8 @@ WCAG 2.2 AA, and WAI-ARIA APG. Build and run its browser acceptance suite with:
 
 ```powershell
 uv sync --locked --cache-dir .uv-cache
+uv run --locked --cache-dir .uv-cache ruff check dancing_log tests scripts
+uv run --locked --cache-dir .uv-cache ty check dancing_log
 pnpm install --frozen-lockfile
 pnpm check:webui
 pnpm build:webui
@@ -314,9 +316,12 @@ pnpm exec playwright install chromium
 pnpm test:a11y
 ```
 
-This scans all seven primary pages in light and dark themes with Playwright and
-axe, then exercises ARIA, keyboard, focus, validation, failure, and forced-colors
-contracts. These automated checks and reproducible asset hashes are the release
+The Python commands lint the package, tests, and scripts and statically check the
+whole runtime package. `pnpm check:webui` runs Oxlint (including React Hooks
+rules) before the complete TypeScript declaration check. Playwright and axe then
+scan all seven primary pages in light and dark themes and exercise ARIA,
+keyboard, focus, validation, failure, API response-contract, and forced-colors
+behavior. These automated checks and reproducible asset hashes are the release
 gate. The manual sections in `docs/accessibility/webui-release-checklist.md` are
 advisory and may be skipped; automated success is not a complete conformance
 claim. Lighthouse Accessibility remains a supporting signal only.

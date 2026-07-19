@@ -98,7 +98,7 @@ def main():
         print(f"  id: {s['id']}  人数：{s['playerCount']}  分组: [{s['major']}] {s['group']}")
 
     # 统计
-    print(f"\n--- 统计 ---")
+    print("\n--- 统计 ---")
     groups = {}
     for s in songs:
         key = s["major"] or s["group"]

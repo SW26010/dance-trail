@@ -76,6 +76,14 @@ _Avoid_: timeline, raw history, catalog
 Controlled workflows that change or rebuild local data in bulk, such as importing VRCX history, syncing dance-system catalogs, rebuilding generated data, backup and restore, and future database merge flows. It is not a raw database editor.
 _Avoid_: settings, raw SQLite editor, ad hoc table editing
 
+**Data Operation Coordinator**:
+The shared service seam that holds one App Data Lifetime Lease while dispatching a Data Operation. It serializes bulk workflows across Web UI, CLI, threads, and processes and conflicts with the Live Watcher over the same application root or resolved SQLite database. A caller cannot bypass it by navigating, refreshing, or opening another page.
+_Avoid_: page-local running state, HTTP request lock, SQLite transaction
+
+**App Data Lifetime Lease**:
+The OS-backed exclusive ownership of one application root and resolved SQLite database for the complete lifetime of a watcher or coordinated bulk write. Persistent lock files identify the scope but do not themselves mean a writer is active.
+_Avoid_: database transaction, process-local mutex, lock-file existence check
+
 **Settings**:
 The local environment and default preference surface for paths, database location, VRChat and VRCX sources, overlay defaults, and watcher defaults. Settings does not own catalog labels, dance plans, playback history, or analytics.
 _Avoid_: data operations, catalog management, dance plan management

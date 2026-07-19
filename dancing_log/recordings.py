@@ -25,7 +25,7 @@ def sample_top_frames(
     target_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        import imageio_ffmpeg
+        import imageio_ffmpeg  # ty: ignore[unresolved-import] -- Optional extra.
     except ModuleNotFoundError as exc:
         raise RuntimeError(
             "sample-frames requires the optional recording-tools dependencies. "

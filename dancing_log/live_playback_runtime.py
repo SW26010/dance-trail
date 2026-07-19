@@ -646,6 +646,8 @@ class LivePlaybackRuntime:
             return False
 
         if settlement.completion_status == "completed":
+            assert settlement.played_seconds is not None
+            assert settlement.required_played_seconds is not None
             changed = False
             if self.store is not None:
                 record_changed = self.store.mark_completed(

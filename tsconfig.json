@@ -2,9 +2,10 @@
   "compilerOptions": {
     "target": "ES2022",
     "useDefineForClassFields": true,
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": ["ES2022", "ESNext.Disposable", "DOM", "DOM.Iterable"],
     "allowJs": false,
-    "skipLibCheck": true,
+    "skipLibCheck": false,
+    "types": ["node"],
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "strict": true,

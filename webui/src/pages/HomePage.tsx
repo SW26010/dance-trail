@@ -17,29 +17,17 @@ import {
 } from "@fluentui/react-components";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, postJson } from "../api";
+import {
+  liveControlResponseSchema,
+  sessionSchema,
+  summarySchema,
+  type Session,
+  type Summary,
+} from "../apiContracts";
 import { FeedbackRegion } from "../components/FeedbackRegion";
 import { useAppStyles } from "../styles";
 import type { PageProps, JsonObject } from "./types";
 import { errorMessage } from "./types";
-
-type Session = {
-  watcher_running?: boolean;
-  overlay_running?: boolean;
-  watcher_state?: string;
-  overlay_state?: string;
-  last_error?: string | null;
-  last_watcher_stats?: unknown;
-};
-
-type Summary = {
-  counts?: Record<string, number>;
-  session?: Session;
-  startup_warnings?: string[];
-  current_live?: unknown;
-  database_exists?: boolean;
-  database_path?: string;
-  recent?: Array<Record<string, unknown>>;
-};
 
 function lifecycleState(value: string | undefined, running: boolean | undefined): "running" | "stopping" | "stopped" {
   const state = String(value ?? "").toLowerCase();
@@ -68,7 +56,7 @@ export function HomePage({ t }: PageProps) {
   const load = useCallback(async () => {
     const request = ++loadRequest.current;
     try {
-      const next = await api<Summary>("/api/summary");
+      const next = await api("/api/summary", summarySchema);
       if (mounted.current && request === loadRequest.current) {
         setSummary(next);
         setError("");
@@ -91,8 +79,8 @@ export function HomePage({ t }: PageProps) {
       if (watcher !== "stopping" && overlay !== "stopping") return;
       await pause(250);
       try {
-        const next = await api<Summary>("/api/summary");
-        current = next.session ?? {};
+        const next = await api("/api/summary", summarySchema);
+        current = next.session;
       } catch {
         return;
       }
@@ -106,12 +94,15 @@ export function HomePage({ t }: PageProps) {
     setBusyControl(kind);
     setError("");
     try {
-      await postJson(`/api/live/${kind}`, { action });
+      await postJson(`/api/live/${kind}`, liveControlResponseSchema, { action });
       await load();
     } catch (controlError) {
       setError(errorMessage(controlError));
-      if (controlError instanceof ApiError && controlError.data.session) {
-        await pollStoppingSession(controlError.data.session as Session);
+      const conflictSession = controlError instanceof ApiError
+        ? sessionSchema.safeParse(controlError.data.session)
+        : null;
+      if (conflictSession?.success) {
+        await pollStoppingSession(conflictSession.data);
       }
     } finally {
       setBusyControl("");
@@ -121,8 +112,8 @@ export function HomePage({ t }: PageProps) {
     }
   };
 
-  const data = summary ?? {};
-  const session = data.session ?? {};
+  const data: Partial<Summary> = summary ?? {};
+  const session: Partial<Session> = data.session ?? {};
   const watcherState = lifecycleState(session.watcher_state, session.watcher_running);
   const overlayState = lifecycleState(session.overlay_state, session.overlay_running);
   const watcherActive = watcherState !== "stopped";
@@ -184,7 +175,7 @@ export function HomePage({ t }: PageProps) {
       </div>
 
       <div className={styles.grid}>
-        <Card id="home-live-status" className={styles.card} aria-live="polite">
+        <Card id="home-live-status" className={styles.card}>
           <CardHeader header={<Text weight="semibold" size={400}>{t("liveStatus")}</Text>} />
           <div className={styles.cardBody}>
             <div className={styles.metricGrid}>

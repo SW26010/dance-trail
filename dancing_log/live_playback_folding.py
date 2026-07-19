@@ -359,6 +359,7 @@ class PlaybackEventBuilder:
                 record.get("timestamp"),
             ):
                 return self._new_occurrence(canonical_key, record.get("timestamp"))
+            assert current_key is not None
             return current_key
         if current_key is None:
             return self._new_occurrence(canonical_key, record.get("timestamp"))

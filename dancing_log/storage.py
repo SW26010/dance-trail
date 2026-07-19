@@ -12,6 +12,7 @@ import json
 import re
 import sqlite3
 import unicodedata
+from typing import Literal
 
 from dancing_log.app_paths import AppPaths
 from dancing_log.live_playback_settlement import is_live_playback_promotable
@@ -69,7 +70,7 @@ LIVE_PLAYBACK_TIME_FIELDS = (
 class ClosingConnection(sqlite3.Connection):
     """SQLite connection that closes when used as a context manager."""
 
-    def __exit__(self, exc_type, exc_value, traceback) -> bool:
+    def __exit__(self, exc_type, exc_value, traceback) -> Literal[False]:
         suppress = super().__exit__(exc_type, exc_value, traceback)
         self.close()
         return suppress

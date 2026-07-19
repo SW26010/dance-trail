@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from dancing_log.time_utils import parse_timestamp
+from dancing_log.time_utils import parse_timestamp  # noqa: E402
 
 KNOWN_OUTPUTS = (
     "raw_output_log.txt",

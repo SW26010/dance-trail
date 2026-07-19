@@ -8,6 +8,7 @@ from pathlib import Path
 import hashlib
 import re
 import sqlite3
+from typing import TypedDict
 from urllib.parse import parse_qs, urlparse
 
 from dancing_log.storage import (
@@ -32,6 +33,14 @@ from dancing_log.playback_record_writer import (
     upsert_evidence_record,
 )
 from dancing_log.time_utils import SQLITE_UTC_NOW, normalize_timestamp
+
+
+class PlaybackSourceIdentity(TypedDict):
+    source_root_key: str
+    source_root_path: str
+    source_table: str
+    source_row_id: int
+    source_event_key: str
 
 
 SOURCE_SELF = "self"
@@ -311,6 +320,10 @@ def import_vrcx_database(
             if not _is_supported(parsed):
                 skipped_unsupported += 1
                 continue
+            system_key = parsed.system_key
+            external_id = parsed.external_id
+            assert system_key is not None
+            assert external_id is not None
             raw_created_at = row["created_at"]
             created_at = normalize_timestamp(raw_created_at)
             display_name, user_id = _requester_fields_for_import(row)
@@ -322,16 +335,16 @@ def import_vrcx_database(
                 blank_requester_source=blank_requester_source,
             )
             event_key = _event_key(row)
-            system_id = ensure_dance_system(app_conn, parsed.system_key, _system_name(parsed.system_key))
-            dance_track_id = ensure_dance_track(app_conn, parsed.system_key, parsed.external_id)
+            system_id = ensure_dance_system(app_conn, system_key, _system_name(system_key))
+            dance_track_id = ensure_dance_track(app_conn, system_key, external_id)
 
-            if parsed.system_key == WANNA_SYSTEM_KEY:
+            if system_key == WANNA_SYSTEM_KEY:
                 app_conn.execute(
                     """
                     INSERT OR IGNORE INTO wannadance_songs (dance_track_id, wanna_id)
                     VALUES (?, ?)
                     """,
-                    (dance_track_id, int(parsed.external_id)),
+                    (dance_track_id, int(external_id)),
                 )
 
             staging_cursor = app_conn.execute(
@@ -379,7 +392,7 @@ def import_vrcx_database(
                     display_name,
                     user_id,
                     system_id,
-                    parsed.external_id,
+                    external_id,
                     dance_track_id,
                     source,
                     confidence,
@@ -419,7 +432,7 @@ def import_vrcx_database(
                     evidence_source="vrcx_history",
                     played_at=staging_row["created_at"],
                     dance_track_id=staging_row["parsed_dance_track_id"],
-                    dance_system_key=parsed.system_key,
+                    dance_system_key=system_key,
                     dance_external_id=staging_row["parsed_external_id"],
                     request_type=request_type,
                     default_acceptance_status=PLAYBACK_STATUS_ACCEPTED,
@@ -480,7 +493,7 @@ def _is_supported(parsed: DanceUrlParseResult) -> bool:
 def _playback_request_type_for_vrcx_write(
     conn: sqlite3.Connection,
     *,
-    source_identity: dict[str, object],
+    source_identity: PlaybackSourceIdentity,
     incoming_request_type: str | None,
     incoming_confidence: float | None,
 ) -> tuple[str | None, float | None]:
@@ -521,7 +534,7 @@ def _vrcx_playback_source_identity(
     *,
     event_key: str,
     staging_row_id: int,
-) -> dict[str, object]:
+) -> PlaybackSourceIdentity:
     existing = conn.execute(
         """
         SELECT
@@ -543,7 +556,13 @@ def _vrcx_playback_source_identity(
         (event_key,),
     ).fetchone()
     if existing is not None:
-        return dict(existing)
+        return {
+            "source_root_key": str(existing["source_root_key"]),
+            "source_root_path": str(existing["source_root_path"]),
+            "source_table": str(existing["source_table"]),
+            "source_row_id": int(existing["source_row_id"]),
+            "source_event_key": str(existing["source_event_key"]),
+        }
 
     legacy_event = conn.execute(
         "SELECT id FROM dance_events WHERE event_key = ?",

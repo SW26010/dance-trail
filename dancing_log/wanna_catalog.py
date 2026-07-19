@@ -348,6 +348,8 @@ def _mtime_iso(path: Path) -> str:
 def _to_int(value: object, default: int | None = None) -> int | None:
     if value in (None, ""):
         return default
+    if not isinstance(value, (str, bytes, bytearray, int, float)):
+        return default
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -356,6 +358,8 @@ def _to_int(value: object, default: int | None = None) -> int | None:
 
 def _to_float(value: object) -> float | None:
     if value in (None, ""):
+        return None
+    if not isinstance(value, (str, bytes, bytearray, int, float)):
         return None
     try:
         return float(value)

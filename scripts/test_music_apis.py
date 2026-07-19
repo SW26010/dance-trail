@@ -215,9 +215,9 @@ def test_netease(song, artist):
                         comment_data = fetch_json(comment_url, headers=headers)
                         print(f"      total comments (评论数): {comment_data.get('total', 'N/A')}")
                     except Exception:
-                        print(f"      total comments: 获取失败")
+                        print("      total comments: 获取失败")
         else:
-            print(f"  未找到结果")
+            print("  未找到结果")
     except Exception as e:
         print(f"  ❌ 错误: {e}")
 

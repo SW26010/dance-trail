@@ -11,6 +11,8 @@ from dancing_log.app_paths import (
     save_app_config,
 )
 
+__all__ = ["CONFIG_FILE", "DEFAULT_CONFIG", "load_local_config", "save_local_config"]
+
 
 def load_local_config(path: Path | str | None = None) -> dict:
     """Load local config, returning defaults when the file is missing.

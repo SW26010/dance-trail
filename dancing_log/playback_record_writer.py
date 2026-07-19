@@ -339,7 +339,7 @@ def _json_dict(value: object) -> dict[str, object]:
     if value is None:
         return {}
     if isinstance(value, Mapping):
-        return dict(value)
+        return {str(key): item for key, item in value.items()}
     try:
         parsed = json.loads(str(value or "{}"))
     except json.JSONDecodeError:

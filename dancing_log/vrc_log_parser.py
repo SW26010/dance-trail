@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import csv
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import timedelta
 import json
 from pathlib import Path
 import re
@@ -627,8 +627,7 @@ def _events_from_wannadance_queue_info(
             display_name = " / ".join(names) if names else None
         elif isinstance(player_names, str):
             display_name = _clean_display_name(player_names)
-        events.append(
-            _wanna_metadata_event(
+        event = _wanna_metadata_event(
                 timestamp=timestamp,
                 raw_line=raw_line,
                 parser_name="wannadance_queue_info",
@@ -642,8 +641,9 @@ def _events_from_wannadance_queue_info(
                 ),
                 duration_source="wanna_queue_json",
             )
-        )
-    return [event for event in events if event is not None]
+        if event is not None:
+            events.append(event)
+    return events
 
 
 def _event_from_wannadance_user_data(
@@ -708,8 +708,7 @@ def _events_from_dudu_queue_info(
     for entry in value:
         if not isinstance(entry, dict):
             continue
-        events.append(
-            _dudu_metadata_event(
+        event = _dudu_metadata_event(
                 timestamp=timestamp,
                 raw_line=raw_line,
                 parser_name="dudu_queue_info",
@@ -723,8 +722,9 @@ def _events_from_dudu_queue_info(
                 ),
                 duration_source="dudu_queue_json",
             )
-        )
-    return [event for event in events if event is not None]
+        if event is not None:
+            events.append(event)
+    return events
 
 
 def _event_from_dudu_song_data(
@@ -1100,7 +1100,7 @@ def _truthy(value) -> bool:
 
 def _dedupe_events(events: list[ParsedVrcLogEvent]) -> list[ParsedVrcLogEvent]:
     deduped: list[ParsedVrcLogEvent] = []
-    seen: set[tuple[str, str | None, str]] = set()
+    seen: set[tuple[str | None, str | None, str]] = set()
     for event in events:
         key = (event.video_url, event.display_name, event.parser_name)
         if key in seen:

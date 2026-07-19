@@ -13,6 +13,7 @@ from urllib.parse import urlparse, urlsplit
 from dancing_log.http_request_lifecycle import (
     AcceptedOperationShutdown,
     HttpShutdownParticipant,
+    InterruptibleHttpConnection,
     ManagedLocalHTTPRequestHandler,
     ManagedLocalHTTPServer,
 )
@@ -295,7 +296,7 @@ class OverlayEventStreams:
         self.state = state
         self.stop_event = threading.Event()
         self._lock = threading.Lock()
-        self._subscribers: dict[Queue, object] = {}
+        self._subscribers: dict[Queue, InterruptibleHttpConnection] = {}
         self._drained = threading.Event()
         self._drained.set()
 
@@ -303,7 +304,7 @@ class OverlayEventStreams:
     def stopped(self) -> bool:
         return self.stop_event.is_set()
 
-    def subscribe(self, connection: object) -> Queue | None:
+    def subscribe(self, connection: InterruptibleHttpConnection) -> Queue | None:
         with self._lock:
             if self.stop_event.is_set():
                 return None
@@ -492,7 +493,7 @@ def _put_latest(queue: Queue, item: object) -> None:
                 pass
 
 
-def _close_stream_connection(connection: object) -> None:
+def _close_stream_connection(connection: InterruptibleHttpConnection) -> None:
     """Interrupt a stream handler blocked in socket write or flush."""
     try:
         connection.shutdown(socket.SHUT_RDWR)

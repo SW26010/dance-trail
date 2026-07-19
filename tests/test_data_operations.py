@@ -1,10 +1,12 @@
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from dancing_log.app_paths import AppRuntimeConfig, DEFAULT_CONFIG
 from dancing_log.data_operations import (
+    DataOperationResult,
     DataOperationError,
     build_data_operation_request,
     build_data_operation_request_from_payload,
@@ -12,9 +14,96 @@ from dancing_log.data_operations import (
     run_data_operation,
 )
 from dancing_log.vrcx_importer import ImportStats
+from dancing_log.watcher_lifetime_lock import (
+    WatcherLifetimeLease,
+    WatcherLifetimeLockUnavailable,
+)
 
 
 class DataOperationsTests(unittest.TestCase):
+    def test_data_operations_are_mutually_exclusive_for_one_app_scope(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_config = AppRuntimeConfig.from_config(DEFAULT_CONFIG, app_root=tmp)
+            started = threading.Event()
+            release = threading.Event()
+            calls_lock = threading.Lock()
+            calls = 0
+            worker_errors: list[BaseException] = []
+
+            def runner(operation, _config, _params):
+                nonlocal calls
+                with calls_lock:
+                    calls += 1
+                    call_number = calls
+                if call_number == 1:
+                    started.set()
+                    if not release.wait(2):
+                        raise TimeoutError("test operation was not released")
+                return DataOperationResult(
+                    operation_key=operation.key,
+                    title=operation.title,
+                    status="completed",
+                    summary="done",
+                    lines=("done",),
+                )
+
+            def run_first_operation():
+                try:
+                    run_data_operation("sync-wanna", config=runtime_config, offline=True)
+                except BaseException as exc:
+                    worker_errors.append(exc)
+
+            with patch.dict(
+                "dancing_log.data_operations._RUNNERS",
+                {"sync-wanna": runner},
+            ):
+                worker = threading.Thread(target=run_first_operation)
+                worker.start()
+                self.assertTrue(started.wait(1))
+                try:
+                    with self.assertRaises(WatcherLifetimeLockUnavailable):
+                        run_data_operation(
+                            "sync-wanna",
+                            config=runtime_config,
+                            offline=True,
+                        )
+                finally:
+                    release.set()
+                    worker.join(2)
+
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(worker_errors, [])
+            self.assertEqual(calls, 1)
+
+    def test_data_operation_rejects_an_active_watcher_scope(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_config = AppRuntimeConfig.from_config(DEFAULT_CONFIG, app_root=tmp)
+            runner_patch = patch(
+                "dancing_log.data_operations._RUNNERS",
+                {
+                    "sync-wanna": lambda operation, _config, _params: DataOperationResult(
+                        operation_key=operation.key,
+                        title=operation.title,
+                        status="completed",
+                        summary="done",
+                        lines=("done",),
+                    )
+                },
+            )
+            with (
+                WatcherLifetimeLease.acquire(
+                    app_root=runtime_config.app_root,
+                    app_db_path=runtime_config.app_db_path,
+                ),
+                runner_patch,
+            ):
+                with self.assertRaises(WatcherLifetimeLockUnavailable):
+                    run_data_operation(
+                        "sync-wanna",
+                        config=runtime_config,
+                        offline=True,
+                    )
+
     def test_catalog_exposes_risk_defaults_command_and_localized_text(self):
         snapshot = operation_catalog_snapshot(command_prefix="dancing-log")
         operations = {operation["key"]: operation for operation in snapshot["operations"]}

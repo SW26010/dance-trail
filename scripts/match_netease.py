@@ -11,7 +11,6 @@
 import csv
 import json
 import re
-import sys
 import time
 import urllib.parse
 import urllib.request
@@ -188,7 +187,7 @@ def main():
     skipped = 0
 
     print(f"已完成: {len(results)} (匹配: {matched}, 未匹配: {failed_count})")
-    print(f"开始查询...\n")
+    print("开始查询...\n")
 
     try:
         for i, song in enumerate(songs_to_query):
@@ -279,19 +278,19 @@ def main():
     total_failed = total_done - total_matched
 
     print(f"\n{'=' * 50}")
-    print(f"查询完成!")
+    print("查询完成!")
     print(f"  总查询: {total_done}")
     print(f"  匹配成功: {total_matched} ({total_matched/total_done*100:.1f}%)" if total_done else "")
     print(f"  匹配失败: {total_failed} ({total_failed/total_done*100:.1f}%)" if total_done else "")
     print(f"  跳过(已完成): {skipped}")
-    print(f"\n输出文件:")
+    print("\n输出文件:")
     print(f"  {OUTPUT_FILE}")
     print(f"  {OUTPUT_CSV}")
 
     if total_matched:
         pops = [r["popularity"] for r in all_results if r.get("popularity") is not None]
         if pops:
-            print(f"\n热度分布:")
+            print("\n热度分布:")
             print(f"  平均 popularity: {sum(pops)/len(pops):.1f}")
             print(f"  最高: {max(pops)}")
             print(f"  最低: {min(pops)}")
