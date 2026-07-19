@@ -4,7 +4,9 @@ Date: 2026-06-23
 
 ## Status
 
-Accepted
+Accepted. The watcher-responsibility portions are superseded by ADR 0013; the
+deprecation of `live_playback_events` and the in-memory Live Status direction
+remain in force.
 
 ## Context
 

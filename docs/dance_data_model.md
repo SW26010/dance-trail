@@ -1,7 +1,7 @@
 # Dance Data Model
 
 Date: 2026-05-17
-Updated: 2026-06-30
+Updated: 2026-07-19
 
 This document describes the current SQLite runtime model for `dancing-log`.
 The project no longer uses the legacy `songs` table or
@@ -14,6 +14,13 @@ The target design for the next `playback_records` schema is
 `docs/playback_records_schema_redesign.zh-CN.md`. This document remains the
 current/v0 runtime model description and must not be treated as the field
 contract for the new schema migration.
+
+ADR 0013 defines the next responsibility boundary: the watcher only captures,
+deterministically organizes, and persists source evidence. It does not own a
+durable event/occurrence summary, Request Source Type Inference, acceptance
+state, or historical repair. Watcher folding, settlement, or direct
+`playback_records` writes described below are current/v0 runtime facts, not
+long-term ownership of those product projections.
 
 ## Current Scope
 

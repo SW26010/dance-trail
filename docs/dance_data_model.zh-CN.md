@@ -1,7 +1,7 @@
 # 跳舞数据模型
 
 日期：2026-05-17
-更新：2026-06-30
+更新：2026-07-19
 
 本文描述 `dancing-log` 当前的 SQLite 运行时模型。项目已经不再使用旧的
 `songs` 表，也不再使用 `dance_events.song_id`。
@@ -11,6 +11,11 @@ Timeline 和 Insights 查询使用的 Local Playback Evidence v0 读模型 contr
 下一版 `playback_records` schema 的目标设计以
 `docs/playback_records_schema_redesign.zh-CN.md` 为准。本文保留当前/v0
 运行时模型说明，不能作为新 schema 迁移目标的字段 contract。
+
+ADR 0013 定义下一版职责边界：watcher 只采集、确定性整理并保存来源证据，不负责
+durable event/occurrence 汇总、Request Source Type Inference、接受状态或历史修复。
+下文出现的 watcher folding、settlement 或直接写 `playback_records` 是当前/v0 运行时
+事实，不表示这些产品投影长期归 watcher 所有。
 
 英文对应文档：`docs/dance_data_model.md`
 

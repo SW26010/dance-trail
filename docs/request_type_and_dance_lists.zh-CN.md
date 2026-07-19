@@ -10,8 +10,9 @@
 - `queued_self` 这个名字不适合作为用户面对的舞蹈计划概念。
 - 长期 `request_type` canonical value 使用 `planned`，表示这条已播放记录被识别为来自预先安排的舞蹈计划。`queued_self` 只作为 legacy input alias 或旧数据解释词，不进入新的正式产品表或 canonical `request_type` 投影。
 - Request Source Type Inference 的分层是 `planned > recommend > self/other/random > unknown > NULL`。`self`、`other`、`random` 是互斥同级分类，没有彼此之间的优先级；`NULL` 不是 canonical value，只表示尚未推断或不适用推断。
-- 第一版 Request Source Type Inference 可以暂不产出 canonical `random`；在各来源对 random 的定义和证据记录方式清晰前，随机相关输入先保留为可读证据或诊断材料，canonical 输出降级为 `unknown`。
+- 真实 VRC output log 与 watcher evidence 范围内的显式 random 证据已经确认：WannaDance `isRandom=true`、PyPyDance 专属 `Random` marker、DUDU `shuffle=true` 可以由下游 Request Source Type Inference 投影为 canonical `random`；没有显式证据且无法建立可信 requester 时为 `unknown`。VRCX 历史数据库缺失 marker 的记录不能靠 blank requester 猜 random。
 - `playback_records.request_type` 为空是预期内状态，因为它是推断输出，不是推断输入；现有 `request_type` 值不应影响新的全局 rebuild。
+- watcher 只负责把真实日志中的直接观察做确定性整理并忠实写入证据表；它不负责汇总 durable `events` 表、生成 canonical playback event、推断 `request_type`、决定接受状态或执行 repair/rebuild。当前 watcher-side `player` / `random` / `unknown` 只属于待移除的 legacy projection，不是新证据 contract。
 - Catalog 页面里的歌曲旁边应该有一个加号，用来把该舞蹈条目加入舞蹈计划。
 - 舞蹈计划不应该继续用 txt/Markdown 文件作为长期存储，而应该规范化存到 SQLite 数据库内。
 - Plan item 应该和实际跳过的 accepted 播放内容对应；如果当前跳舞日没有对应上，item 可以继续保留到后续跳舞日。
@@ -209,13 +210,15 @@ Removed item 默认从 active plan UI 中隐藏，不参与自然顺延、supers
 
 已决定：Request Source Type Inference 的分层是 `planned > recommend > self/other/random > unknown > NULL`。`planned` 与 `recommend` 是更强的解释性证据；`self`、`other`、`random` 是互斥同级分类，不能用优先级互相覆盖；`unknown` 表示推断已经运行但证据不足；`NULL` 表示尚未推断或不适用推断，不是 canonical Request Source Type。
 
-已决定：`self` / `other` / `random` 这一层由单一归一化判断产出，而不是三个规则按优先级抢结果。第一版优先用 Requester Identity 与 Self User Identity 判定 `self` 或 `other`。当前可以暂不实现 canonical `random` 推断；即使某些来源提供随机相关线索，在各来源对 random 的定义和证据记录方式清晰前，Request Source Type Inference 可以先输出 `unknown`，同时保留读取 random 证据或候选输入的可能。如果记录有 `requester_display_name` 但缺少 `requester_user_id`，不应推断为 `random`；它应该落到 `unknown`，并作为 requester identity 补全或诊断需要关注的数据。
+已决定：`self` / `other` / `random` 这一层由单一归一化判断产出，而不是三个规则按优先级抢结果。显式 watcher random evidence 为真时产出 `random`，不再读取 requester 来改变该分类；没有显式 random evidence 时，再根据 Requester Identity 与 Self User Identity 判定 `self` 或 `other`。两类证据都不足时产出 `unknown`。如果记录只有 `requester_display_name` 而缺少可信 `requester_user_id`，不应推断为 `random`；它应该落到 `unknown`，并作为 requester identity 补全或诊断需要关注的数据。
 
 已决定：random 不是 requester identity。不能通过把 `requester_display_name` / `requester_user_id` 写成空值、`NULL` 或 `"random"` 来表达随机来源；random 必须作为独立的 playback/source evidence 被记录或解释。当前暴露出的主要问题不是 `playback_records.request_type` 为空，而是 watcher / playback-record origin 没有认真保留 VRC log 中可解析的 random 证据。
 
 已决定：VRCX 历史里的随机不能靠 blank requester 猜出来；不知道就是不知道。用户未来可以在 UI 上选择把未知来源降级显示为 random，但这只能是明确的展示偏好或用户判断，不能糊进原始证据，也不能擅自修改 imported evidence。
 
 random 证据现状与后续计划另见 `docs/request_type_random_evidence.zh-CN.md`。该文档记录 watcher / VRC log / VRCX 的证据问题，但不阻塞第一版 Request Source Type Inference。
+
+已决定：watcher 是 source evidence adapter，而不是 event aggregator 或 inference engine。它可以解析 payload、规范化时间/URL/单位、在同一 session 内做有 provenance 的有限关联和身份补全，但输出止于证据表。canonical event/occurrence 汇总、Request Source Type Inference、Default Acceptance Result 和历史修复必须由可独立重跑的下游流程负责。正式职责边界见 ADR 0013。
 
 已决定：Request Source Type Inference 消费当前模型化后的稳定输入，不负责追溯这些输入的来源可靠性。即使历史上某些 `requester_user_id` 可能来自 video owner、parser fallback 或旧 watcher 语义，推断模块也不重新打开原始日志、不比较 provenance 可信度、不纠正 Requester Identity；这些问题若需要修正，应由 requester identity enrichment、数据修复或重导入流程处理。
 

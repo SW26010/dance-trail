@@ -19,6 +19,14 @@
 
 不采用把 request、acceptance、observation 拆成多张产品主表的方案。这个拆法概念上更纯，但会显著增加 Timeline、Insights、report、writer 和 watcher settlement 的 join/迁移面。
 
+### Watcher 写入边界
+
+watcher 是 source evidence adapter。它只能写入真实日志中直接观察到、经过确定性整理的证据字段及 origin/provenance；同一 session 内有完整来源坐标的有限关联或身份补全也属于证据整理。
+
+即使当前兼容存储仍让 watcher evidence 经过 folded event 或落入 `playback_records`，watcher 也不拥有该表中的产品投影字段。它不负责汇总 durable `events` 表或 canonical playback occurrence，不设置 `request_type`，不决定 Default Acceptance Result / Review Attention，也不执行 repair/rebuild 或跨来源 reconciliation。上述字段和模型由消费证据的独立下游流程生成，并且必须可以从证据重跑。当前 watcher-side `player` / `random` / `unknown` 是 legacy projection，不是下一版 schema 的 evidence 输入。
+
+正式职责边界见 ADR 0013。
+
 ### Request Source Type
 
 Request Source Type 作为规范化产品字段保留在 `playback_records` 主表，长期字段名使用 `request_type`。

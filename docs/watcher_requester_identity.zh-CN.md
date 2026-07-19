@@ -4,15 +4,30 @@
 
 ## 目标
 
-live watcher 写入 `playback_records` 时，尽量记录 Requester Identity 在播放事件发生时对应的 VRChat `user_id`，但不把它做成永久身份追踪系统。
+live watcher 采集来源证据时，尽量记录播放观察发生时能够直接关联到的 VRChat `user_id`，但不把它做成永久身份追踪系统，也不在 watcher 内把这些证据解释成 canonical Requester Identity 或 Request Source Type。
+
+## Watcher 职责边界
+
+watcher 是来源证据采集器，只负责读取新增日志、解析来源 payload、做确定性的字段整理，以及在同一 watcher/房间上下文内进行可追溯的有限身份补全。整理后的观察写入证据表，并保留原始值、source file、line range、parser name 和参与补全的身份日志 provenance。
+
+watcher 不负责：
+
+- 汇总或维护 durable `events` 表、canonical playback event 或 playback occurrence。
+- 把多条观察合并为产品层事件真相。
+- 推断 `request_type`，包括 `random`、`self`、`other` 或 `unknown`。
+- 决定 accepted、excluded、needs-attention 等接受或复核投影。
+- 执行历史数据 repair/rebuild、跨来源去重或 reconciliation。
+
+同一 session 内的 display-name → user-id 补全仍属于证据整理，因为输入和关联过程都可以保留并审计；它不能因此升级为类型推断。当前实现若仍经过 folded event、legacy live table 或直接写入带投影字段的 `playback_records`，只视为兼容/过渡路径，不扩大 watcher 的长期职责。正式边界见 ADR 0013。
 
 ## 已确认语义
 
-- `playback_records.requester_display_name` 表示播放事件里看到的当时显示名。
-- `playback_records.requester_user_id` 表示 watcher 在同一 VRChat 房间、当前 watcher/replay 会话、或启动时预读到的当前日志上下文中能确认的 `usr_...`。
+- source evidence 中的 requester/source display name 表示来源日志在观察发生时写出的显示名；下游可以把它投影到 `playback_records.requester_display_name`。
+- source evidence 中的 `requester_user_id` 表示 watcher 在同一 VRChat 房间、当前 watcher/replay 会话、或启动时预读到的当前日志上下文中能确认的 `usr_...`；是否投影到产品记录由下游负责。
+- 对 WannaDance，source display name 只取世界 payload 的 `playerName`。USharpVideo `Started video load ... requested by <name>` 表示技术性 video owner / executor，必须作为独立 origin/provenance 保存，不能在 `playerName` 为空时回退填充 source display name 或 canonical requester。
 - 不因为用户后续改名而改写旧播放记录。
 - 不用跨会话、跨房间、全局缓存或 VRCX 历史去补 watcher 记录的 requester user id。
-- 如果播放事件先出现、身份行后出现，允许在同一房间内延迟回填同一条 watcher-derived `playback_records`。
+- 如果来源播放观察先出现、身份行后出现，允许在同一房间内延迟回填同一条 source evidence observation。
 - 映射生命周期按当前 VRChat 房间，而不是整个 watcher 进程。
 - 切换房间、重新进入房间、应用退出等房间边界会让旧映射失效。
 
@@ -50,14 +65,14 @@ live watcher 写入 `playback_records` 时，尽量记录 Requester Identity 在
 
 ## 延迟回填范围
 
-- 允许回填同一 watcher session 内同一 watcher playback event 的 `requester_user_id`，不限该记录当前是 pending、accepted/completed，还是 needs-attention。
-- 回填只填 `requester_user_id` 为空的事件/记录；已有 `requester_user_id` 不覆盖。
-- upsert/settlement 更新时必须保留数据库中已有的非空 `requester_user_id`；自动 watcher 写入不能用空值或另一个新非空值覆盖它。
-- 保留已有 `requester_user_id` 时，`provenance_json` / live `event_json` 中的 `requester_user_id` 和 `requester_user_id_source` 也必须同步保留，避免顶层字段和证据 JSON 表达不同身份。
-- 回填只能按 watcher event/source event 的身份更新同一条事件记录，不能只凭 display name 去扫描旧历史。
+- 允许回填同一 watcher session 内同一 source evidence observation 的 `requester_user_id`；下游记录当前处于何种投影状态不属于 watcher 的判断条件。
+- 回填只填 `requester_user_id` 为空的证据；已有 `requester_user_id` 不覆盖。
+- 证据 upsert 时必须保留已有的非空 `requester_user_id`；自动 watcher 写入不能用空值或另一个新非空值覆盖它。
+- 保留已有 `requester_user_id` 时，origin/provenance 中的 `requester_user_id` 和 `requester_user_id_source` 也必须同步保留，避免规范字段和证据 JSON 表达不同身份。
+- 回填只能按 watcher/source observation 的稳定身份更新同一条证据，不能只凭 display name 去扫描旧历史。
 - 如果回填使用的信息来自过期映射，应继续记录 warning。
 - Requester Identity 是用户可纠正的播放字段；watcher 身份补全属于来源证据补全。未来如果存在 active Manual Record Update/overlay，自动补全不得覆盖用户手动纠正的 requester 身份。
-- 不倒改已经写出的 `parsed_events.jsonl`。`parsed_events.jsonl` 表示按日志时间线 append-only 记录的单行解析结果；延迟回填体现在 folded playback event、summary warning、live DB 和 `playback_records`。
+- 不倒改已经写出的 `parsed_events.jsonl`。`parsed_events.jsonl` 表示按日志时间线 append-only 记录的单行解析结果；延迟回填写入同一 source evidence observation 及其 provenance。当前 folded playback event、live DB 或 `playback_records` 若镜像该结果，只属于兼容路径，不能成为唯一来源。
 
 ## 临时快照（暂缓该方案，但保留这个备选设计，不删除）
 
@@ -84,19 +99,19 @@ live watcher 写入 `playback_records` 时，尽量记录 Requester Identity 在
 
 ## 实现位置
 
-- 身份补全应发生在 watcher drain loop 中，位于 parser 产出 capture record 之后、调用 `PlaybackEventBuilder.observe(record)` 之前。
-- 这样 `parsed_events.jsonl`、`playback_events.jsonl`、live DB 和最终 `playback_records` 会看到同一个 enrichment 结果。
-- materializer/storage 层只负责保存 event 中已经确定的 `requester_user_id`，不再自己查身份映射。
-- `requester_user_id` 的补全来源不需要新增 `playback_records` 顶层字段；写入 folded event，并通过现有 `provenance_json` 保存即可。
+- 身份补全应发生在 watcher drain loop 中，位于 parser 产出 capture record 之后、证据 writer 写入之前。
+- 证据 row 与 origin/provenance 必须看到同一个 enrichment 结果；runtime-only folded event 可以读取它，但不能成为唯一持久来源。
+- evidence materializer/storage 层只负责保存 capture record 中已经确定的 `requester_user_id`，不再自己查身份映射。
+- `requester_user_id` 的补全来源写入证据及其 provenance；是否投影到产品记录由下游独立流程决定。
 - 来源分类保持粗粒度：`active`、`expired`、或 `payload`。其中 `payload` 表示播放日志 payload 本身已经包含 user id，不是通过 display-name mapping 查出来。
-- watcher 身份补全不负责推断最终 Request Source Type，也不因为拿到 `requester_user_id` 就把 `source_type` 细分成 `self` / `other`。
+- watcher 身份补全不负责推断任何 Request Source Type，也不因为拿到 `requester_user_id` 就写出 `random`、`self`、`other` 或 `unknown`。
 - Request Source Type 推断应由后续独立流程负责；它可以使用 `requester_user_id`、`self_user_id` 和其他证据，而且不需要强调实时性。
-- 现有 watcher 产出的 `player` / `random` / `unknown` 粗分类可以为了兼容暂时保留，但应显式视为即将弃用的 watcher-side source-type 推断；本设计不扩大这部分职责。
+- 现有 watcher 产出的 `player` / `random` / `unknown` 粗分类可以为了兼容暂时保留，但应显式视为待移除的 watcher-side legacy projection；它不是新证据 contract，也不能作为新推断的输入。
 
 ## OnPlayerLeft 处理
 
 - `OnPlayerLeft <display_name> (<usr_id>)` 证明该用户刚刚离开前的身份。
-- 它可以用于回填此前同房间、同 display name 的 pending watcher 播放事件。
+- 它可以用于回填此前同房间、同 display name 的 pending source evidence observation。
 - 它会把该 display name/user id 从当前有效映射移到过期映射。
 - 后续播放事件如果当前有效映射没有匹配，可以从过期映射里找唯一匹配并补 `requester_user_id`，但要记录 warning。
 
@@ -127,7 +142,7 @@ live watcher 写入 `playback_records` 时，尽量记录 Requester Identity 在
 ## 验收要求
 
 - 真实日志 replay 是实现验收的一部分，不是可选 smoke。
-- 实现后必须用 `logs/source-vrc-logs` replay，统计 watcher-derived playback records 的 `requester_user_id` 覆盖率、active/expired/payload 来源数量、warning 数量，以及预读相关 warning。
+- 实现后必须用 `logs/source-vrc-logs` replay，统计 watcher source evidence 的 `requester_user_id` 覆盖率、active/expired/payload 来源数量、warning 数量，以及预读相关 warning。
 - 单元测试需要覆盖核心状态机和回填规则，但不能替代真实日志 replay。
 
 ## 容错原则

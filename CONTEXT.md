@@ -184,8 +184,12 @@ _Avoid_: status buckets, live monitor, insights, data operations
 The Web UI timeline item representing one parsed playback-related record, whether it comes from historical import, live observation, interrupted observation, or another parsed source. It is not the same as a raw VRChat log line.
 _Avoid_: raw log line, database row
 
+**VRChat Log Watcher**:
+The source adapter that observes newly appended VRChat log lines, performs only deterministic parsing and bounded evidence-preserving organization or enrichment, and writes the observed facts with their provenance to Local Playback Evidence. It does not own a durable events summary, canonical playback-occurrence projection, Request Source Type Inference, acceptance policy, cross-source reconciliation, or historical repair. Runtime-only folding for Live Status or the OBS Overlay is ephemeral operational state, not a durable product event model.
+_Avoid_: event aggregator, request-source classifier, history projector, repair worker
+
 **Watcher-Derived Playback Record**:
-A Playback Record created from live watcher evidence once the observation has a dance identity. It may represent playback observed from the start or playback discovered after it is already in progress. Its existence means the event is reviewable in Timeline; whether it counts in history is decided separately by acceptance policy.
+A Playback Record projected from evidence captured by the VRChat Log Watcher once downstream evidence organization has a dance identity. It may represent playback observed from the start or playback discovered after it is already in progress. Its existence means the evidence is reviewable in Timeline; it does not mean the watcher owns event summarization, Request Source Type Inference, or accepted-history policy.
 _Avoid_: live playback record, overlay state, accepted playback record, actual-play-only record
 
 **Manual Log Entry**:
@@ -193,8 +197,8 @@ A user-created Local Playback Evidence record for a playback the user says happe
 _Avoid_: request source override, plan item, manual playback decision
 
 **Watcher Settlement**:
-The watcher action that resolves a pending Watcher-Derived Playback Record into its default acceptance result after enough lifecycle or playback evidence is available. Settlement may accept a record, mark it attention-needed, exclude it, or leave it pending when the observation is still active or the watcher ended before settlement.
-_Avoid_: raw event parsing, manual decision, playback record creation
+The legacy name for the downstream evidence-policy action that resolves a pending Watcher-Derived Playback Record after enough lifecycle or playback evidence is available. Settlement may accept a record, mark it attention-needed, exclude it, or leave it pending when the observation is still active. Despite the name, this policy is not part of VRChat Log Watcher capture responsibility.
+_Avoid_: watcher capture, raw event parsing, manual decision, playback record creation
 
 **Playback Observation**:
 The locally observed playback lifecycle state for a playback record, such as an active observation, completed observation, interruption, watcher stop, video shutdown, or observed end boundary. Playback Observation can inform the Default Acceptance Result, but it is not the request source, not the evidence identity, and not a manual decision.
