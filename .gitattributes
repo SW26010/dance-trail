@@ -1,2 +1,6 @@
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
 # The generated bundle embeds validator source templates with intentional indented blank lines.
 dancing_log/webui_dist/app.js whitespace=-trailing-space

@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 import threading
+import time
 from typing import TYPE_CHECKING, Literal
 
 from dancing_log.app_paths import AppRuntimeConfig
@@ -227,7 +228,12 @@ class LiveAppSessionRuntime:
         with self._transition_lock:
             self._stop_watcher_transition()
 
-    def _stop_watcher_transition(self, *, wait_until_stopped: bool = False) -> None:
+    def _stop_watcher_transition(
+        self,
+        *,
+        wait_until_stopped: bool = False,
+        deadline: float | None = None,
+    ) -> None:
         with self._lock:
             if self._watcher_owner_mode == "synchronous":
                 raise RuntimeError(
@@ -243,14 +249,20 @@ class LiveAppSessionRuntime:
             raise RuntimeError("watcher lifecycle cannot transition from its own thread")
         if stop_event is not None:
             stop_event.set()
-        timeout = None if wait_until_stopped else self._watcher_stop_timeout_seconds
+        if wait_until_stopped:
+            timeout = _remaining_deadline_seconds(deadline)
+        else:
+            timeout = self._watcher_stop_timeout_seconds
         thread.join(timeout=timeout)
         if thread.is_alive():
-            message = (
-                "watcher did not stop within "
-                f"{self._watcher_stop_timeout_seconds:g} seconds; "
-                "lifecycle transition cancelled"
-            )
+            if wait_until_stopped and deadline is not None:
+                message = "watcher did not stop before the shutdown deadline"
+            else:
+                message = (
+                    "watcher did not stop within "
+                    f"{self._watcher_stop_timeout_seconds:g} seconds; "
+                    "lifecycle transition cancelled"
+                )
             with self._lock:
                 if self._watcher_thread is thread:
                     self._last_error = message
@@ -275,19 +287,40 @@ class LiveAppSessionRuntime:
             self._stop_watcher_transition()
             self._start_watcher_transition(overlay=False)
 
-    def close(self) -> None:
-        with self._transition_lock:
+    def close(self, *, deadline: float | None = None) -> None:
+        remaining = _remaining_deadline_seconds(deadline)
+        if remaining is None:
+            transition_acquired = self._transition_lock.acquire()
+        else:
+            transition_acquired = self._transition_lock.acquire(timeout=remaining)
+        if not transition_acquired:
+            raise TimeoutError(
+                "live session transition did not finish before the shutdown deadline"
+            )
+        try:
             with self._lock:
                 if self._session_state == "closed":
                     return
                 self._session_state = "closing"
-                while self._watcher_owner_mode == "synchronous":
-                    self._watcher_condition.wait()
             try:
-                self._stop_watcher_transition(wait_until_stopped=True)
+                with self._watcher_condition:
+                    while self._watcher_owner_mode == "synchronous":
+                        remaining = _remaining_deadline_seconds(deadline)
+                        if remaining is not None and remaining <= 0:
+                            raise TimeoutError(
+                                "synchronous watcher did not stop before the "
+                                "shutdown deadline"
+                            )
+                        self._watcher_condition.wait(timeout=remaining)
+                self._stop_watcher_transition(
+                    wait_until_stopped=True,
+                    deadline=deadline,
+                )
             finally:
                 with self._lock:
                     self._session_state = "closed"
+        finally:
+            self._transition_lock.release()
 
     def mount_overlay(self, overlay: "MountedOverlayAdapter") -> None:
         """Use an overlay route hosted by the owning app HTTP server."""
@@ -298,15 +331,31 @@ class LiveAppSessionRuntime:
                     raise RuntimeError("cannot mount overlay while watcher is running")
                 self._mounted_overlay = overlay
 
-    def unmount_overlay(self, overlay: "MountedOverlayAdapter") -> None:
+    def unmount_overlay(
+        self,
+        overlay: "MountedOverlayAdapter",
+        *,
+        deadline: float | None = None,
+    ) -> None:
         """Detach and deactivate one overlay owned by an external HTTP server."""
-        with self._transition_lock:
+        remaining = _remaining_deadline_seconds(deadline)
+        if remaining is None:
+            transition_acquired = self._transition_lock.acquire()
+        else:
+            transition_acquired = self._transition_lock.acquire(timeout=remaining)
+        if not transition_acquired:
+            raise TimeoutError(
+                "overlay unmount did not finish before the shutdown deadline"
+            )
+        try:
             with self._lock:
                 if self._mounted_overlay is not overlay:
                     return
                 self._mounted_overlay = None
                 self._watcher_overlay = False
             overlay.close()
+        finally:
+            self._transition_lock.release()
 
     def resolved_log_dir(self, options: LiveWatcherRunOptions | None = None) -> Path:
         return self._resolved_watcher_config(
@@ -515,3 +564,9 @@ def _combine_watcher_failures(
         f"watcher failed with {primary}; overlay finalization failed with {cleanup}",
         [primary, cleanup],
     )
+
+
+def _remaining_deadline_seconds(deadline: float | None) -> float | None:
+    if deadline is None:
+        return None
+    return max(deadline - time.monotonic(), 0.0)

@@ -22,7 +22,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1
 
 脚本会构建 Fluent React Web UI、运行单元测试，并使用 `uv.lock` 中锁定的
 `release` dependency group 与 pnpm lockfile 构建 PyInstaller onedir 桌面托盘
-程序和 console CLI 程序；之后对 exe 做 smoke test，并输出：
+程序和 console CLI 程序；之后执行 CLI smoke test 和 frozen GUI 单实例验收。
+GUI 验收会确认 8787 只有一个监听者、第二个进程快速退出并准确打开 `/home`、
+首实例退出后 mutex 可由替代实例重新获取，以及等待中的进程能在模拟启动 owner
+释放 mutex 后重新选主并成为唯一监听者。构建随后输出：
 
 ```text
 dist/releases/DancingLog-v<version>-win-x64-portable.zip
@@ -78,7 +81,10 @@ start-watch-vrc-log.bat
 
 双击 `DancingLog.exe` 会启动桌面托盘入口，并在不打开控制台窗口的情况下激活
 `http://127.0.0.1:8787/` 上的 Local Web UI。可以通过托盘菜单重新打开 Web
-UI，启动或停止 live watcher 和 OBS overlay，或退出后台应用会话。
+UI，启动或停止 live watcher 和 OBS overlay，或退出后台应用会话。当前 Windows
+会话中只允许一个托盘实例；再次双击该程序只会使用默认浏览器打开已有 Web UI，
+随后退出，不会再创建应用会话或 HTTP 监听器。如果原 owner 在启动期间退出，等待中
+的进程会重新竞争 mutex 并成为替代 owner，避免两个进程最终都退出。
 
 `start-watch-vrc-log.bat` 默认启动常用的 OBS overlay 流程：
 

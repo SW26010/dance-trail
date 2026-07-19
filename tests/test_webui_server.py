@@ -1,6 +1,7 @@
 import json
 from io import BytesIO
 import socket
+import sys
 import tempfile
 import threading
 import time
@@ -66,6 +67,19 @@ def wait_for_call_count(calls: list[dict], count: int) -> None:
 
 
 class WebUiServerTest(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "win32", "Windows listener semantics")
+    def test_second_server_cannot_share_the_same_local_address(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            first = WebUiServer(port=0, app_root=tmp)
+            first.start()
+            second = WebUiServer(port=first.port, app_root=tmp)
+            try:
+                with self.assertRaises(OSError):
+                    second.start()
+            finally:
+                second.stop()
+                first.stop()
+
     def test_mount_failure_closes_bound_listener(self):
         class RejectingSession:
             def mount_overlay(self, _overlay) -> None:
@@ -373,6 +387,58 @@ class WebUiServerTest(unittest.TestCase):
                 stop_thread.join(timeout=2.0)
                 if server._server is not None:
                     server.stop()
+
+    def test_webui_terminal_stop_bounds_accepted_operation_drain_by_deadline(self):
+        entered = threading.Event()
+        release = threading.Event()
+        request_errors: list[Exception] = []
+
+        def blocking_post(_runtime, _target, _payload):
+            entered.set()
+            release.wait(timeout=2.0)
+            return WebUiRouteResponse(
+                200,
+                "application/json; charset=utf-8",
+                b"{}",
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            server = WebUiServer(port=0, app_root=tmp)
+            server.start()
+            token = self._csrf_token(server)
+            request = self._json_request(
+                server,
+                "api/config",
+                {},
+                token=token,
+                origin=server.url.rstrip("/"),
+            )
+
+            def send_request() -> None:
+                try:
+                    with urlopen(request, timeout=2) as response:
+                        response.read()
+                except Exception as exc:
+                    request_errors.append(exc)
+
+            request_thread = threading.Thread(target=send_request)
+            try:
+                with patch(
+                    "dancing_log.webui_server.handle_post_request",
+                    side_effect=blocking_post,
+                ):
+                    request_thread.start()
+                    self.assertTrue(entered.wait(timeout=1.0))
+                    started = time.monotonic()
+                    with self.assertRaisesRegex(TimeoutError, "shutdown deadline"):
+                        server.stop(deadline=started + 0.05)
+                    elapsed = time.monotonic() - started
+            finally:
+                release.set()
+                request_thread.join(timeout=2.0)
+
+        self.assertLess(elapsed, 0.3)
+        self.assertFalse(request_thread.is_alive())
 
     def test_invalid_post_headers_are_rejected_without_waiting_for_body(self):
         with tempfile.TemporaryDirectory() as tmp:
