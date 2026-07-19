@@ -39,7 +39,7 @@ dist/releases/DancingLog-v<version>-win-x64-portable.zip.sha256
 Useful options:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1 -Version 0.7.0
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1 -Version 0.8.0
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1 -SkipTests
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1 -SkipSmoke
 ```
@@ -55,8 +55,8 @@ observations are advisory and are not required for release.
 Push a version tag:
 
 ```powershell
-git tag v0.7.0
-git push origin v0.7.0
+git tag v0.8.0
+git push origin v0.8.0
 ```
 
 The `Release Portable` workflow verifies the matching accessibility report, runs the
