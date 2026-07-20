@@ -3,6 +3,8 @@
 Date: 2026-05-17
 Updated: 2026-07-19
 
+Primary data-model definition described here: v0 (runtime and historical reference)
+
 This document describes the current SQLite runtime model for `dancing-log`.
 The project no longer uses the legacy `songs` table or
 `dance_events.song_id` path.
@@ -10,10 +12,10 @@ After the legacy cleanup recorded in ADR 0004, `playback_records` is the
 Local Playback Evidence v0 read contract for normal Timeline and Insights
 queries.
 
-The target design for the next `playback_records` schema is
-`docs/playback_records_schema_redesign.zh-CN.md`. This document remains the
-current/v0 runtime model description and must not be treated as the field
-contract for the new schema migration.
+The directional definition for the next playback data model is
+`docs/playback_data_model_redesign.zh-CN.md`. This document remains the
+current/v0 runtime model description and must not constrain the new structure
+or its future field design.
 
 ADR 0013 defines the next responsibility boundary: the watcher only captures,
 deterministically organizes, and persists source evidence. It does not own a

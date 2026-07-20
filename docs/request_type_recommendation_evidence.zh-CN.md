@@ -2,18 +2,20 @@
 
 日期：2026-06-26
 
-状态：第一版实现约束。本文只记录为了先实现 Dance Plan 和 Request Source Type Inference 所必须确定的推荐相关事项；推荐算法、推荐 UI、清单长度、重生成规则、排序细则和最终推荐表 schema 暂缓。
+状态：未来推荐扩展的语义记录。完整 Request Source Type Inference 属于 v2 核心，但推荐
+机制整体暂缓，包括推荐算法、推荐 UI、清单生成、Recommendation List Snapshot 生产流程
+和最终推荐表 schema。本文保留未来 `recommend` 的可解释证据边界，不构成当前实现范围。
 
 ## 目标
 
 `request_type = recommend` 必须来自一个可解释、可重复读取的推荐清单证据，而不是来自当前推荐算法的即时结果。
 
-第一版要先保证：
+当前 v2 要先保证：
 
-- Dance Plan 能把已 fulfill 的 Accepted Playback Record 推断为 `planned`。
+- Dance Plan 能把已 fulfill 的 Accepted Playback Occurrence 推断为 `planned`。
 - Request Source Type Inference 能作为独立模块先实现。
-- 推荐清单能在用户显式启用或接受后，作为 `recommend` 推断材料；没有推荐清单存储时，Request Source Type Inference 仍然必须能运行，只是不能产生新的 `recommend` 推断。
-- 推荐算法以后可以替换，不影响已经冻结的推荐清单证据。
+- 没有推荐清单存储时，Request Source Type Inference 仍然完整运行，只是不能产生新的 `recommend` 推断。
+- 未来若实现推荐机制，显式启用或接受的清单必须先冻结为 Recommendation List Snapshot，才能作为 `recommend` 推断材料；算法以后可以替换，但不能改写已经冻结的 snapshot。
 
 ## 已决定的边界
 
@@ -23,11 +25,11 @@ Request Source Type Inference 必须是独立模块。它可以放在 `playback_
 
 推荐清单必须固定。用户显式启用或接受推荐功能时，系统要冻结当时的清单内容，形成 Recommendation List Snapshot。之后算法变化、catalog metadata 更新或用户重新生成推荐，都不能改写旧 snapshot 的内容。未来也可以把“信息已经传达给用户或被系统代为使用”的动作视为冻结动作，例如用户复制推荐清单，或未来自动点歌系统使用了推荐清单内容。
 
-推荐清单是 `request_type` 推断材料。推断模块可以用 frozen snapshot 判断某条 Accepted Playback Record 是否来自本工具推荐，并把默认 Request Source Type 推断为 `recommend`。这不创建 playback record，不决定 accepted/excluded，也不覆盖 requester identity。
+推荐清单是 `request_type` 推断材料。推断模块可以用 frozen snapshot 判断某次 Accepted Playback Occurrence 是否来自本工具推荐，并把默认 Request Source Type 推断为 `recommend`。这不创建 Playback Evidence，不决定 accepted/excluded，也不覆盖 requester identity。
 
 推荐清单只向后生效。snapshot 只能作用于同一个 Local Dance Day 内、snapshot 内容已经冻结之后发生的 playback。不能在舞蹈后补建或补接受推荐清单，再把已经发生的 playback 改成 `recommend`。
 
-Dance Plan 比推荐清单更强。如果同一条 Accepted Playback Record 同时满足 Dance Plan Fulfillment 和 Recommendation List Snapshot，`planned` 胜出，`recommend` 只作为次级可解释材料保留。
+Dance Plan 比推荐清单更强。如果同一次 Accepted Playback Occurrence 同时满足 Dance Plan Fulfillment 和 Recommendation List Snapshot，`planned` 胜出，`recommend` 只作为次级可解释材料保留。
 
 ## Recommendation List Snapshot 的最小语义
 
@@ -49,7 +51,7 @@ snapshot item 应保存足够稳定的舞蹈身份。数据库内可以引用 `d
 
 当同一 Local Dance Day 内同一个 snapshot item / `dance_track_id` 对应多条 eligible effective accepted playback records 时，第一版只把当天最早的一条 record 推断为 `recommend`。后续同 track 播放不会因为同一个 Recommendation List Snapshot item 继续被标记为 `recommend`。
 
-如果当前数据库还没有推荐 snapshot 表，或表存在但当天没有 frozen snapshot，Request Source Type Inference 应继续运行，并把推荐证据视为空输入。此时它可以继续根据 Dance Plan Fulfillment、Requester Identity、Self User Identity、legacy/source evidence 和 Manual Record Updates 推断 `planned`、`self`、`other`、`random` 或 `unknown`，但不能凭当前算法即时结果推断 `recommend`。
+如果当前数据库还没有推荐 snapshot 表，或表存在但当天没有 frozen snapshot，Request Source Type Inference 应继续运行，并把推荐证据视为空输入。此时它可以继续根据 Dance Plan Fulfillment、Requester Identity、Self User Identity 和 legacy/source evidence 推断 `planned`、`self`、`other`、`random` 或 `unknown`，但不能凭当前算法即时结果推断 `recommend`。Manual Record Update 已整体暂缓，不是第一版输入。
 
 以下情况不能推断为 `recommend`：
 
@@ -69,7 +71,7 @@ watcher 只负责观察和保存 playback evidence，可保留 raw/coarse source
 
 VRCX importer 只负责导入历史 evidence 和 requester identity。它不应因为当前算法推荐了某首歌，就在导入时直接写 `recommend`。
 
-writer 只负责写 Local Playback Evidence 和 origins。它不应内嵌推荐清单匹配规则。
+source writer 只负责写 Playback Evidence 和 provenance。它不应内嵌推荐清单匹配规则。
 
 推荐算法只负责生成候选和排序。它可以产生 snapshot 的内容，但 snapshot 冻结后就是推断证据，不能再由算法实时解释。
 

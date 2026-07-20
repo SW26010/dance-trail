@@ -4,7 +4,15 @@ Date: 2026-06-22
 
 ## Status
 
-Accepted
+Accepted for v1; principle retained and mechanics superseded for v2
+
+V2 retains trust-by-default inclusion and reversible manual `accepted` /
+`excluded` decisions. ADR 0013 supersedes watcher-owned settlement and
+acceptance responsibilities; ADR 0014 supersedes playback-record identity;
+the v2 model also replaces the global source-priority and routine-review
+language below with per-fact resolution and a non-counting default
+attention-needed result that does not itself require user action. The detailed
+v1 mechanics below remain historical implementation context.
 
 ## Context
 

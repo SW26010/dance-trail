@@ -4,7 +4,14 @@ Date: 2026-06-21
 
 ## Status
 
-Accepted
+Historical for v1; future v2 reference only
+
+The v2 design does not promise or implement cross-`dancing-log` database
+merging. It keeps the capability only as a possible future extension. If that
+work is ever revived, a new ADR must redefine the workflow around immutable
+Playback Evidence, remapped Playback Handles, temporal memberships and
+redirects, and the user state that v2 actually supports. The tables and
+conflict semantics below are not v2 requirements.
 
 ## Context
 

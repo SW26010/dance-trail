@@ -3,14 +3,16 @@
 日期：2026-05-17
 更新：2026-07-19
 
+本文主要描述的数据模型定义版本：v0（现状与历史运行时说明）
+
 本文描述 `dancing-log` 当前的 SQLite 运行时模型。项目已经不再使用旧的
 `songs` 表，也不再使用 `dance_events.song_id`。
 ADR 0004 记录的一次性 legacy cleanup 之后，`playback_records` 是普通
 Timeline 和 Insights 查询使用的 Local Playback Evidence v0 读模型 contract。
 
-下一版 `playback_records` schema 的目标设计以
-`docs/playback_records_schema_redesign.zh-CN.md` 为准。本文保留当前/v0
-运行时模型说明，不能作为新 schema 迁移目标的字段 contract。
+下一代播放数据结构的方向性定义以
+`docs/playback_data_model_redesign.zh-CN.md` 为准。本文只保留当前/v0
+运行时模型说明，不能作为新结构的字段或迁移约束。
 
 ADR 0013 定义下一版职责边界：watcher 只采集、确定性整理并保存来源证据，不负责
 durable event/occurrence 汇总、Request Source Type Inference、接受状态或历史修复。

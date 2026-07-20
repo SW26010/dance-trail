@@ -372,7 +372,7 @@ status 应使用运行时内存状态。
 
 ## 从 VRCX 检测本机身份
 
-从 VRCX 只读推断 `self_user_id` 候选是可行的。
+从 VRCX 只读提出 Self User Identity 的候选 VRChat user id 是可行的。
 
 推荐流程：
 
@@ -380,10 +380,11 @@ status 应使用运行时内存状态。
 2. 如果只找到一个候选 id，再从 `gamelog_video_play` 和 `gamelog_join_leave` 查它
    最近或最常见的 `display_name`。
 3. UI 用 display name 让用户确认，因为它比原始 `usr_...` 更直观。
-4. 保存时仍保存稳定的 `self_user_id`，不要把 display name 当身份主键。
+4. 用户确认后把稳定 user id 加入 Self User Identity；不要用 display name 替代身份主键，
+   也不要因确认一个新候选而覆盖已经确认的其他 user ids。
 
 display name 只适合做确认标签。它可能改名，也理论上可能重复；真正用于 VRCX 导入和
-后续回填判断 `self` / `other` 的，仍然应该是稳定的 `usr_...`。
+后续重建并判断 `self` / `other` 的，仍然应该是经确认集合中的稳定 `usr_...`。
 
 如果 VRCX 里出现多个本地账号候选，或一个 display name 对应多个 `user_id`，辅助检测
 应该让用户明确选择，或者保持手动填写；不要静默猜测。
@@ -392,8 +393,8 @@ display name 只适合做确认标签。它可能改名，也理论上可能重�
 
 1. 继续收集真实 PyPyDance、Dudu、VRDancing 和其他舞蹈系统的 VRCX 行作为 fixture。
 2. 为带正 playback offset 的真实 PyPyDance 半路进房行为增加 fixture。
-3. 增加一个只读 VRCX 身份辅助检测，用 display name 给用户确认，背后写入
-   `self_user_id`。
+3. 增加一个只读 VRCX 身份辅助检测，用 display name 给用户确认，背后把稳定 user id
+   加入 Self User Identity。
 4. 看到输入形状后，再为每个新舞蹈系统设计自己的扩展表。
 5. 增加一个修正或回填命令，用来处理现有 `unknown` 来源。身份辅助检测也可以用于
    回填：当附近播放或 player-history 风格记录里的 `display_name` 映射无歧义时，

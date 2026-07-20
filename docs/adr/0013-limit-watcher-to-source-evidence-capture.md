@@ -4,7 +4,7 @@ Date: 2026-07-19
 
 ## Status
 
-Accepted
+Accepted (clarified 2026-07-21)
 
 ## Context
 
@@ -30,9 +30,20 @@ The watcher owns only source evidence capture:
   as timestamp, URL, dance-system identity, field shape, and units;
 - perform bounded same-session correlation or identity enrichment only when the
   contributing observations and provenance remain recorded;
-- write the organized observation to the Local Playback Evidence store with
-  its raw value or payload, source file, line range, parser name, and other
-  audit coordinates.
+- organize the contributing lines before publication so one watcher Source
+  Evidence Event is independently sufficient to describe the source playback;
+- after bounded organization and enrichment completes or times out, publish
+  that one immutable event with its raw values or payloads, source file, line
+  range, parser name, and other audit coordinates.
+
+Mutable watcher capture candidates exist only before evidence publication.
+They may be held in memory or an operational staging store and may drive Live
+Status or the OBS Overlay, but they are not Playback Evidence or Playback
+Occurrences. A missing optional fact such as requester user id may remain null
+when the bounded wait ends. Once the Playback Evidence item is published, the
+watcher must not backfill, upsert, or overwrite it. It also must not publish a
+set of fragment rows that requires downstream consumers to reconstruct the
+single watcher source event.
 
 The watcher does not own:
 
@@ -69,6 +80,10 @@ policy, or repair ownership to the watcher.
 Source adapters stay faithful and replayable. Event/occurrence projection,
 Request Source Type Inference, acceptance policy, and repair can evolve and be
 rerun without changing the captured evidence.
+
+Durable Timeline and Insights may lag the live watcher until a capture
+candidate is published. This is intentional: realtime operational display and
+immutable historical evidence have different publication boundaries.
 
 Evidence rows must preserve enough provenance to explain every downstream
 projection. A bare normalized label without the direct source marker that

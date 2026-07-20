@@ -511,7 +511,8 @@ captures:
 
 ## Self Identity Detection
 
-It is feasible to use VRCX as a read-only source for a `self_user_id` candidate.
+It is feasible to use VRCX as a read-only source for candidate VRChat user ids
+for Self User Identity.
 
 The preferred flow is:
 
@@ -521,19 +522,22 @@ The preferred flow is:
    most common `display_name` from `gamelog_video_play` and `gamelog_join_leave`.
 3. Ask the user to confirm the display name, because that is more legible than a
    raw `usr_...` id.
-4. Persist the stable `self_user_id`, not the display name.
+4. After confirmation, add the stable user id to Self User Identity. Do not use
+   the display name as the identity key or replace other confirmed user ids.
 
-The helper should run from Settings when `self_user_id` is not saved yet. VRCX
-import and rebuild operations may use a saved `self_user_id`, but they should
-not silently detect and persist one as a side effect of a data operation.
+The helper should run from Settings when no Self User Identity member has been
+confirmed yet, and remain available when another account needs to be added.
+VRCX import and rebuild operations may use the confirmed identity set, but they
+should not silently detect and persist a member as a side effect of a data
+operation.
 
 The display name is only a confirmation label. It can change and is not a stable
-identity key. The `usr_...` value remains the source of truth for self-vs-other
-inference during VRCX import and later backfill.
+identity key. Membership of a stable `usr_...` value in the confirmed identity
+set remains the source of truth for self-vs-other inference during rebuild.
 
 If VRCX exposes multiple candidate accounts, or if a display name maps to more
-than one `user_id`, the helper should present explicit choices or leave
-`self_user_id` manual. It should not silently guess.
+than one `user_id`, the helper should present explicit choices or leave the
+identity set unchanged. It should not silently guess.
 
 ## Recommended Next Steps
 
@@ -541,8 +545,8 @@ than one `user_id`, the helper should present explicit choices or leave
    other dance-system VRCX rows.
 2. Add a fixture for true PyPyDance mid-room-join behavior with positive
    playback offsets.
-3. Add a read-only VRCX identity helper that proposes `self_user_id` with a
-   display-name confirmation label.
+3. Add a read-only VRCX identity helper that proposes stable user ids for the
+   confirmed Self User Identity set, with display-name confirmation labels.
 4. Design one extension table per additional dance system only after the input
    shape is known.
 5. Add a correction/backfill command for existing `unknown` source rows. The

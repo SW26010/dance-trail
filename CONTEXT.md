@@ -29,7 +29,7 @@ A durable planned set of dance items the user intends to dance. A Dance Plan can
 _Avoid_: catalog, timeline, history
 
 **Dance Plan Fulfillment**:
-The relationship between a Dance Plan item and an Accepted Playback Record that satisfied it. Fulfillment can promote the playback record's Request Source Type to planned, but it does not create playback evidence and does not replace requester identity.
+The relationship between a Dance Plan item and an accepted Playback Occurrence that satisfied it. Fulfillment makes `planned` available to Request Source Type Inference, but it does not create playback evidence or replace Requester Identity.
 _Avoid_: playback evidence, requester identity, manual exclusion
 
 **Superseded Dance Plan Item**:
@@ -49,7 +49,7 @@ The inventory of available dance content and the real music those entries repres
 _Avoid_: dance plan, timeline, data operations
 
 **Dance Track**:
-One playable dance version inside a dance system, such as a WannaDance, PyPyDance, or Dudu entry. It may represent a specific choreography, dancer, difficulty, player count, or system-local id.
+One playable dance version identified by its dance system and system-local external id, such as a WannaDance, PyPyDance, or Dudu entry. That stable source identity exists conceptually even before a local Catalog row is materialized. The row may be created lazily as a minimal identity-only entry when first needed; later Catalog metadata enrichment does not change that identity.
 _Avoid_: song, music track
 
 **Dance Preference**:
@@ -57,11 +57,11 @@ A user preference attached to a dance track, such as favorite or want-to-learn. 
 _Avoid_: music preference, playlist item
 
 **Recommendation Algorithm**:
-The changeable scoring or selection strategy that proposes dance tracks to the user. It may change without rewriting historical Request Source Type evidence; only an explicitly enabled or accepted result becomes a Recommendation List Snapshot.
+The deferred, changeable scoring or selection strategy that may propose dance tracks to the user. Its output is not Request Source Type evidence; a future workflow would have to freeze an explicitly enabled or accepted result as a Recommendation List Snapshot.
 _Avoid_: recommendation evidence, request source type, dance plan
 
 **Recommendation List Snapshot**:
-A frozen list of recommended dance tracks explicitly enabled or accepted by the user for a Local Dance Day. It can be evidence for Request Source Type Inference only for same-day playback after the snapshot was frozen, and it is separate from the mutable Recommendation Algorithm, Dance Plan, and playback evidence.
+A possible future frozen list of recommended dance tracks explicitly enabled or accepted for a Local Dance Day. If implemented, it can support `recommend` only for same-day playback after freezing; the v2 Request Source Type Inference does not require snapshots to exist.
 _Avoid_: algorithm result, preview, dance plan item, playback record
 
 **Music Track**:
@@ -69,11 +69,11 @@ The real song independent of dance system and choreography. Music-provider links
 _Avoid_: dance track, dance-system entry
 
 **Insights**:
-Derived views that summarize and explain accepted playback, catalog, and dance-plan data, such as frequency, trends, source distribution, and neglected favorites. Insights are analysis surfaces, not the source of historical truth; manually excluded playback records do not contribute to normal insight calculations.
+Derived views that summarize and explain accepted Playback Occurrences, catalog, and dance-plan data, such as frequency, trends, source distribution, and neglected favorites. Insights consume the same handle-based current interpretation as Timeline; source evidence is traceable input rather than an independently counted playback.
 _Avoid_: timeline, raw history, catalog
 
 **Data Operations**:
-Controlled workflows that change or rebuild local data in bulk, such as importing VRCX history, syncing dance-system catalogs, rebuilding generated data, backup and restore, and future database merge flows. It is not a raw database editor.
+Controlled workflows that change or rebuild local data in bulk, such as importing VRCX history, syncing dance-system catalogs, rebuilding generated data, and backup or restore. Cross-`dancing-log` database merge is only a possible future flow, not a v2 commitment. Data Operations is not a raw database editor.
 _Avoid_: settings, raw SQLite editor, ad hoc table editing
 
 **Data Operation Coordinator**:
@@ -141,15 +141,15 @@ An External Source Path explicitly saved by the user for cases where automatic d
 _Avoid_: detected source path, internal app path, generated output path
 
 **Self User Identity**:
-The stable VRChat user id for the local user, used to distinguish the user's own playback requests from other requester identities.
+The set of stable VRChat user ids confirmed to belong to the local user, used to distinguish the user's own playback requests from other requester identities. Any member identifies self across the retained playback history; display names are confirmation labels, not identity keys.
 _Avoid_: display name, source path, VRCX database path
 
 **Detected User Identity**:
-A candidate Self User Identity found from local source metadata. It may be shown with a display-name label for confirmation, but the display name is not the identity key.
+A candidate stable VRChat user id found from local source metadata. It may be shown with a display-name label for confirmation and added to Self User Identity without replacing its existing members.
 _Avoid_: saved configuration, display-name preference, source path
 
 **Manual User Identity**:
-A Self User Identity explicitly provided or corrected by the user when detection is unavailable, ambiguous, or stale.
+A stable VRChat user id explicitly added to or removed from Self User Identity by the user when detection is unavailable, ambiguous, wrong, or stale.
 _Avoid_: detected source path, display name, generated default
 
 **Requester Identity**:
@@ -177,27 +177,87 @@ The Home surface for current watcher state, current playback, current session ac
 _Avoid_: timeline, history, archive, primary navigation
 
 **Timeline**:
-The chronological review and correction surface for playback records. Timeline defaults to the latest local date that has playback records, preserves time order within the selected date, and uses color, icons, and labels to show each record's acceptance, review attention, and relevant observation details.
+The chronological review and correction surface whose v2 items each represent one handle-based Playback Occurrence and its current interpretation. Playback Evidence remains available as expandable provenance details, not parallel history items for the same occurrence.
 _Avoid_: status buckets, live monitor, insights, data operations
 
 **Playback Record**:
-The Web UI timeline item representing one parsed playback-related record, whether it comes from historical import, live observation, interrupted observation, or another parsed source. It is not the same as a raw VRChat log line.
-_Avoid_: raw log line, database row
+The legacy v1 product and storage term for a normalized `playback_records` row. V2 uses Playback Evidence for immutable source evidence and Playback Occurrence for the user-facing playback unit; Playback Record is not a v2 identity or read root.
+_Avoid_: v2 playback identity, occurrence projection, playback evidence
+
+**Playback Occurrence**:
+The system's current rebuildable representation of one distinct playback occurrence, addressed by a stable Playback Handle and constructed from evidence, memberships, redirects, and current rules. It is the v2 playback unit exposed to ordinary business features, not a claim that the system stores an independently knowable real-world event. It is a logical product shape rather than a required stored row; its computation or cache never becomes the durable identity.
+_Avoid_: evidence row, permanent fact copy, ephemeral row identity, merge group
+
+**Playback Read Boundary**:
+The v2 domain boundary through which ordinary upper-layer features read Handle-addressed playback and current interpretation. It owns Handle redirect resolution and evidence-identity isolation while allowing internal queries, views, or caches to vary without changing the business contract.
+_Avoid_: occurrence table, shared SQL query, evidence repository, UI-specific resolver
+
+**Playback Handle**:
+The stable database-local identifier through which v2 business data references a Playback Occurrence. A Playback Handle contains no playback facts or current interpretation; reads resolve any active Playback Handle Redirect to a Canonical Handle before exposing the current occurrence. Its physical key type is a schema choice rather than a separate domain term.
+_Avoid_: global identity, portable database id, playback evidence, occurrence row, permanent fact copy
+
+**Canonical Handle**:
+The current representative Playback Handle reached after resolving all active Playback Handle Redirects from an input Handle. `resolved_handle` may name the result of that resolution in code, while `root` is only an internal graph term. Canonical is a current role rather than a permanent flag: the Handle can itself become the source of a later redirect.
+_Avoid_: permanent canonical flag, terminal Handle, end Handle, copied occurrence identity
+
+**Playback Evidence Membership**:
+The relationship through which one Playback Evidence item has membership in one Playback Handle. Through that relationship, the evidence supports the Playback Occurrence addressed by the Handle. The evidence is the member and the Handle is the membership target; this relationship is not a Handle merge or redirect.
+_Avoid_: Handle membership, evidence copy, Handle redirect, occurrence cache
+
+**Playback Identity Operation**:
+An instantaneous durable audit record grouping membership and Handle-redirect changes made by one atomic playback-identity action. It owns one occurrence time; relationship validity begins or ends according to whether the relationship references it as its establishing or closing operation.
+_Avoid_: relationship-table audit row, generic application operation, reconciliation run
+
+**Playback Evidence**:
+An immutable, source-scoped evidence item created when an Evidence Source adapter deterministically organizes the facts it observed. Whenever possible, one adapter should consolidate the bounded raw observations for one playback into one self-contained item, so that one item from that source is sufficient to support a Playback Occurrence; downstream code should not have to assemble fragmented evidence to understand the source's claim. This is an organization principle rather than a uniqueness constraint. Playback Evidence has a stable local identity shared across source kinds and distinct from source-side row ids and log coordinates. It is direct input to Playback Reconciliation and may retain provenance to multiple raw lines or source rows, but it is not a Playback Handle, Playback Occurrence, or current interpretation.
+_Avoid_: raw log line, fragmented source fact, playback occurrence, mutable projection
+
+**Source Evidence Location**:
+A stable source-scoped coordinate used to recognize the same source record before comparing its content fingerprint. Repeated VRCX imports must resolve the same source row to the same location, and watcher live capture and watcher replay must resolve the same underlying VRChat log event to the same location. Import-run ids, live/replay mode, and watcher session ids are not part of this identity. Exact-ingestion deduplication compares locations and content only among Playback Evidence items that still have an effective Playback Evidence Membership and therefore still support a Playback Handle; an evidence row has no separate active flag.
+_Avoid_: evidence id, content fingerprint, import run, watcher session, playback handle
+
+**Playback Evidence Deduplication**:
+The same-source check that decides whether incoming source data has already produced the same Playback Evidence. It prevents duplicate ingestion; it does not decide which Playback Evidence items support the same Playback Occurrence.
+_Avoid_: Playback Reconciliation, occurrence merge, cross-source matching
+
+**Playback Reconciliation**:
+The process that determines which Playback Evidence items from different Evidence Sources support the same Playback Occurrence and which remain independent. Its result is expressed through Playback Evidence Memberships and, when reconciling existing identities, Playback Handle Redirects.
+_Avoid_: Playback Evidence Deduplication, source import, evidence parsing, occurrence projection
+
+**Playback Occurrence Merge**:
+The semantic effect in which Playback Handles that previously exposed separate Playback Occurrences now resolve to one current Playback Occurrence. It is produced through Playback Handle Redirects rather than by physically merging or rewriting stored occurrence rows.
+_Avoid_: evidence merge, row rewrite, Handle deletion, field conflict
+
+**Playback Handle Redirect**:
+The durable directed relationship through which one source Playback Handle redirects to one target Playback Handle. Resolving the relationship produces Playback Occurrence Merge semantics while preserving the source Handle and its existing Playback Evidence Memberships.
+_Avoid_: Playback Evidence Membership, Handle replacement, occurrence row merge, mutable cache pointer
+
+**Possible Match**:
+A relationship reported by Playback Reconciliation between independent Playback Occurrences that appear related but do not satisfy the strict merge rule. It does not prescribe how the algorithm found or evaluated them, change identity or normal consumption, or require user review; new evidence or explicit historical reprocessing may evaluate it again.
+_Avoid_: merged playback, review task, negative relationship, hidden deduplication
+
+**Do Not Merge Decision**:
+A durable user-authored negative relationship for a specific candidate pair or group that the user has explicitly chosen to keep separate. It is never generated for ordinary unmatched occurrences; normal reconciliation must respect it until an explicit user action or repair revokes it.
+_Avoid_: unmatched occurrence, automatic negative relation, possible match, source priority
+
+**Merge Decision**:
+An exceptional user decision requested when identity evidence supports merging Playback Occurrences but incompatible user-authored states prevent a lossless automatic merge. It belongs to an explicit merge or historical-repair workflow rather than a general review queue; the user may complete the merge or create a Do Not Merge Decision, and until then both occurrences and their states remain unchanged.
+_Avoid_: possible match, routine confirmation, evidence conflict, automatic source priority
 
 **VRChat Log Watcher**:
-The source adapter that observes newly appended VRChat log lines, performs only deterministic parsing and bounded evidence-preserving organization or enrichment, and writes the observed facts with their provenance to Local Playback Evidence. It does not own a durable events summary, canonical playback-occurrence projection, Request Source Type Inference, acceptance policy, cross-source reconciliation, or historical repair. Runtime-only folding for Live Status or the OBS Overlay is ephemeral operational state, not a durable product event model.
+The source adapter that observes newly appended VRChat log lines, performs deterministic parsing plus bounded same-source organization and enrichment, and publishes one self-contained immutable Playback Evidence item for each organized watcher playback. Mutable pending capture exists only before publication; after the evidence row is written, the watcher cannot backfill or overwrite it. The watcher does not own the canonical Playback Occurrence, Request Source Type Inference, acceptance policy, cross-source reconciliation, or historical repair. Runtime-only folding for Live Status or the OBS Overlay is ephemeral operational state, not a durable product event model.
 _Avoid_: event aggregator, request-source classifier, history projector, repair worker
 
 **Watcher-Derived Playback Record**:
-A Playback Record projected from evidence captured by the VRChat Log Watcher once downstream evidence organization has a dance identity. It may represent playback observed from the start or playback discovered after it is already in progress. Its existence means the evidence is reviewable in Timeline; it does not mean the watcher owns event summarization, Request Source Type Inference, or accepted-history policy.
+A legacy v1 Playback Record projected from evidence captured by the VRChat Log Watcher. V2 instead publishes one self-contained Playback Evidence item after bounded watcher-side organization and enrichment, then lets the Handle-based downstream boundary expose the Playback Occurrence. Neither shape makes the watcher the owner of canonical occurrence identity, Request Source Type Inference, or accepted-history policy.
 _Avoid_: live playback record, overlay state, accepted playback record, actual-play-only record
 
 **Manual Log Entry**:
-A user-created Local Playback Evidence record for a playback the user says happened, with user-supplied playback facts such as dance track and played time. It creates playback evidence; it is not a Manual Record Update, not a Dance Plan item, and not a direct Request Source Type edit. Request Source Type Inference still decides the record's Request Source Type from stable inputs after the manual evidence exists.
-_Avoid_: request source override, plan item, manual playback decision
+A user-authored source-evidence claim that a playback occurred, with supplied facts such as dance track and played time. It may independently support default inclusion under the Trust-By-Default Playback Policy, but it does not override differing external-source facts and is not a Manual Record Update, Manual Playback Decision, Dance Plan item, or direct Request Source Type edit.
+_Avoid_: manual correction, request source override, plan item, manual playback decision
 
 **Watcher Settlement**:
-The legacy name for the downstream evidence-policy action that resolves a pending Watcher-Derived Playback Record after enough lifecycle or playback evidence is available. Settlement may accept a record, mark it attention-needed, exclude it, or leave it pending when the observation is still active. Despite the name, this policy is not part of VRChat Log Watcher capture responsibility.
+The legacy v1 name for the downstream evidence-policy action that resolves a pending Watcher-Derived Playback Record after enough lifecycle or playback evidence is available. V2 watcher capture instead completes or times out its bounded source-side organization before publishing one immutable Playback Evidence item; downstream acceptance policy remains separate.
 _Avoid_: watcher capture, raw event parsing, manual decision, playback record creation
 
 **Playback Observation**:
@@ -205,76 +265,80 @@ The locally observed playback lifecycle state for a playback record, such as an 
 _Avoid_: request source, acceptance result, raw watcher payload, manual decision
 
 **Request Source Type**:
-The normalized request/playback-source classification stored on a playback record, such as planned, recommend, self, other, random, or unknown. Request Source Type is stored today in legacy `source_type`, with `request_type` as the clearer long-term field name. It is not evidence strength, not a confidence score, and does not decide whether the record is effectively accepted, excluded, or needs attention. Self, other, and random are mutually exclusive sibling classifications rather than an ordered priority ladder. Coarse watcher-side labels such as player and old queued_self values are legacy parser or import evidence, not canonical Request Source Type values.
+The canonical, rebuildable request/playback-source classification of a Playback Occurrence: planned, recommend, self, other, random, or unknown. It is not evidence strength, confidence, or acceptance state; self, other, and random are mutually exclusive siblings, while coarse watcher labels and legacy `queued_self` are not canonical values.
 _Avoid_: requester identity, evidence source priority, confidence score, acceptance status, review status, raw watcher label
 
 **Request Source Type Inference**:
-The independent, repeatable process that derives or repairs a playback record's Request Source Type from stable inputs such as Local Playback Evidence, Requester Identity, Self User Identity, Dance Plan Fulfillment, Recommendation List Snapshots, and active Manual Record Updates. It is not a watcher, importer, writer, or ordinary read-path responsibility, and it does not require realtime execution.
+The independent, repeatable v2 process that derives a Playback Occurrence's Request Source Type from Handle-resolved Playback Evidence, Requester Identity, Self User Identity, Dance Plan Fulfillment, and any available Recommendation List Snapshot. It runs without recommendation snapshots and is not owned by a watcher, importer, writer, recommendation algorithm, or ordinary read path.
 _Avoid_: watcher enrichment, VRCX import, recommendation algorithm, acceptance settlement
 
-**Accepted Playback Record**:
-A playback record included in normal history and Insights under the trust-by-default policy. A record may be accepted because it comes from a supported source, was automatically settled, or was manually confirmed; manual confirmation is not required for ordinary inclusion.
-_Avoid_: manually confirmed only, promotion-only record, raw parser row
+**Accepted Playback Occurrence**:
+A Playback Occurrence included in normal history and Insights under the Trust-By-Default Playback Policy or an active Manual Acceptance. Manual confirmation is not required for ordinary inclusion.
+_Avoid_: accepted playback record, manually confirmed only, promotion-only record, raw parser row
 
 **Pending Playback Record**:
-A playback record whose evidence is reviewable but not yet settled into accepted, attention-needed, or excluded state. Pending is for active or incomplete observation state; it is not a request for human review by itself and does not count in normal history or Insights. Pending should normally be settled when the watcher stops gracefully; a leftover pending watcher-derived record indicates the watcher ended unexpectedly before settlement. Recovery or repair workflows may convert stale pending watcher records into attention-needed records, but ordinary Timeline or Insights reads should not mutate them.
-_Avoid_: needs attention, excluded, accepted, raw live state, graceful final state, read-time repair
+A legacy v1 playback row whose watcher observation has not settled. In v2, pending watcher capture is mutable pre-publication operational state, not Playback Evidence or a Playback Occurrence; Live Status and OBS may consume it, while Timeline and Insights consume only published evidence through the Handle boundary.
+_Avoid_: v2 evidence, v2 occurrence, needs attention, excluded, accepted, durable live state
 
 **Default Acceptance Result**:
-The accepted, pending, excluded, or attention-needed result inferred from playback evidence and Evidence Source Priority before any active manual decision is applied. It is one default evidence-derived outcome, not a combination of a status field plus a separate history-counting flag. Restoring the default result means removing the manual decision overlay and letting the evidence rules decide again.
+A system-derived result inferred from published playback evidence before any active manual decision is applied. In v2 the result is accepted or attention-needed. Pending watcher capture exists before evidence publication and is not a Default Acceptance Result. Attention-needed is non-counting and does not by itself require user action; excluded is only a Manual Playback Decision and is never a default result. Restoring the default result means removing the manual accepted/excluded overlay and letting the evidence rules decide again.
 _Avoid_: stored truth, permanent user state, raw parser status, history-counting flag
 
 **Manual Playback Decision**:
-A reversible user-authored decision about whether a playback record should be accepted, excluded, or reviewed. Manual Playback Decision is strongest while active, but it does not erase playback evidence or permanently replace the Default Acceptance Result. Pending is not a Manual Playback Decision because active observation state is inferred from evidence rather than chosen by the user.
+A reversible user-authored overlay on a Playback Handle that explicitly makes the current Playback Occurrence accepted or excluded. It is strongest while active, but it does not erase Playback Evidence, change evidence membership or redirects, or permanently replace the Default Acceptance Result. Restoring the default closes the active overlay and lets evidence-derived rules govern again; it is not a third persistent inclusion state. Pending is not a Manual Playback Decision because active observation state is inferred from evidence rather than chosen by the user.
 _Avoid_: deletion, source rewrite, irreversible confirmation, pending playback
 
+**Manual Acceptance**:
+A reversible Manual Playback Decision that a Playback Occurrence should participate in normal history and Insights even when its current default result would not include it. It records user intent on the Playback Handle; it is not required for evidence that already counts under Trust-By-Default Playback Policy, and it does not rewrite evidence.
+_Avoid_: source evidence, mandatory confirmation, permanent promotion, default acceptance
+
 **Manual Exclusion**:
-A reversible Manual Playback Decision that a playback record should not count as accepted playback. Manual Exclusion is the normal way for the user to correct false positives without needing to confirm every normal record.
-_Avoid_: deletion, parser interruption, automatic conflict
+A reversible Manual Playback Decision that a Playback Occurrence should not participate in normal history or Insights. It is the single playback-removal intent: views may filter it without creating a separate hidden state, and restoring the default removes the decision while preserving evidence and reviewability.
+_Avoid_: deletion, hidden state, parser interruption, automatic conflict
 
 **Review Attention**:
-A user-facing cue that a playback record may need human attention because of a conflict, low-confidence evidence, or unusual source state. Review Attention is separate from acceptance and pending observation state: most accepted records should not require attention, and pending records should not be treated as attention-needed until settlement or evidence rules say so.
-_Avoid_: required confirmation, acceptance status, parser status, pending playback
+A user-facing cue for a concrete, actionable problem that the product has intentionally chosen to expose. Internal evidence differences are resolved by Playback Reconciliation, and Possible Match does not create Review Attention; normal operation must not depend on the user clearing an attention queue.
+_Avoid_: evidence disagreement, possible match, required confirmation, acceptance status, parser status, pending playback
 
 **Trust-By-Default Playback Policy**:
 The product rule that supported playback evidence is accepted unless stronger evidence or explicit user judgment excludes it. This policy keeps day-to-day use lightweight: the user handles exceptions instead of confirming every dance.
 _Avoid_: manual-only history, review-everything workflow, raw import
 
 **Evidence Source**:
-The stable adapter family that produced a Local Playback Evidence record, such as VRCX history, VRChat log replay, live VRChat log observation, or manual log entry. Evidence Source identifies the evidence family, not a source table, source row, import operation, script version, or raw payload location.
-_Avoid_: request source type, source table, source row id, import batch, script version
+The stable source kind and capability family under which Playback Evidence is produced, such as VRCX history or VRChat log observation. A particular database, file, stream, or producer can naturally be described as a concrete instance of that Evidence Source; its instance-specific identity and coordinates belong to provenance and do not create a different source kind. Evidence Source remains distinct from Request Source Type, import runs, parser versions, and raw record locations; Manual Log Entry is a deferred future source kind.
+_Avoid_: request source type, import batch, parser version, raw record location
 
 **Evidence Source Priority**:
-The evidence-strength precedence used when overlapping playback records disagree. Evidence Source Priority is a strategy result derived from evidence source, default acceptance, and active manual decisions; it should not be treated as a separate source fact. Active Manual Playback Decision is strongest, automatic acceptance is stronger than ordinary playback evidence, and ordinary watcher evidence is preferred over VRCX history when review or analysis must choose one representative record. Higher-priority evidence can negate lower-priority overlapping records; without that stronger negation, ordinary records remain accepted under the trust-by-default policy.
-_Avoid_: request source type, filesystem order, newest-row-wins, stored source fact
+The decision-specific precedence used by internal field resolvers when evidence claims differ, evaluated per fact from source capability, provenance lineage, directness, and active user judgment; it is not a global source ordering, and source counts are not votes. Active Manual Playback Decisions govern current inclusion intent, while Manual Log Entries remain source claims; watcher evidence may be preferred to VRCX for overlapping ordinary observed facts without gaining universal authority or controlling Playback Occurrence identity. Deferred Manual Record Updates do not participate in the first v2 resolver.
+_Avoid_: global source ranking, majority vote, request source type, filesystem order, newest-row-wins, stored source fact
 
 **Automatic Acceptance**:
-A system-derived acceptance decision for a playback record, based on supported source semantics or conservative settlement rules. Automatic Acceptance is not limited to an elapsed-time threshold; future rules may use additional conservative signals. Automatic Acceptance lets normal records count without manual confirmation, but it is weaker than an active Manual Playback Decision or Manual Record Update.
+A system-derived acceptance decision for a Playback Occurrence, based on supported source semantics or conservative evidence rules. Automatic Acceptance is not limited to an elapsed-time threshold; future rules may use additional conservative signals. It lets normal occurrences count without manual confirmation, but it is weaker than an active Manual Playback Decision.
 _Avoid_: manual confirmation, parser completion, promotion
 
 **Ordinary Playback Evidence**:
-A supported playback record with no manual judgment and no automatic acceptance state, such as an unjudged watcher record or a VRCX history record. Ordinary Playback Evidence is accepted by default, but it is weaker than automatic acceptance and manual judgment when overlapping records disagree.
-_Avoid_: untrusted record, ignored record, needs manual confirmation
+A supported Playback Evidence item that does not carry a stronger acceptance signal, such as ordinary watcher or VRCX evidence. It can support trust-by-default inclusion but remains evidence rather than a user decision or Playback Occurrence identity.
+_Avoid_: playback occurrence, untrusted record, ignored record, needs manual confirmation
 
 **Acceptance Conflict**:
-A Review Attention case where overlapping playback records disagree on accepted or excluded state in a way that source order must not resolve automatically. The user must decide which acceptance judgment, if any, should apply.
-_Avoid_: parser conflict, source-order fill, duplicate row
+A legacy v1 merge term for overlapping records with incompatible inclusion state. V2 does not expose field-level evidence conflict; when separately used Playback Handles contain incompatible durable user state and identity evidence later supports merging them, the current term is Merge Decision.
+_Avoid_: v2 merge state, parser conflict, source-order fill, duplicate row
 
 **User-Editable Playback Field**:
-A playback-record field where the user can make a durable judgment or correction, such as acceptance, exclusion, dance-track mapping, requester identity, or note. These fields may be overridden by Manual Record Update. Request Source Type is inferred from stable inputs rather than directly edited by the user in the first product shape.
+A playback field whose current interpretation could in principle receive a durable user judgment or correction. In the first v2 shape, only acceptance and exclusion are user-editable, through Manual Playback Decisions. Dance-track mapping, requester identity, and note corrections require the deferred Manual Record Update capability. Request Source Type is inferred from stable inputs rather than directly edited by the user.
 _Avoid_: parser evidence, raw log metadata, automatic inference
 
-**Playback Evidence Field**:
-A playback-record field that preserves what the source parser or raw log observed, such as source file, line range, raw event payload, parser names, and original timing signals. Evidence fields are preserved for audit and are not overwritten by Manual Record Update.
+**Source Evidence Field**:
+A Playback Evidence field that preserves what the source adapter observed or how it organized that observation, such as source file, line range, raw payload, parser names, and original timing signals. Evidence fields are preserved for audit and are not overwritten by user decisions or any future correction overlay.
 _Avoid_: user correction, review status, accepted-history inclusion
 
 **Source Playback Evidence**:
-Playback evidence as it exists inside a source database or app root before a Playback Evidence Merge. Source Playback Evidence explains where an imported record came from, but it remains the source's evidence rather than becoming the target app root's long-term evidence verbatim.
+The legacy v1 term for playback evidence inside another `dancing-log` database or app root before a Playback Evidence Merge. Cross-database merge is only a possible future v2 extension; any future design must use v2 Playback Evidence and Handle semantics rather than treating this term as a current contract.
 _Avoid_: target history, local evidence, copied truth
 
 **Local Playback Evidence**:
-Playback evidence owned by the current app root after parsing, importing, or merging. Local Playback Evidence is normalized enough for Timeline, Insights, and review to query directly, even when it is derived from Source Playback Evidence or older local history roots. Source-side coordinates, raw payloads, and legacy source details explain provenance, but they are not the local evidence identity.
-_Avoid_: source row copy, raw source event, foreign table, external database state
+The legacy v1 term for normalized playback evidence owned by the current app root. V2 does not migrate or read it as a compatibility input; any efficient direct evidence query uses v2 Playback Evidence behind the Handle-based business boundary.
+_Avoid_: v2 read root, playback occurrence, source row copy, external database state
 
 **Local Evidence Identity**:
 The stable identity used by local writers, imports, replays, and merges to decide whether incoming playback evidence represents the same Local Playback Evidence already owned by the current app root. It is separate from the database row id used for local references and from source-side origin identity used for provenance.
@@ -289,41 +353,40 @@ An older local playback-history root kept only to read or migrate existing recor
 _Avoid_: canonical timeline, source evidence, permanent history root
 
 **Playback Evidence Merge**:
-A Data Operations workflow that imports playback records from another `dancing-log` database or app root into the current local review flow. It converts Source Playback Evidence into Local Playback Evidence for Timeline review and does not, by itself, make every imported record count as accepted history.
-Playback Evidence Merge may import existing acceptance, exclusion, and review-attention state from source records as reversible decisions, but it does not run new settlement rules from raw parser completion.
-_Avoid_: raw SQLite merge, settings import, timeline edit
+A historical v1 Data Operations design for importing playback records from another `dancing-log` database or app root. V2 does not promise or implement this workflow; it retains only the possibility of a future semantic import that remaps database-local identities and preserves v2 evidence, relationship, and user-state boundaries.
+_Avoid_: current v2 requirement, raw SQLite merge, settings import, timeline edit
 
 **Merge Source Order**:
-The user-visible order in which multiple source databases or app roots are applied to one target database during a Playback Evidence Merge. The selected order is part of the merge decision because it can affect which source fills still-empty user-editable fields.
-_Avoid_: filesystem order, modification-time order, implicit priority
+A historical v1 Playback Evidence Merge term for the order in which source databases were to be applied. V2 has no current cross-database merge workflow or source-order contract.
+_Avoid_: current v2 policy, filesystem order, modification-time order, implicit priority
 
 **Merge Plan**:
-A user-reviewed plan for a Playback Evidence Merge that describes the target, sources, source order, additions, field fills, skipped records, warnings, and conflicts before any data is written. A Merge Plan is tied to the exact source and target state it previewed; if that state changes, the plan must be refreshed before execution.
-_Avoid_: rough estimate, execution log, raw diff
+A historical v1 preview artifact for the proposed Playback Evidence Merge workflow. V2 does not currently define or require a cross-database Merge Plan; a future feature would need a new contract based on the then-current v2 model.
+_Avoid_: current v2 artifact, rough estimate, execution log, raw diff
 
 **Merge Execution**:
-The Data Operations action that applies an approved Merge Plan to the target database. Merge Execution first backs up the target database, then reads each source in Merge Source Order, and applies the merge in place to the target database.
-_Avoid_: export-only preview, database replacement, source mutation
+The historical v1 Data Operations action that would apply an approved Merge Plan. It is not a current v2 operation.
+_Avoid_: current v2 operation, export-only preview, database replacement, source mutation
 
 **Merge Target Backup**:
-The mandatory restore point captured immediately before Merge Execution. It is stored under the target app root's data archive area and includes the target SQLite database plus any active SQLite sidecar files needed for a consistent restore.
-_Avoid_: optional export, source backup, partial database copy
+The historical v1 restore point proposed for Merge Execution. Ordinary v2 backup and restore remain valid Data Operations, but no cross-database merge-specific backup contract is currently defined.
+_Avoid_: current merge requirement, optional export, source backup, partial database copy
 
 **Merge Source Fingerprint**:
-The source-database identity captured for audit during a Playback Evidence Merge, including the source path, resolved database path, file metadata, integrity result, schema fingerprint, and content fingerprint. Source databases are read-only during merge, but their fingerprints are stored so the merge can be explained later.
-_Avoid_: source backup, display name, temporary picker value
+The historical v1 audit identity proposed for a source database in Playback Evidence Merge. A future v2 semantic import may define its own source database or snapshot identity, but this fingerprint shape is not reserved now.
+_Avoid_: current v2 identity, source backup, display name, temporary picker value
 
 **Review Status**:
-The user's durable attention or correction state for a playback record. Review Status does not mean every accepted playback record must be manually confirmed; under the trust-by-default policy, normal records can count without user action.
-_Avoid_: deletion, raw parser status, completion status
+The legacy umbrella term for playback review state. In v2, system-derived `needs_attention` belongs to the Default Acceptance Result and is non-counting without requiring user action; the only manual inclusion states are `accepted` and `excluded`, with restore-default represented by closing the active Manual Playback Decision.
+_Avoid_: manual needs-attention decision, deletion, raw parser status, completion status
 
 **Manual Record Update**:
-A user-authored correction to a playback record after import or review, such as dance-track mapping, requester identity, note, or other user-editable timeline fields. For overlapping records, manually updated fields are preferred over imported or parser-derived fields, while raw evidence remains preserved for audit. Acceptance and exclusion are Manual Playback Decisions, not direct Request Source Type edits.
-_Avoid_: parser backfill, automatic merge, raw evidence edit
+A deferred future capability for a user-authored correction to the interpreted fields of an existing Playback Handle, such as dance-track mapping, requester identity, or note, while preserving raw evidence. It is not part of the first v2 schema, resolver inputs, API, or merge behavior. Acceptance and exclusion remain Manual Playback Decisions; a Manual Log Entry remains a separate source-evidence claim.
+_Avoid_: current v2 input, parser backfill, automatic merge, raw evidence edit, manual log entry
 
 **Manual Merge Conflict**:
-A Playback Evidence Merge case where overlapping records both contain Manual Record Updates but disagree on one or more user-editable playback fields. The current target record remains active until the user explicitly chooses whether to keep the target judgment or adopt the source judgment.
-_Avoid_: automatic overwrite, parser conflict, duplicate row
+A possible future merge case in which both sides contain incompatible Manual Record Updates. Because Manual Record Update is deferred, this is not a first-v2 Merge Decision cause; current merge decisions concern incompatible user state that v2 actually implements.
+_Avoid_: current v2 merge state, automatic overwrite, parser conflict, duplicate row
 
 **Raw VRChat Log**:
 Low-level diagnostic evidence captured from VRChat output logs. Raw VRChat logs are not normal user-facing timeline content and should only appear in explicit debugging or forensic details.

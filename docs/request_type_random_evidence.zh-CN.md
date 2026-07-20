@@ -12,7 +12,7 @@
 
 `random` 是真实的 Request Source Type 候选，但它不是 Requester Identity，也不是 requester 字段的空值状态。不能通过把 `requester_display_name` / `requester_user_id` 写成空、`NULL` 或 `"random"` 来表达随机来源。
 
-当前暴露出的最严重问题是：watcher / playback-record origin 没有认真保留 VRC log 中可解析到的明确 random 证据。`playback_records.request_type` 为空本身不是问题；`request_type` 本来就是未来由 Request Source Type Inference 产出的投影。
+当前暴露出的最严重问题是：watcher / playback-record origin 没有认真保留 VRC log 中可解析到的明确 random 证据。`playback_records.request_type` 为空本身不是问题；v2 `request_type` 是由已经纳入核心范围的 Request Source Type Inference 产出的可重建投影。
 
 ## 当前调查结论
 

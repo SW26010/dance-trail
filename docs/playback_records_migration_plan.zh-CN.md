@@ -1,8 +1,15 @@
-# playback_records migration plan
+# playback_records v0 → v1 migration plan（历史）
 
-本文记录从当前 `playback_records` v0 runtime schema 迁移到下一版 `playback_records` schema 的一次性迁移规则。
+本文记录从 `playback_records` v0 运行时结构迁移到数据模型定义 v1 所对应结构的一次性
+历史迁移规则。
 
-目标 schema、字段语义和长期模型边界以 `docs/playback_records_schema_redesign.zh-CN.md` 为准。本文只回答“如何从现有 v0 数据迁过去”。
+本文是旧 `playback_records` 方案下的历史迁移设计，不是下一代数据结构的约束。
+新的方向性定义见 `docs/playback_data_model_redesign.zh-CN.md`；新结构优先最大化长期模型优势，
+明确不以本文件中的迁移成本、字段映射或兼容要求作为设计输入。
+v2 已明确采用无数据迁移、无双写、无兼容读取的干净切换；本文只记录历史上的 v0→v1
+方案，不能作为 v1→v2 实施计划。
+旧方案当时采用的字段级目标仍保留在 `docs/playback_records_schema_redesign.zh-CN.md`，
+仅用于理解本文的历史上下文。
 
 ## 迁移原则
 

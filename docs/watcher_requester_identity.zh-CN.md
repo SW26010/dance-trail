@@ -27,7 +27,7 @@ watcher 不负责：
 - 对 WannaDance，source display name 只取世界 payload 的 `playerName`。USharpVideo `Started video load ... requested by <name>` 表示技术性 video owner / executor，必须作为独立 origin/provenance 保存，不能在 `playerName` 为空时回退填充 source display name 或 canonical requester。
 - 不因为用户后续改名而改写旧播放记录。
 - 不用跨会话、跨房间、全局缓存或 VRCX 历史去补 watcher 记录的 requester user id。
-- 如果来源播放观察先出现、身份行后出现，允许在同一房间内延迟回填同一条 source evidence observation。
+- 如果来源播放观察先出现、身份行后出现，允许在同一房间内继续补全尚未提交的 watcher capture candidate；不得回填已经发布的 Playback Evidence。
 - 映射生命周期按当前 VRChat 房间，而不是整个 watcher 进程。
 - 切换房间、重新进入房间、应用退出等房间边界会让旧映射失效。
 
@@ -36,8 +36,8 @@ watcher 不负责：
 实现应该把房间状态视为：
 
 1. `active`：正常房间内。`OnPlayerJoined` / `User Authenticated` 可以建立当前可用映射；播放事件可以用当前唯一映射补 `requester_user_id`。
-2. `closing`：看到 `OnLeftRoom` 后，到下一次 `Entering Room` 前。此阶段不再给新的播放事件使用旧映射，但仍接受紧随其后的 `OnPlayerLeft <display_name> (<usr_id>)` 来回填此前同房间 pending 的播放事件。
-3. `cleared`：下一次 `Entering Room`、应用退出、或兜底超时/异常边界触发后。旧房间映射和旧 pending 回填任务都丢弃。
+2. `closing`：看到 `OnLeftRoom` 后，到下一次 `Entering Room` 前。此阶段不再给新的播放事件使用旧映射，但仍接受紧随其后的 `OnPlayerLeft <display_name> (<usr_id>)` 来补全此前同房间、尚未发布的 pending capture candidate。
+3. `cleared`：下一次 `Entering Room`、应用退出、或兜底超时/异常边界触发后。旧房间映射和旧 pending 补全任务都丢弃；需要保留的 capture candidate 以当时完整可得的信息发布，未知 requester 可以保持为空。
 
 ## 映射分层
 
@@ -53,9 +53,9 @@ watcher 不负责：
 - 优先查当前有效映射。
 - 当前有效映射没有时，可以查本 watcher session 的过期映射。
 - `cleared` 状态不使用过期映射补新的播放事件；无房间上下文下的孤立 `OnPlayerLeft` 只能计数/warning，不能写入过期映射。
-- 刚进入新房间后，不立即使用跨房间带来的过期映射。先给当前房间的 `OnPlayerJoined` / `User Authenticated` 留出一小段宽限窗口；宽限期内的播放事件登记为同房间 pending，若后续当前房间身份行出现则用当前有效映射回填。
-- 宽限窗口过后仍没有当前房间身份行时，可以对仍未补全的同房间 pending 事件使用过期映射回填，并记录 warning；宽限期后新出现的播放事件也可以使用过期映射补 id，并记录 warning。
-- watcher session 正常结束时，可以对仍未补全且已经捕获过期映射候选的 pending 事件做一次最终回填，并记录 warning。
+- 刚进入新房间后，不立即使用跨房间带来的过期映射。先给当前房间的 `OnPlayerJoined` / `User Authenticated` 留出一小段宽限窗口；宽限期内的播放事件登记为同房间 pending capture candidate，若后续当前房间身份行出现则在发布前用当前有效映射补全。
+- 宽限窗口过后仍没有当前房间身份行时，可以对仍未发布的同房间 pending capture candidate 使用过期映射补全，并记录 warning；宽限期后新出现的播放事件也可以在发布前使用过期映射补 id，并记录 warning。
+- watcher session 正常结束时，可以对仍未发布且已经捕获过期映射候选的 pending capture candidate 做一次最终补全，并记录 warning；随后按当时完整可得的信息发布或按明确规则放弃。
 - 同一个 `display_name` 在当前有效映射和过期映射之间也应当只有一个可查结果；如果 `display_name` 重新进入当前有效映射，应从过期映射移除。
 - 使用过期映射补 id 时必须记录 warning，但不能阻塞 watcher。
 - 如果同一 display name 在 session-local cache 中被观察到新的 user id，更新该 display name 的当前可查 user id，并记录 warning。
@@ -63,16 +63,17 @@ watcher 不负责：
 - 同一 `user_id` 在同一 watcher session 中出现多个 display name 不影响补 id 逻辑；播放记录保留事件发生时已经写入的 display name，不因为后续改名回改。
 - 如果同一 display name 后续对应了新的 user id，按 session-local enrichment cache 更新该 display name 的当前可查 user id，并记录 warning；已经写入的旧记录不因此回改 display name。
 
-## 延迟回填范围
+## 提交前延迟补全范围
 
-- 允许回填同一 watcher session 内同一 source evidence observation 的 `requester_user_id`；下游记录当前处于何种投影状态不属于 watcher 的判断条件。
-- 回填只填 `requester_user_id` 为空的证据；已有 `requester_user_id` 不覆盖。
-- 证据 upsert 时必须保留已有的非空 `requester_user_id`；自动 watcher 写入不能用空值或另一个新非空值覆盖它。
-- 保留已有 `requester_user_id` 时，origin/provenance 中的 `requester_user_id` 和 `requester_user_id_source` 也必须同步保留，避免规范字段和证据 JSON 表达不同身份。
-- 回填只能按 watcher/source observation 的稳定身份更新同一条证据，不能只凭 display name 去扫描旧历史。
-- 如果回填使用的信息来自过期映射，应继续记录 warning。
-- Requester Identity 是用户可纠正的播放字段；watcher 身份补全属于来源证据补全。未来如果存在 active Manual Record Update/overlay，自动补全不得覆盖用户手动纠正的 requester 身份。
-- 不倒改已经写出的 `parsed_events.jsonl`。`parsed_events.jsonl` 表示按日志时间线 append-only 记录的单行解析结果；延迟回填写入同一 source evidence observation 及其 provenance。当前 folded playback event、live DB 或 `playback_records` 若镜像该结果，只属于兼容路径，不能成为唯一来源。
+- 延迟补全只作用于同一 watcher session 内尚未发布的 capture candidate；下游投影和 Handle 状态不参与 watcher 的补全判断。
+- 补全只填候选中尚为空的 `requester_user_id`；已经从 payload 或更直接映射得到的非空值不覆盖。
+- capture candidate 与最终 origin/provenance 必须使用同一个 `requester_user_id` 和 `requester_user_id_source`，避免规范字段和证据 JSON 表达不同身份。
+- 补全只能按 watcher/source observation 的稳定身份定位同一个未发布候选，不能只凭 display name 扫描已经发布的历史证据。
+- 如果补全使用的信息来自过期映射，应继续记录 warning。
+- 整理完成或有界等待结束后，writer 一次性发布单条 Playback Evidence；未知 requester 可以保持为空，不能为了等待可选身份信息无限阻塞证据发布。
+- 已发布的 Playback Evidence 不再回填、upsert 或覆盖。后来发现的信息不能借 watcher 自动改写旧证据。
+- Requester Identity 在未来可以成为用户可纠正的播放字段；当前 Manual Record Update/overlay 已整体暂缓。watcher 身份补全属于来源证据补全；以后若重新引入 active correction overlay，自动补全不得覆盖用户手动纠正的 requester 身份。
+- 不倒改已经写出的 `parsed_events.jsonl`。`parsed_events.jsonl` 表示按日志时间线 append-only 记录的单行解析结果；watcher 根据这些输入在发布前整理 capture candidate，最终证据保存整理结果及其 provenance。当前 folded playback event、live DB 或 `playback_records` 若镜像中间状态，只属于 v1 兼容路径，不能成为 v2 证据层。
 
 ## 临时快照（暂缓该方案，但保留这个备选设计，不删除）
 
@@ -101,7 +102,7 @@ watcher 不负责：
 
 - 身份补全应发生在 watcher drain loop 中，位于 parser 产出 capture record 之后、证据 writer 写入之前。
 - 证据 row 与 origin/provenance 必须看到同一个 enrichment 结果；runtime-only folded event 可以读取它，但不能成为唯一持久来源。
-- evidence materializer/storage 层只负责保存 capture record 中已经确定的 `requester_user_id`，不再自己查身份映射。
+- evidence materializer/storage 层只负责一次性保存 capture record 中已经确定的 `requester_user_id`，不再自己查身份映射，也不提供发布后回填路径。
 - `requester_user_id` 的补全来源写入证据及其 provenance；是否投影到产品记录由下游独立流程决定。
 - 来源分类保持粗粒度：`active`、`expired`、或 `payload`。其中 `payload` 表示播放日志 payload 本身已经包含 user id，不是通过 display-name mapping 查出来。
 - watcher 身份补全不负责推断任何 Request Source Type，也不因为拿到 `requester_user_id` 就写出 `random`、`self`、`other` 或 `unknown`。
@@ -111,7 +112,7 @@ watcher 不负责：
 ## OnPlayerLeft 处理
 
 - `OnPlayerLeft <display_name> (<usr_id>)` 证明该用户刚刚离开前的身份。
-- 它可以用于回填此前同房间、同 display name 的 pending source evidence observation。
+- 它可以用于补全此前同房间、同 display name 且尚未发布的 pending capture candidate。
 - 它会把该 display name/user id 从当前有效映射移到过期映射。
 - 后续播放事件如果当前有效映射没有匹配，可以从过期映射里找唯一匹配并补 `requester_user_id`，但要记录 warning。
 

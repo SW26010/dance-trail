@@ -1,6 +1,15 @@
-# playback_records schema redesign
+# playback_records schema redesign（已弃用）
 
-本文记录下一版 `playback_records` 及其相邻表的目标设计。它是进行中的设计文档，记录已经确认的决定；后续实现中发现的新问题应继续补充到本文。
+状态：已弃用，仅作旧方案参考
+
+数据模型定义版本：v1（已弃用）
+
+> 本文记录的是以 `playback_records` 为统一主表的旧字段级设计，已经不再定义下一代目标结构。
+> 新方向以 `docs/playback_data_model_redesign.zh-CN.md` 为准。
+> v2 采用无数据迁移、无双写、无兼容读取的干净切换，不从本文结构派生迁移映射。
+>
+> 本文仍保留有价值的字段语义、命名分析、来源坐标和查询考虑，供后续具体建表时参考；
+> 其中与新方向冲突的主表边界、可修改性、状态归属和迁移假设均不再有效。
 
 ## 设计原则
 
@@ -114,7 +123,11 @@ dance_system_key TEXT NOT NULL,
 dance_external_id TEXT NOT NULL
 ```
 
-这些字段足够表达当前产品需要的 catalog 绑定状态：`dance_track_id IS NULL` 表示尚未绑定到本地 catalog track；非空表示已经绑定。`dance_system_key` / `dance_external_id` 保留证据中的舞蹈系统身份，使未绑定记录仍可展示、复查和后续修复。
+这些字段在 v1 方案中允许用 `dance_track_id IS NULL` 表示尚未绑定到本地 catalog track，
+并用 `dance_system_key` / `dance_external_id` 保留来源身份。该 nullable binding 不适用于 v2
+目标中的业务语义：来源已经提供稳定系统标识与 external id 时，Dance Track 身份已经
+确定，不因本地 Catalog 行尚未物化而处于“待绑定”状态。v2 可以等到首次需要解析或展示
+时才懒创建最小 Dance Track，metadata 以后补全；本文件只保留这里的字段语义作为历史参考。
 
 如果未来出现明确的 UI/report 读路径，需要解释“为什么没有匹配”或“匹配需要人工处理”，再引入专门的 repair/report 输出或清晰命名字段。当前不要提前存 `*_status` / `*_attention` 缓存字段，避免和 catalog repair 逻辑 drift。
 

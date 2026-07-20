@@ -4,7 +4,7 @@ Date: 2026-06-22
 
 ## Status
 
-Accepted
+Superseded by ADR 0014 for v2. Retained as the accepted v1 implementation record.
 
 ## Context
 
