@@ -451,3 +451,10 @@ uv sync --extra recording-tools
 
 `scripts/init_songs.py` is deprecated because the runtime database no longer
 has a `songs` table.
+
+## License
+
+Dancing Log source code is licensed under the [MIT License](LICENSE), copyright
+2026 Himalia. Third-party dependencies retain their own licenses. Portable
+releases include full notices in `Legal/`; see [license packaging](legal/README.md).
+This license does not grant rights to third-party music, videos, or external catalog data.

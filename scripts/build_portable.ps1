@@ -197,6 +197,10 @@ Copy-Item -LiteralPath (Join-Path $RepoRoot "README.md") -Destination $StageDir 
 Copy-Item -LiteralPath (Join-Path $RepoRoot "README.zh-CN.md") -Destination $StageDir -Force
 Copy-Item -LiteralPath (Join-Path $RepoRoot "docs") -Destination (Join-Path $StageDir "docs") -Recurse -Force
 
+Invoke-Checked {
+    Invoke-ProjectPython -Arguments @("scripts/collect_licenses.py", "--output", $StageDir)
+} "Collect project and third-party licenses"
+
 $ConfigDir = Join-Path $StageDir "config"
 $DataDir = Join-Path $StageDir "data"
 $LogsDir = Join-Path $StageDir "logs"

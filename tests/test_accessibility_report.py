@@ -7,7 +7,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.verify_accessibility_changes import verify_accessibility_changes
+from scripts.verify_accessibility_changes import (
+    changed_paths,
+    main as verify_changes_main,
+    verify_accessibility_changes,
+)
 from scripts.verify_accessibility_report import (
     AccessibilityReport,
     REQUIRED_ASSETS,
@@ -40,8 +44,7 @@ class AccessibilityReportTest(unittest.TestCase):
         relative_path: Path = Path("report.md"),
     ) -> Path:
         hashes = {
-            asset: sha256_bytes(content)
-            for asset, content in self.contents.items()
+            asset: sha256_bytes(content) for asset, content in self.contents.items()
         }
         if app_hash is not None:
             hashes[REQUIRED_ASSETS[0]] = app_hash
@@ -72,9 +75,7 @@ class AccessibilityReportTest(unittest.TestCase):
             verify_report(self.write_report(app_hash="0" * 64), self.root)
 
     def test_release_rejects_non_commit_revision(self) -> None:
-        with self.assertRaisesRegex(
-            ReportValidationError, "40-character commit SHA"
-        ):
+        with self.assertRaisesRegex(ReportValidationError, "40-character commit SHA"):
             verify_report(
                 self.write_report(),
                 self.root,
@@ -124,9 +125,7 @@ class AccessibilityReportTest(unittest.TestCase):
 
     @patch("scripts.verify_accessibility_changes.verify_report")
     def test_material_change_accepts_immutable_changed_report(self, verify) -> None:
-        relative_report = Path(
-            "docs/accessibility/change-reports/2026-07-18-test.md"
-        )
+        relative_report = Path("docs/accessibility/change-reports/2026-07-18-test.md")
         report_path = self.write_report(
             revision="1" * 40,
             relative_path=relative_report,
@@ -149,9 +148,7 @@ class AccessibilityReportTest(unittest.TestCase):
 
     @patch("scripts.verify_accessibility_changes.verify_report")
     def test_report_only_change_still_verifies_passing_report(self, verify) -> None:
-        relative_report = Path(
-            "docs/accessibility/change-reports/2026-07-18-test.md"
-        )
+        relative_report = Path("docs/accessibility/change-reports/2026-07-18-test.md")
         self.write_report(
             revision="1" * 40,
             relative_path=relative_report,
@@ -205,6 +202,61 @@ class AccessibilityReportTest(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("--base-revision", completed.stdout)
+
+    def test_missing_base_checks_full_snapshot_and_requires_current_evidence(
+        self,
+    ) -> None:
+        def git(*args: str) -> str:
+            return subprocess.check_output(
+                ["git", *args], cwd=self.root, text=True, encoding="utf-8"
+            ).strip()
+
+        git("init", "--quiet")
+        git("config", "user.name", "Test")
+        git("config", "user.email", "test@example.invalid")
+        git("add", ".")
+        git("commit", "--quiet", "-m", "Assets")
+        evaluated = git("rev-parse", "HEAD")
+        args = [
+            "--base-revision",
+            "f" * 40,
+            "--head-revision",
+            "HEAD",
+            "--repo-root",
+            str(self.root),
+        ]
+        self.assertEqual(verify_changes_main(args), 1)
+        old = Path("docs/accessibility/change-reports/old.md")
+        current = Path("docs/accessibility/change-reports/current.md")
+        self.write_report(revision=evaluated, app_hash="0" * 64, relative_path=old)
+        self.write_report(revision=evaluated, relative_path=current)
+        git("add", ".")
+        git("commit", "--quiet", "-m", "Evidence only")
+        self.assertIn(
+            REQUIRED_ASSETS[0].as_posix(), changed_paths(self.root, "0" * 40, "HEAD")
+        )
+        self.assertEqual(verify_changes_main(args), 0)
+        with self.assertRaises(ReportValidationError):
+            verify_accessibility_changes(
+                [old.as_posix()], self.root, head_revision="HEAD"
+            )
+        self.write_report(revision=evaluated, app_hash="0" * 64, relative_path=current)
+        self.assertEqual(verify_changes_main(args), 1)
+
+    def test_snapshot_does_not_accept_unknown_head(self) -> None:
+        self.assertEqual(
+            verify_changes_main(
+                [
+                    "--base-revision",
+                    "0" * 40,
+                    "--head-revision",
+                    "unknown",
+                    "--repo-root",
+                    str(self.root),
+                ]
+            ),
+            1,
+        )
 
 
 if __name__ == "__main__":

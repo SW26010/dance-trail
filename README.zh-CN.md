@@ -335,3 +335,9 @@ uv sync --extra recording-tools
 ```
 
 `scripts/init_songs.py` 已废弃，因为运行时数据库不再有 `songs` 表。
+
+## 许可证
+
+Dancing Log 源码采用 [MIT 许可证](LICENSE)，版权归 2026 Himalia 所有。
+第三方依赖保留各自的许可证，便携包中的 `Legal/` 包含完整许可文本；
+详情见[许可打包说明](legal/README.md)。此许可证不授予第三方音乐、视频或外部曲库数据的使用权。

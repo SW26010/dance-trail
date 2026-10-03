@@ -69,6 +69,11 @@ jobs:
       - name: Install Chromium
         run: pnpm exec playwright install chromium
 
+      - name: Verify portable license collection
+        run: >-
+          uv run --locked --group release --cache-dir .uv-cache python
+          scripts/collect_licenses.py --output build/license-check
+
       - name: Check and build Fluent React Web UI
         run: |
           pnpm check:webui

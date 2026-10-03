@@ -1,0 +1,18 @@
+{
+  "@fluentui/react-icons@2.0.333": {
+    "file": "fluentui-react-icons-2.0.333.txt",
+    "source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/c6456e145a239c390deac0a84cfdbfadcef2b504/LICENSE"
+  },
+  "embla-carousel@8.6.0": {
+    "file": "embla-8.6.0.txt",
+    "source": "https://raw.githubusercontent.com/davidjerleke/embla-carousel/v8.6.0/LICENSE"
+  },
+  "embla-carousel-autoplay@8.6.0": {
+    "file": "embla-8.6.0.txt",
+    "source": "https://raw.githubusercontent.com/davidjerleke/embla-carousel/v8.6.0/LICENSE"
+  },
+  "embla-carousel-fade@8.6.0": {
+    "file": "embla-8.6.0.txt",
+    "source": "https://raw.githubusercontent.com/davidjerleke/embla-carousel/v8.6.0/LICENSE"
+  }
+}

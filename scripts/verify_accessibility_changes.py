@@ -64,12 +64,9 @@ def changed_paths(
     if ZERO_REVISION_PATTERN.fullmatch(base_revision):
         output = _git(
             repo_root,
-            "diff-tree",
-            "--root",
-            "--no-commit-id",
+            "ls-tree",
             "--name-only",
             "-r",
-            "--diff-filter=ACMRT",
             head_revision,
         )
     else:
@@ -83,9 +80,7 @@ def changed_paths(
             "--",
         )
     return tuple(
-        line.strip().replace("\\", "/")
-        for line in output.splitlines()
-        if line.strip()
+        line.strip().replace("\\", "/") for line in output.splitlines() if line.strip()
     )
 
 
@@ -110,23 +105,29 @@ def verify_accessibility_changes(
     repo_root: Path,
     *,
     head_revision: str,
+    snapshot: bool = False,
 ) -> tuple[Path, ...]:
-    material_changes = tuple(
-        path for path in paths if is_material_webui_change(path)
-    )
+    material_changes = tuple(path for path in paths if is_material_webui_change(path))
     passing_reports: list[Path] = []
 
     for path in sorted(path for path in paths if is_change_report(path)):
         report_path = repo_root / Path(path)
         content = report_path.read_text(encoding="utf-8")
-        if report_result(content) != "Pass":
+        try:
+            if report_result(content) != "Pass":
+                continue
+            verify_report(
+                report_path,
+                repo_root,
+                require_pass=True,
+                revision_must_be_ancestor_of=head_revision,
+            )
+        except ReportValidationError:
+            if not snapshot:
+                raise
+            # A snapshot includes superseded reports for earlier asset versions.
+            # At least one report must still verify against the current assets.
             continue
-        verify_report(
-            report_path,
-            repo_root,
-            require_pass=True,
-            revision_must_be_ancestor_of=head_revision,
-        )
         passing_reports.append(Path(path))
 
     if material_changes and not passing_reports:
@@ -153,15 +154,31 @@ def main(argv: list[str] | None = None) -> int:
     arguments = parser.parse_args(argv)
     repo_root = arguments.repo_root.resolve()
     try:
+        _git(repo_root, "rev-parse", "--verify", arguments.head_revision + "^{commit}")
+        base = arguments.base_revision
+        snapshot = bool(ZERO_REVISION_PATTERN.fullmatch(base))
+        if not snapshot:
+            available = subprocess.run(
+                ["git", "cat-file", "-e", base + "^{commit}"],
+                cwd=repo_root,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            snapshot = available.returncode != 0
+        if snapshot:
+            print("Base unavailable; verifying the complete current snapshot.")
+            base = "0" * 40
         paths = changed_paths(
             repo_root,
-            arguments.base_revision,
+            base,
             arguments.head_revision,
         )
         reports = verify_accessibility_changes(
             paths,
             repo_root,
             head_revision=arguments.head_revision,
+            snapshot=snapshot,
         )
     except (OSError, ReportValidationError) as error:
         print(
