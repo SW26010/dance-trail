@@ -1,9 +1,6 @@
 name: Release Portable
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
 
 permissions:
