@@ -3,13 +3,6 @@ import {
   Button,
   Card,
   CardHeader,
-  Dialog,
-  DialogActions,
-  DialogBody,
-  DialogContent,
-  DialogSurface,
-  DialogTitle,
-  DialogTrigger,
   MessageBar,
   MessageBarBody,
   MessageBarTitle,
@@ -51,10 +44,18 @@ export function HomePage({ t }: PageProps) {
   const [error, setError] = useState("");
   const [busyControl, setBusyControl] = useState("");
   const [exitDialogOpen, setExitDialogOpen] = useState(false);
+  const exitDialog = useRef<HTMLDialogElement>(null);
   const [exitAccepted, setExitAccepted] = useState(false);
   const [exitError, setExitError] = useState("");
   const mounted = useRef(false);
   const loadRequest = useRef(0);
+
+  useEffect(() => {
+    const dialog = exitDialog.current;
+    if (!dialog) return;
+    if (exitDialogOpen && !dialog.open) dialog.showModal();
+    if (!exitDialogOpen && dialog.open) dialog.close();
+  }, [exitDialogOpen]);
 
   useEffect(() => {
     mounted.current = true;
@@ -177,30 +178,32 @@ export function HomePage({ t }: PageProps) {
             </Button>
           </>
         )}
-        <Dialog open={exitDialogOpen} onOpenChange={(_, next) => {
-          if (busyControl !== "exit") setExitDialogOpen(next.open);
-        }}>
-          <DialogTrigger disableButtonEnhancement>
-            <Button disabled={controlsBusy} onClick={() => setExitError("")}>{t("exitApp")}</Button>
-          </DialogTrigger>
-          <DialogSurface>
-            <DialogBody>
-              <DialogTitle>{t("exitApp")}</DialogTitle>
-              <DialogContent>
-                {t("exitAppConfirm")}
-                <FeedbackRegion message={exitError || null} title={t("exitAppFailed")} intent="error" />
-              </DialogContent>
-              <DialogActions>
-                <DialogTrigger disableButtonEnhancement>
-                  <Button disabled={busyControl === "exit"}>{t("exitAppCancel")}</Button>
-                </DialogTrigger>
-                <Button appearance="primary" disabled={busyControl === "exit"} onClick={() => void exitApp()}>
-                  {t(busyControl === "exit" ? "exitingApp" : "exitApp")}
-                </Button>
-              </DialogActions>
-            </DialogBody>
-          </DialogSurface>
-        </Dialog>
+        <Button disabled={controlsBusy} onClick={() => {
+          setExitError("");
+          setExitDialogOpen(true);
+        }}>{t("exitApp")}</Button>
+        <dialog
+          ref={exitDialog}
+          className={styles.exitDialog}
+          aria-labelledby="exit-dialog-title"
+          aria-describedby="exit-dialog-description"
+          onCancel={(event) => {
+            event.preventDefault();
+            if (busyControl !== "exit") setExitDialogOpen(false);
+          }}
+        >
+          <h2 id="exit-dialog-title" className={styles.exitDialogTitle}>{t("exitApp")}</h2>
+          <p id="exit-dialog-description">{t("exitAppConfirm")}</p>
+          <FeedbackRegion message={exitError || null} title={t("exitAppFailed")} intent="error" />
+          <div className={styles.exitDialogActions}>
+            <Button autoFocus disabled={busyControl === "exit"} onClick={() => setExitDialogOpen(false)}>
+              {t("exitAppCancel")}
+            </Button>
+            <Button appearance="primary" disabled={busyControl === "exit"} onClick={() => void exitApp()}>
+              {t(busyControl === "exit" ? "exitingApp" : "exitApp")}
+            </Button>
+          </div>
+        </dialog>
       </div>
       <FeedbackRegion message={exitAccepted ? t("exitAppAccepted") : null} />
       {!summary && !error && <Spinner label={t("loading")} />}

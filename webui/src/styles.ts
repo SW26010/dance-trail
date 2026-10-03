@@ -14,6 +14,33 @@ export const useGlobalStyles = makeStaticStyles({
 });
 
 export const useAppStyles = makeStyles({
+  exitDialog: {
+    width: "min(600px, calc(100% - 32px))",
+    maxHeight: "calc(100% - 32px)",
+    padding: tokens.spacingHorizontalXXL,
+    border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke1}`,
+    borderRadius: tokens.borderRadiusXLarge,
+    backgroundColor: tokens.colorNeutralBackground1,
+    color: tokens.colorNeutralForeground1,
+    boxShadow: tokens.shadow64,
+    fontFamily: tokens.fontFamilyBase,
+    fontSize: tokens.fontSizeBase300,
+    "::backdrop": {
+      backgroundColor: tokens.colorBackgroundOverlay,
+    },
+  },
+  exitDialogTitle: {
+    marginTop: 0,
+    fontSize: tokens.fontSizeBase500,
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  exitDialogActions: {
+    display: "flex",
+    justifyContent: "flex-end",
+    flexWrap: "wrap",
+    gap: tokens.spacingHorizontalS,
+    marginTop: tokens.spacingVerticalL,
+  },
   provider: {
     minHeight: "100vh",
     backgroundColor: tokens.colorNeutralBackground2,

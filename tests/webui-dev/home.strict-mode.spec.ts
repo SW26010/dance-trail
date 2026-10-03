@@ -34,6 +34,29 @@ test("StrictMode development remount still loads Home", async ({ page }) => {
   await expect(page.getByRole("status").filter({ hasText: "Loading" })).toHaveCount(0);
 });
 
+test("pending exit cannot be dismissed with Escape", async ({ page }) => {
+  let releaseResponse!: () => void;
+  const responseReady = new Promise<void>((resolve) => { releaseResponse = resolve; });
+  await page.route("**/api/app/exit", async (route) => {
+    await responseReady;
+    await route.fulfill({ status: 503, json: { error: "Exit unavailable" } });
+  });
+  await page.getByRole("button", { name: "Exit application", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Exit application" });
+  try {
+    await dialog.getByRole("button", { name: "Exit application", exact: true }).click();
+    await expect(dialog.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeVisible();
+  } finally {
+    releaseResponse();
+  }
+  await expect(dialog).toContainText("Exit unavailable");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("button", { name: "Exit application", exact: true })).toBeFocused();
+});
+
 test("Home exit can be cancelled, retried, and disables controls after acceptance", async ({ page }) => {
   let requests = 0;
   await page.route("**/api/app/exit", async (route) => {

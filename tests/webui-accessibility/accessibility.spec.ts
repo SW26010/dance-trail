@@ -9,6 +9,45 @@ const wcag22AATags = [
   "wcag22aa",
 ];
 
+for (const theme of ["light", "dark", "forced-colors"] as const) {
+  test(`exit confirmation supports keyboard and accessibility in ${theme}`, async ({ page }) => {
+    await page.addInitScript((value) => {
+      localStorage.setItem("dance-trail.language", "en");
+      localStorage.setItem("dance-trail.theme", value === "dark" ? "dark" : "light");
+    }, theme);
+    if (theme === "forced-colors") await page.emulateMedia({ forcedColors: "active" });
+    await openSettledPage(page, "/home", "Home", "#home-live-status");
+    const trigger = page.getByRole("button", { name: "Exit application", exact: true });
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog", { name: "Exit application" });
+    const cancel = dialog.getByRole("button", { name: "Cancel" });
+    const confirm = dialog.getByRole("button", { name: "Exit application" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toHaveAccessibleDescription(/stop the watcher, overlay, and Web UI service/);
+    await expect(cancel).toBeFocused();
+    await expectNoWcag22AAViolations(page);
+    await page.keyboard.press("Tab");
+    await expect(confirm).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(cancel).toBeFocused();
+    // Repeated Tab must never reach controls behind the native modal.
+    for (let index = 0; index < 5; index += 1) {
+      await page.keyboard.press("Tab");
+      expect(await page.evaluate(() => document.activeElement === document.body ||
+        Boolean(document.activeElement?.closest("dialog")))).toBe(true);
+    }
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(trigger).toBeFocused();
+    await trigger.press("Enter");
+    await cancel.press("Enter");
+    await expect(dialog).toBeHidden();
+    await expect(trigger).toBeFocused();
+    await expectNoWcag22AAViolations(page);
+  });
+}
+
 const primaryPages = [
   ["/home", "Home", "#home-live-status"],
   ["/timeline", "Timeline", "#view-timeline .panel"],
