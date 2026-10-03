@@ -9,7 +9,7 @@ DanceTrail 从本地 VRChat 日志记录舞蹈播放，帮助你回顾每次跳�
 
 ## 可以做什么
 
-- **记录 WannaDance、PyPyDance 和 DuDu 的播放**：启动日志监听，记录这三个舞蹈系统中支持的播放，并查看当前正在播放的曲目。
+- **记录 WannaDance、PyPyDance 和 DuDu FitDance 的播放**：启动日志监听，记录这三个舞蹈系统中支持的播放，并查看当前正在播放的曲目。
 - **回顾跳舞历史**：按天浏览时间线，复查不确定的记录，决定哪些播放计入历史。
 - **寻找下一首舞蹈**：搜索 WannaDance 曲库，标记收藏和想学的曲目，获取基于历史的推荐。
 - **查看统计**：在洞察页查看常跳曲目和播放来源分布。
@@ -109,8 +109,8 @@ DanceTrail 不会自动迁移旧产品名称下的配置或数据库。
 
 ## 支持范围与当前限制
 
-DanceTrail 支持记录 **WannaDance（Wanna）**、**PyPyDance（PyPy）**
-和 **DuDu FitDance（DuDu）** 的舞蹈播放：
+DanceTrail 支持记录 **WannaDance**、**PyPyDance**
+和 **DuDu FitDance** 的舞蹈播放：
 
 | 舞蹈系统 | 从 VRChat 日志实时记录 | 导入 VRCX 历史 |
 | --- | --- | --- |
@@ -118,7 +118,7 @@ DanceTrail 支持记录 **WannaDance（Wanna）**、**PyPyDance（PyPy）**
 | **PyPyDance** | 支持可识别的播放日志和 URL | 支持可识别的 URL |
 | **DuDu FitDance** | 支持可识别的播放日志和 URL | URL 识别为实验性支持 |
 
-WannaDance 还提供曲库同步，用于浏览和搜索曲目。PyPyDance 和 DuDu 的播放记录支持
+WannaDance 还提供曲库同步，用于浏览和搜索曲目。PyPyDance 和 DuDu FitDance 的播放记录支持
 不包含这两个系统的完整曲库同步。
 
 - 记录依赖 VRChat 日志中的信息。检测到播放不等于你完成了整支舞，
