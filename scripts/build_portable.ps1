@@ -231,6 +231,13 @@ if (-not $SkipSmoke) {
     } "Smoke test portable app"
 }
 
+# Smoke checks may create the application-data lease file. It is runtime state,
+# not a release asset; removing it also fails safely if a smoke process is alive.
+$StageLock = Join-Path $StageDir "data\.dance-trail-watcher.lock"
+if (Test-Path -LiteralPath $StageLock) {
+    Remove-Item -LiteralPath $StageLock -Force
+}
+
 if (Test-Path -LiteralPath $ZipPath) {
     Remove-Item -LiteralPath $ZipPath -Force
 }
