@@ -1,7 +1,7 @@
+import errno
 import json
 from io import BytesIO
 import socket
-import sys
 import tempfile
 import threading
 import time
@@ -132,18 +132,53 @@ class WebUiServerTest(unittest.TestCase):
                 self.assertIsNone(server._server)
                 self.assertFalse(server.runtime.session.overlay_running)
 
-    @unittest.skipUnless(sys.platform == "win32", "Windows listener semantics")
-    def test_second_server_cannot_share_the_same_local_address(self):
+    def test_occupied_port_falls_back_and_reports_actual_port_in_webui(self):
         with tempfile.TemporaryDirectory() as tmp:
             first = WebUiServer(port=0, app_root=tmp)
             first.start()
             second = WebUiServer(port=first.port, app_root=tmp)
             try:
-                with self.assertRaises(OSError):
-                    second.start()
+                second.start()
+                self.assertNotEqual(first.port, second.port)
+                with urlopen(f"{second.url}api/summary", timeout=2) as response:
+                    warnings = json.load(response)["startup_warnings"]
+                self.assertTrue(any(
+                    str(first.port) in warning and str(second.port) in warning
+                    for warning in warnings
+                ))
+                self.assertEqual(second._mounted_overlay.url, second.overlay_url)
+                with urlopen(second.home_url, timeout=2) as response:
+                    self.assertEqual(response.status, 200)
             finally:
                 second.stop()
                 first.stop()
+
+    def test_unrelated_listener_errors_do_not_trigger_fallback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server = WebUiServer(app_root=tmp)
+            try:
+                with patch(
+                    "dance_trail.webui_server._WebUiHTTPServer",
+                    side_effect=OSError(errno.EIO, "listener failed"),
+                ) as listener:
+                    with self.assertRaises(OSError):
+                        server.start()
+                    listener.assert_called_once()
+            finally:
+                server.stop()
+
+    def test_available_preferred_port_is_kept_without_warning(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with socket.socket() as probe:
+                probe.bind(("127.0.0.1", 0))
+                port = probe.getsockname()[1]
+            server = WebUiServer(port=port, app_root=tmp)
+            try:
+                server.start()
+                self.assertEqual(server.port, port)
+                self.assertEqual(server.runtime.startup_warnings, ())
+            finally:
+                server.stop()
 
     def test_mount_failure_closes_bound_listener(self):
         class RejectingSession:

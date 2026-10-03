@@ -47,7 +47,7 @@ uv sync --locked
 uv run --locked python main.py webui
 ```
 
-Your browser opens at **<http://127.0.0.1:8787/home>**. Keep the terminal running
+Your browser opens at **<http://127.0.0.1:8787/home>** by default. If 8787 (or the port selected with `--port`) is occupied, the system assigns a free port and the Web UI home page shows a notice with both ports. Use the actual port for OBS as well. Keep the terminal running
 while using DanceTrail; press **Ctrl+C** in that terminal to stop it.
 
 The built browser interface is included in the repository. You do not need

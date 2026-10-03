@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import ctypes
+from contextlib import contextmanager
 from ctypes import wintypes
 from enum import Enum
 from http.client import HTTPException
+import mmap
 import threading
 import time
 from urllib.request import ProxyHandler, build_opener
@@ -23,6 +25,20 @@ EXISTING_WEBUI_POLL_SECONDS = 0.05
 EXISTING_WEBUI_PROBE_TIMEOUT_SECONDS = 0.5
 WEBUI_IDENTITY_MARKER = b"<title>DanceTrail</title>"
 _DIRECT_HTTP_OPENER = build_opener(ProxyHandler({}))
+
+
+@contextmanager
+def publish_desktop_port(port: int, *, name: str = DESKTOP_INSTANCE_MUTEX_NAME):
+    """Advertise the listener within this Windows session for the owner's lifetime."""
+    with mmap.mmap(-1, 4, tagname=f"{name}.Port") as mapping:
+        mapping[:] = port.to_bytes(4, "little")
+        yield
+
+
+def read_desktop_port(*, name: str = DESKTOP_INSTANCE_MUTEX_NAME) -> int | None:
+    with mmap.mmap(-1, 4, tagname=f"{name}.Port") as mapping:
+        port = int.from_bytes(mapping[:], "little")
+    return port if 1 <= port <= 65535 else None
 
 
 class ExistingWebUiActivation(Enum):

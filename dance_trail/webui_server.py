@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+import errno
 import json
 from pathlib import Path
 import secrets
@@ -144,7 +145,26 @@ class WebUiServer:
         return f"http://{self.host}:{self.port}{OVERLAY_PAGE_PATH}"
 
     def start(self) -> None:
-        server = _WebUiHTTPServer((self.host, self.port), _WebUiHandler, self.runtime)
+        requested_port = self.port
+        try:
+            server = _WebUiHTTPServer((self.host, requested_port), _WebUiHandler, self.runtime)
+        except OSError as exc:
+            # Windows exclusive listeners can report WSAEACCES for an occupied port.
+            if not requested_port or not (
+                exc.errno == errno.EADDRINUSE
+                or getattr(exc, "winerror", None) in (10048, 10013)
+            ):
+                raise
+            server = _WebUiHTTPServer((self.host, 0), _WebUiHandler, self.runtime)
+            self.runtime = replace(
+                self.runtime,
+                startup_warnings=(*self.runtime.startup_warnings, (
+                    f"端口 {requested_port} 已被占用或不可用，已自动切换到系统分配的端口 "
+                    f"{server.server_address[1]}。 / Port {requested_port} is occupied or unavailable; "
+                    f"using system-assigned port {server.server_address[1]}."
+                )),
+            )
+            server.runtime = self.runtime
         self.port = int(server.server_address[1])
         overlay = MountedOverlayAdapter(
             self.runtime.overlay_state,

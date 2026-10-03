@@ -1,4 +1,5 @@
 import json
+from contextlib import nullcontext
 import sys
 import tempfile
 import time
@@ -21,6 +22,21 @@ def wait_for_call_count(calls: list[dict], count: int) -> None:
 
 
 class TrayRuntimeTest(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch(
+            "dance_trail.desktop_instance.publish_desktop_port",
+            return_value=nullcontext(),
+        ))
+        self.enterContext(patch(
+            "dance_trail.desktop_instance.read_desktop_port", return_value=None,
+        ))
+
+    def test_existing_desktop_url_uses_published_port(self):
+        from dance_trail.tray_app import _desktop_home_url
+
+        with patch("dance_trail.desktop_instance.read_desktop_port", return_value=54321):
+            self.assertEqual(_desktop_home_url(), "http://127.0.0.1:54321/home")
+
     @unittest.skipUnless(sys.platform == "win32", "Windows tray exit message test")
     def test_web_exit_posts_existing_tray_exit_command(self):
         from dance_trail import _win_tray
@@ -224,7 +240,7 @@ class TrayRuntimeTest(unittest.TestCase):
             close=Mock(side_effect=lambda: events.append("runtime.close")),
         )
         server = SimpleNamespace(
-            start=Mock(),
+            port=8787, start=Mock(),
             stop=Mock(side_effect=lambda: events.append("server.stop")),
         )
         tray_window = SimpleNamespace(run=Mock())
@@ -293,7 +309,7 @@ class TrayRuntimeTest(unittest.TestCase):
 
         instance = SimpleNamespace(close=Mock())
         runtime = SimpleNamespace(session=object(), close=Mock())
-        server = SimpleNamespace(start=Mock(), stop=Mock())
+        server = SimpleNamespace(port=8787, start=Mock(), stop=Mock())
         tray_window = SimpleNamespace(run=Mock())
         fake_win_tray_module = SimpleNamespace(
             WindowsTrayApp=Mock(return_value=tray_window)
@@ -376,7 +392,7 @@ class TrayRuntimeTest(unittest.TestCase):
         instance = SimpleNamespace(close=Mock())
         runtime = SimpleNamespace(session=object(), close=Mock())
         server = SimpleNamespace(
-            start=Mock(),
+            port=8787, start=Mock(),
             stop=Mock(side_effect=TimeoutError("slow SSE drain")),
         )
         tray_window = SimpleNamespace(run=Mock())
@@ -469,7 +485,7 @@ class TrayRuntimeTest(unittest.TestCase):
         )
         runtime = SimpleNamespace(session=object(), close=Mock())
         server = SimpleNamespace(
-            start=Mock(),
+            port=8787, start=Mock(),
             stop=Mock(side_effect=TimeoutError("server cleanup failed")),
         )
         tray_window = SimpleNamespace(run=Mock())
@@ -496,18 +512,17 @@ class TrayRuntimeTest(unittest.TestCase):
         )
         runtime.close.assert_called_once_with()
 
-    def test_windows_entry_rejects_noncanonical_port_before_acquiring_instance(self):
+    def test_windows_entry_with_custom_port_activates_existing_instance(self):
         with (
             patch.object(sys, "platform", "win32"),
             patch(
-                "dance_trail.tray_app._acquire_windows_desktop_instance",
+                "dance_trail.tray_app._acquire_or_activate_windows_desktop_instance",
                 return_value=None,
             ) as acquire_instance,
-            self.assertRaisesRegex(ValueError, "canonical port"),
         ):
             run_tray_webui_app(port=9988, open_browser=False, app_root=".")
 
-        acquire_instance.assert_not_called()
+        acquire_instance.assert_called_once_with(open_browser=False)
 
     def test_non_windows_entry_uses_webui_server_fallback(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -15,11 +15,29 @@ from dance_trail.desktop_instance import (
     WAIT_ABANDONED,
     WindowsDesktopInstanceLease,
     open_existing_webui,
+    publish_desktop_port,
+    read_desktop_port,
 )
 from dance_trail.webui_server import WebUiServer
 
 
 class DesktopInstanceTest(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "win32", "Windows named mapping test")
+    def test_actual_port_is_visible_to_other_processes_only_while_published(self):
+        name = f"Local\\DanceTrail.DesktopTray.Test.{uuid.uuid4()}"
+        self.assertIsNone(read_desktop_port(name=name))
+        with publish_desktop_port(54321, name=name):
+            probe = subprocess.run(
+                [sys.executable, "-c", (
+                    "import sys; "
+                    "from dance_trail.desktop_instance import read_desktop_port; "
+                    "print(read_desktop_port(name=sys.argv[1]))"
+                ), name],
+                capture_output=True, text=True, check=True,
+            )
+            self.assertEqual(probe.stdout.strip(), "54321")
+        self.assertIsNone(read_desktop_port(name=name))
+
     @staticmethod
     def _webui_response(body: bytes = b"<title>DanceTrail</title>") -> MagicMock:
         response = MagicMock()

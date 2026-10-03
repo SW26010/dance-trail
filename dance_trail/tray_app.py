@@ -190,12 +190,6 @@ def run_tray_webui_app(
 
         run_webui_server(port=port, open_browser=open_browser, app_root=app_root)
         return
-    if port != DEFAULT_WEBUI_PORT:
-        raise ValueError(
-            "Windows Desktop Tray Entry requires the canonical port "
-            f"{DEFAULT_WEBUI_PORT}; use the standalone webui command for a "
-            "custom port."
-        )
 
     instance = _acquire_or_activate_windows_desktop_instance(
         open_browser=open_browser
@@ -211,9 +205,12 @@ def run_tray_webui_app(
         server = WebUiServer(port=port, app_root=app_root, session_runtime=runtime.session)
         shutdown.own_server(server)
         server.start()
-        WindowsTrayApp(server, runtime, shutdown=shutdown.close).run(
-            open_browser=open_browser
-        )
+        from dance_trail.desktop_instance import publish_desktop_port
+
+        with publish_desktop_port(server.port):
+            WindowsTrayApp(server, runtime, shutdown=shutdown.close).run(
+                open_browser=open_browser
+            )
     except BaseException as primary:
         shutdown.close(primary=primary)
         raise
@@ -237,6 +234,7 @@ def _acquire_or_activate_windows_desktop_instance(*, open_browser: bool):
             return instance
 
         remaining = max(deadline - time.monotonic(), 0.0)
+        home_url = _desktop_home_url()
         activation = _try_activate_existing_webui(
             home_url,
             open_browser=open_browser,
@@ -284,4 +282,7 @@ def _show_existing_webui_activation_failure(home_url: str) -> None:
 
 
 def _desktop_home_url() -> str:
-    return f"http://{WEBUI_HOST}:{DEFAULT_WEBUI_PORT}{WEBUI_ROUTE_BY_VIEW['home']}"
+    from dance_trail.desktop_instance import read_desktop_port
+
+    port = read_desktop_port() or DEFAULT_WEBUI_PORT
+    return f"http://{WEBUI_HOST}:{port}{WEBUI_ROUTE_BY_VIEW['home']}"
