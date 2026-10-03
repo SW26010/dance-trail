@@ -10,8 +10,9 @@ It runs on your Windows PC, with an interface in your browser.
 
 ## What you can do
 
-- **Record while you play.** Start the log watcher to capture supported dance
-  playback and see what is currently playing.
+- **Record WannaDance, PyPyDance, and DuDu sessions.** Start the log watcher
+  to capture supported playback from all three dance systems and see what is
+  currently playing.
 - **Review your history.** Browse a daily timeline, review uncertain records,
   and choose which plays count toward your history.
 - **Find your next dance.** Search the WannaDance catalog, mark favorites and
@@ -127,9 +128,19 @@ paths and backup details.
 
 ## Supported sources and current limits
 
-- WannaDance is the main catalog integration.
-- VRCX history import recognizes WannaDance and observed PyPyDance URLs.
-  Recognition of DuDu FitDance URLs is experimental.
+DanceTrail supports recording from **WannaDance (Wanna)**, **PyPyDance (PyPy)**,
+and **DuDu FitDance (DuDu)**:
+
+| Dance system | Live recording from VRChat logs | VRCX history import |
+| --- | --- | --- |
+| **WannaDance** | Supported | Supported |
+| **PyPyDance** | Supported for recognized playback logs and URLs | Supported for recognized URLs |
+| **DuDu FitDance** | Supported for recognized playback logs and URLs | Experimental URL recognition |
+
+WannaDance also provides the catalog integration for browsing and searching
+tracks. Recording support for PyPyDance and DuDu does not include full catalog
+synchronization for those systems.
+
 - Capture depends on the information present in VRChat logs. A detected play
   is not proof that you completed the dance; review uncertain records in
   Timeline.
