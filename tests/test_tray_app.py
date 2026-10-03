@@ -21,6 +21,19 @@ def wait_for_call_count(calls: list[dict], count: int) -> None:
 
 
 class TrayRuntimeTest(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "win32", "Windows tray exit message test")
+    def test_web_exit_posts_existing_tray_exit_command(self):
+        from dance_trail import _win_tray
+
+        app = _win_tray.WindowsTrayApp.__new__(_win_tray.WindowsTrayApp)
+        app._hwnd = 123
+        with patch.object(_win_tray.user32, "PostMessageW", return_value=1) as post:
+            app._request_exit()
+        post.assert_called_once_with(123, _win_tray.WM_COMMAND, _win_tray.IDM_EXIT, 0)
+        with patch.object(_win_tray.user32, "PostMessageW", return_value=0):
+            with self.assertRaises(OSError):
+                app._request_exit()
+
     @unittest.skipUnless(sys.platform == "win32", "Windows tray callback test")
     def test_windows_tray_callback_contains_lifecycle_timeout(self):
         from dance_trail import _win_tray

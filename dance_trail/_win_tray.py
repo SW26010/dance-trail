@@ -141,6 +141,8 @@ user32.DefWindowProcW.restype = LRESULT
 user32.DestroyWindow.argtypes = [wintypes.HWND]
 user32.DestroyWindow.restype = wintypes.BOOL
 user32.PostQuitMessage.argtypes = [ctypes.c_int]
+user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+user32.PostMessageW.restype = wintypes.BOOL
 user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
 user32.LoadIconW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR]
 user32.LoadIconW.restype = wintypes.HICON
@@ -222,9 +224,15 @@ class WindowsTrayApp:
         _enable_dpi_awareness()
         self._create_window()
         self._add_tray_icon()
+        self.server.set_exit_handler(self._request_exit)
         if open_browser:
             webbrowser.open(self.server.home_url)
         self._message_loop()
+
+    def _request_exit(self) -> None:
+        # Post to the owner thread; cleanup must not block an HTTP operation.
+        if not user32.PostMessageW(self._hwnd, WM_COMMAND, IDM_EXIT, 0):
+            self._raise_last_error("PostMessageW")
 
     def _create_window(self) -> None:
         window_class = WNDCLASSW()

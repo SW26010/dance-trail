@@ -3,6 +3,13 @@ import {
   Button,
   Card,
   CardHeader,
+  Dialog,
+  DialogActions,
+  DialogBody,
+  DialogContent,
+  DialogSurface,
+  DialogTitle,
+  DialogTrigger,
   MessageBar,
   MessageBarBody,
   MessageBarTitle,
@@ -19,6 +26,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, postJson } from "../api";
 import {
   liveControlResponseSchema,
+  exitResponseSchema,
   sessionSchema,
   summarySchema,
   type Session,
@@ -42,6 +50,9 @@ export function HomePage({ t }: PageProps) {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [error, setError] = useState("");
   const [busyControl, setBusyControl] = useState("");
+  const [exitDialogOpen, setExitDialogOpen] = useState(false);
+  const [exitAccepted, setExitAccepted] = useState(false);
+  const [exitError, setExitError] = useState("");
   const mounted = useRef(false);
   const loadRequest = useRef(0);
 
@@ -118,8 +129,24 @@ export function HomePage({ t }: PageProps) {
   const overlayState = lifecycleState(session.overlay_state, session.overlay_running);
   const watcherActive = watcherState !== "stopped";
   const overlayActive = overlayState !== "stopped";
-  const controlsBusy = Boolean(busyControl);
+  const controlsBusy = Boolean(busyControl) || exitAccepted;
   const counts = data.counts ?? {};
+
+  const exitApp = async () => {
+    setBusyControl("exit");
+    setExitError("");
+    loadRequest.current += 1;
+    try {
+      await postJson("/api/app/exit", exitResponseSchema, {});
+      setExitAccepted(true);
+      setError("");
+      setExitDialogOpen(false);
+    } catch (exitFailure) {
+      setExitError(errorMessage(exitFailure));
+    } finally {
+      setBusyControl("");
+    }
+  };
 
   return (
     <div className={styles.page}>
@@ -129,7 +156,7 @@ export function HomePage({ t }: PageProps) {
         intent="error"
       />
       <div className={styles.pageToolbar}>
-        <Button onClick={() => void load()}>{t("refresh")}</Button>
+        <Button disabled={controlsBusy} onClick={() => void load()}>{t("refresh")}</Button>
         {summary && (
           <>
             <Button
@@ -150,7 +177,32 @@ export function HomePage({ t }: PageProps) {
             </Button>
           </>
         )}
+        <Dialog open={exitDialogOpen} onOpenChange={(_, next) => {
+          if (busyControl !== "exit") setExitDialogOpen(next.open);
+        }}>
+          <DialogTrigger disableButtonEnhancement>
+            <Button disabled={controlsBusy} onClick={() => setExitError("")}>{t("exitApp")}</Button>
+          </DialogTrigger>
+          <DialogSurface>
+            <DialogBody>
+              <DialogTitle>{t("exitApp")}</DialogTitle>
+              <DialogContent>
+                {t("exitAppConfirm")}
+                <FeedbackRegion message={exitError || null} title={t("exitAppFailed")} intent="error" />
+              </DialogContent>
+              <DialogActions>
+                <DialogTrigger disableButtonEnhancement>
+                  <Button disabled={busyControl === "exit"}>{t("exitAppCancel")}</Button>
+                </DialogTrigger>
+                <Button appearance="primary" disabled={busyControl === "exit"} onClick={() => void exitApp()}>
+                  {t(busyControl === "exit" ? "exitingApp" : "exitApp")}
+                </Button>
+              </DialogActions>
+            </DialogBody>
+          </DialogSurface>
+        </Dialog>
       </div>
+      <FeedbackRegion message={exitAccepted ? t("exitAppAccepted") : null} />
       {!summary && !error && <Spinner label={t("loading")} />}
       {summary && (
         <>

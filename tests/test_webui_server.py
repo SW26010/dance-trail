@@ -67,6 +67,71 @@ def wait_for_call_count(calls: list[dict], count: int) -> None:
 
 
 class WebUiServerTest(unittest.TestCase):
+    def test_exit_requires_local_authenticated_post(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server = WebUiServer(port=0, app_root=tmp)
+            requested = threading.Event()
+            server.set_exit_handler(requested.set)
+            server.start()
+            try:
+                self._http_error_json(self._json_request(server, "api/app/exit", {}), 403)
+                self._http_error_json(self._json_request(
+                    server, "api/app/exit", {}, token=server.runtime.csrf_token,
+                    origin="https://example.com",
+                ), 403)
+                with self.assertRaises(HTTPError) as error:
+                    urlopen(f"{server.url}api/app/exit", timeout=2)
+                self.assertEqual(error.exception.code, 404)
+                error.exception.close()
+                self.assertFalse(requested.is_set())
+                for _ in range(2):
+                    with urlopen(self._json_request(
+                        server, "api/app/exit", {}, token=server.runtime.csrf_token,
+                    ), timeout=2) as response:
+                        self.assertEqual(response.status, 202)
+                        self.assertEqual(json.load(response), {"status": "exiting"})
+                self.assertTrue(requested.is_set())
+            finally:
+                server.stop()
+
+    def test_exit_stops_standalone_owner_after_sending_response(self):
+        from dance_trail.webui_server import run_webui_server
+
+        with tempfile.TemporaryDirectory() as tmp:
+            server = WebUiServer(port=0, app_root=tmp)
+            ready = threading.Event()
+            failures = []
+
+            def run():
+                try:
+                    run_webui_server(port=0, app_root=tmp, open_browser=True)
+                except BaseException as exc:
+                    failures.append(exc)
+
+            with (
+                patch("dance_trail.webui_server.WebUiServer", return_value=server),
+                patch("dance_trail.webui_server.webbrowser.open", side_effect=lambda _: ready.set()),
+            ):
+                owner = threading.Thread(target=run)
+                owner.start()
+                try:
+                    self.assertTrue(ready.wait(3))
+                    server.runtime.session.start_overlay()
+                    with urlopen(self._json_request(
+                        server, "api/app/exit", {}, token=server.runtime.csrf_token,
+                    ), timeout=3) as response:
+                        self.assertEqual(response.status, 202)
+                        self.assertEqual(json.load(response), {"status": "exiting"})
+                finally:
+                    request_exit = server.runtime.request_exit
+                    if request_exit is not None:
+                        request_exit()
+                    owner.join(5)
+                self.assertFalse(owner.is_alive())
+                self.assertEqual(failures, [])
+                self.assertIsNone(server._server)
+                self.assertFalse(server.runtime.session.overlay_running)
+
     @unittest.skipUnless(sys.platform == "win32", "Windows listener semantics")
     def test_second_server_cannot_share_the_same_local_address(self):
         with tempfile.TemporaryDirectory() as tmp:

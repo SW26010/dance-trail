@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace
 import json
 from pathlib import Path
 import secrets
-import time
+import threading
 from urllib.parse import urlsplit
 import webbrowser
 
@@ -68,6 +68,7 @@ class WebUiRuntime:
     overlay_state: OverlayState
     live_state: OverlayState
     startup_warnings: tuple[str, ...] = ()
+    request_exit: Callable[[], None] | None = None
 
     @classmethod
     def from_root(
@@ -175,6 +176,12 @@ class WebUiServer:
             raise
         self._server = server
         self._mounted_overlay = overlay
+
+    def set_exit_handler(self, handler: Callable[[], None]) -> None:
+        """Register a nonblocking notification to the application's owner loop."""
+        self.runtime = replace(self.runtime, request_exit=handler)
+        if self._server is not None:
+            self._server.runtime = self.runtime
 
     def stop(self, *, deadline: float | None = None) -> None:
         cleanup_errors: list[Exception] = []
@@ -461,14 +468,15 @@ def run_webui_server(
 ) -> None:
     """Run the local Web UI server until interrupted."""
     server = WebUiServer(port=port, app_root=app_root)
+    exit_requested = threading.Event()
+    server.set_exit_handler(exit_requested.set)
     server.start()
     print(f"dance-trail Web UI: {server.home_url}")
     print(f"dance-trail OBS overlay: {server.overlay_url}")
     if open_browser:
         webbrowser.open(server.home_url)
     try:
-        while True:
-            time.sleep(3600)
+        exit_requested.wait()
     except KeyboardInterrupt:
         print("\nStopping dance-trail Web UI")
     finally:

@@ -43,6 +43,9 @@ from dance_trail.webui_settings import (
 
 class WebUiRouteRuntime(Protocol):
     @property
+    def request_exit(self) -> Callable[[], None] | None: ...
+
+    @property
     def app_root(self) -> Path: ...
 
     @property
@@ -122,7 +125,15 @@ GET_JSON_ROUTES: dict[str, GetRoute] = {
     OVERLAY_STATE_PATH: _get_overlay_state,
 }
 
+def _exit_app(runtime: WebUiRouteRuntime, payload: dict) -> tuple[dict, int]:
+    if runtime.request_exit is None:
+        return {"error": "Application exit is unavailable"}, 503
+    runtime.request_exit()
+    return {"status": "exiting"}, 202
+
+
 POST_JSON_ROUTES: dict[str, PostRoute] = {
+    "/api/app/exit": _exit_app,
     "/api/config": save_config_from_payload,
     "/api/resolve-path": resolve_path_from_payload,
     "/api/pick-path": pick_path_from_payload,

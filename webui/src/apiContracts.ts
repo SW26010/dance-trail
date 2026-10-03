@@ -37,6 +37,8 @@ export const liveControlResponseSchema = z.object({
   session: sessionSchema,
 }).passthrough();
 
+export const exitResponseSchema = z.object({ status: z.literal("exiting") });
+
 export const timelineRecordSchema = z.object({
   id: z.number().int(),
   time: z.string(),
