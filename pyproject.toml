@@ -1,5 +1,5 @@
 [project]
-name = "dancing-log"
+name = "dance-trail"
 version = "0.8.0"
 description = "舞蹈歌曲记录与数据分析工具"
 readme = "README.md"

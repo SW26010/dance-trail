@@ -23,8 +23,8 @@ else:
 CHANGE_REPORT_DIRECTORY = Path("docs/accessibility/change-reports")
 MATERIAL_WEBUI_FILES = frozenset(
     {
-        "dancing_log/webui_assets.py",
-        "dancing_log/webui_routes.py",
+        "dance_trail/webui_assets.py",
+        "dance_trail/webui_routes.py",
         "package.json",
         "pnpm-lock.yaml",
         "tsconfig.json",
@@ -32,7 +32,7 @@ MATERIAL_WEBUI_FILES = frozenset(
     }
 )
 MATERIAL_WEBUI_DIRECTORIES = (
-    "dancing_log/webui_dist/",
+    "dance_trail/webui_dist/",
     "webui/",
 )
 ZERO_REVISION_PATTERN = re.compile(r"^0{40}$")

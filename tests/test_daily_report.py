@@ -3,19 +3,19 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from dancing_log.daily_report import (
+from dance_trail.daily_report import (
     format_daily_dance_line,
     load_daily_dances,
     load_daily_live_dances,
     parse_played_at_local,
 )
-from dancing_log.local_dance_day import LocalDanceDayBoundary
-from dancing_log.playback_projection import (
+from dance_trail.local_dance_day import LocalDanceDayBoundary
+from dance_trail.playback_projection import (
     EFFECTIVE_PLAYBACK_ACCEPTED,
     EFFECTIVE_PLAYBACK_EXCLUDED,
     set_manual_playback_decision,
 )
-from dancing_log.storage import (
+from dance_trail.storage import (
     WANNA_SYSTEM_KEY,
     connect_db,
     ensure_dance_track,

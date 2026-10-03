@@ -145,7 +145,7 @@ def collect(repo: Path, output: Path, node_root: Path) -> None:
         json.dumps(entries, indent=2) + "\n", encoding="utf-8"
     )
     (legal / "README.txt").write_text(
-        "Dancing Log is MIT licensed; see ../LICENSE.\n"
+        "DanceTrail is MIT licensed; see ../LICENSE.\n"
         "Bundled dependencies retain their own licenses and copyright notices.\n"
         "manifest.json lists installed Python runtime dependencies, PyInstaller's\n"
         "bootloader exception, and the frontend runtime dependency closure.\n"

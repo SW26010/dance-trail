@@ -30,7 +30,7 @@ The suite's Nav package is explicitly documented as not production-ready, so
 primary navigation uses official Fluent Link controls inside a semantic `nav`.
 
 The maintainable source of truth lives under `webui/`. Vite produces a locked,
-self-contained bundle under `dancing_log/webui_dist/`; no CDN or runtime package
+self-contained bundle under `dance_trail/webui_dist/`; no CDN or runtime package
 download is permitted. Python owns the narrow static-asset delivery and
 request-local bootstrap interface, including CSRF and canonical Navigation Entry
 routes. The portable build rebuilds the frontend and includes the generated
@@ -44,7 +44,7 @@ ADR 0009.
 
 Frontend changes require the locked pnpm graph, TypeScript checking, a production
 Web UI build, and the Playwright accessibility suite. Generated files in
-`dancing_log/webui_dist/` are build output and are not edited by hand.
+`dance_trail/webui_dist/` are build output and are not edited by hand.
 
 The initial bundle is larger than the handwritten asset, but it replaces local
 control implementations with maintained Fluent behavior and keeps theme,

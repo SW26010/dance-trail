@@ -1,10 +1,11 @@
 name: Web UI Accessibility
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
-      - master
+      - main
 
 permissions:
   contents: read
@@ -45,8 +46,8 @@ jobs:
 
       - name: Check Python lint and types
         run: |
-          uv run --locked --cache-dir .uv-cache ruff check dancing_log tests scripts
-          uv run --locked --cache-dir .uv-cache ty check dancing_log
+          uv run --locked --cache-dir .uv-cache ruff check dance_trail tests scripts
+          uv run --locked --cache-dir .uv-cache ty check dance_trail
 
       - name: Run Python unit tests
         run: uv run --locked --cache-dir .uv-cache python -m unittest discover
@@ -78,11 +79,11 @@ jobs:
         run: |
           pnpm check:webui
           pnpm build:webui
-          git diff --exit-code -- dancing_log/webui_dist
+          git diff --exit-code -- dance_trail/webui_dist
 
       - name: Verify accessibility evidence for material Web UI changes
         env:
-          BASE_REVISION: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE_REVISION: ${{ github.event.pull_request.base.sha || github.event.before || '0000000000000000000000000000000000000000' }}
           HEAD_REVISION: ${{ github.sha }}
         run: >-
           uv run --locked --cache-dir .uv-cache python

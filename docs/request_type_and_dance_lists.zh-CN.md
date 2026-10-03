@@ -227,7 +227,7 @@ random 证据现状与后续计划另见 `docs/request_type_random_evidence.zh-C
 
 已决定：现有 `playback_records.request_type` 是推断输出或旧投影，不是 Request Source Type Inference 的输入。全局 rebuild / repair 不能因为已有 `request_type` 是 `random`、`player`、`queued_self`、`self` 或其他旧值就保留它；它必须只根据当前稳定输入重新推断。旧值只能用于兼容显示、迁移诊断或审计解释。
 
-已决定：当前 `dancing_log/playback_request_type.py` 不是按本语义设计的长期模块，可以在正式实现 Request Source Type Inference 时整体替换；不需要保留旧 `REQUEST_TYPE_PRECEDENCE`、旧 `queued_self` promotion seam 或历史数字优先级作为实现约束。
+已决定：当前 `dance_trail/playback_request_type.py` 不是按本语义设计的长期模块，可以在正式实现 Request Source Type Inference 时整体替换；不需要保留旧 `REQUEST_TYPE_PRECEDENCE`、旧 `queued_self` promotion seam 或历史数字优先级作为实现约束。
 
 已决定：Request Source Type Inference 第一版接受全局重算作为普通写操作后的稳定路径。Dance Plan Fulfillment、Recommendation List Snapshot、planned record exclusion 和恢复默认等强输入发生变化时，可以直接触发全局 Dance Plan Fulfillment reconciliation 和全局 `request_type` rebuild，以正确性和可验证性优先。VRCX importer、watcher 和 PlaybackRecord writer 不内嵌最终策略。另提供显式 repair/rebuild 命令，用于切换后、策略更新后或用户怀疑数据漂移时批量重投影。普通 Timeline / Insights 读路径不做隐式修复，避免读页面时改变数据库。
 

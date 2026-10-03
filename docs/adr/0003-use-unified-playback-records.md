@@ -8,7 +8,7 @@ Superseded by ADR 0014 for v2. Retained as the accepted v1 implementation record
 
 ## Context
 
-`dancing-log` currently has playback-shaped data in several places: historical `dance_events`, source-specific VRCX import rows, and live watcher rows. The merge design now treats source database evidence as input that must be converted into target-owned Local Playback Evidence, not copied as long-term source-table state. The current data format has not been widely distributed, and existing `dance_events` data is limited enough to treat as legacy input during the merge transition.
+`dance-trail` currently has playback-shaped data in several places: historical `dance_events`, source-specific VRCX import rows, and live watcher rows. The merge design now treats source database evidence as input that must be converted into target-owned Local Playback Evidence, not copied as long-term source-table state. The current data format has not been widely distributed, and existing `dance_events` data is limited enough to treat as legacy input during the merge transition.
 
 ## Decision
 

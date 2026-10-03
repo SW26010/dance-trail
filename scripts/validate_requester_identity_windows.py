@@ -24,9 +24,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from dancing_log.storage import connect_db  # noqa: E402
-from dancing_log.vrc_log_utils import extract_timestamp, parse_vrc_timestamp  # noqa: E402
-from dancing_log.vrc_log_watcher import replay_vrc_log_files, watch_vrc_logs  # noqa: E402
+from dance_trail.storage import connect_db  # noqa: E402
+from dance_trail.vrc_log_utils import extract_timestamp, parse_vrc_timestamp  # noqa: E402
+from dance_trail.vrc_log_watcher import replay_vrc_log_files, watch_vrc_logs  # noqa: E402
 
 
 DEFAULT_SEED = 20260624

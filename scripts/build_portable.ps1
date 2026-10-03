@@ -115,13 +115,13 @@ if ($Version.StartsWith("v", [System.StringComparison]::OrdinalIgnoreCase)) {
     $Version = $Version.Substring(1)
 }
 
-$AppName = "DancingLog"
-$CliAppName = "DancingLogCli"
+$AppName = "DanceTrail"
+$CliAppName = "DanceTrailCli"
 $ReleaseName = "$AppName-v$Version-$Runtime-portable"
 $StageDir = Join-Path $PortableRoot $ReleaseName
 $ZipPath = Join-Path $ReleaseRoot "$ReleaseName.zip"
 $ChecksumPath = "$ZipPath.sha256"
-$WebUiDist = Join-Path $RepoRoot "dancing_log\webui_dist"
+$WebUiDist = Join-Path $RepoRoot "dance_trail\webui_dist"
 
 Set-Location $RepoRoot
 
@@ -165,7 +165,7 @@ $pyInstallerBaseArgs = @(
     "--onedir",
     "--exclude-module", "imageio",
     "--exclude-module", "imageio_ffmpeg",
-    "--add-data", "$WebUiDist;dancing_log/webui_dist",
+    "--add-data", "$WebUiDist;dance_trail/webui_dist",
     "--distpath", $PyInstallerDist,
     "--workpath", $PyInstallerWork,
     "--specpath", $PyInstallerWork
@@ -211,17 +211,17 @@ New-Item -ItemType Directory -Force `
     (Join-Path $LogsDir "captures"), `
     (Join-Path $LogsDir "runs"), `
     (Join-Path $LogsDir "source-vrc-logs") | Out-Null
-Copy-Item -LiteralPath (Join-Path $RepoRoot "config\dancing-log.example.json") -Destination $ConfigDir -Force
+Copy-Item -LiteralPath (Join-Path $RepoRoot "config\dance-trail.example.json") -Destination $ConfigDir -Force
 
 $batEncoding = [System.Text.UTF8Encoding]::new($false)
 [System.IO.File]::WriteAllText(
     (Join-Path $StageDir "sync-wanna.bat"),
-    "@echo off`r`nsetlocal`r`ncd /d ""%~dp0""`r`nDancingLogCli.exe sync-wanna %*`r`n",
+    "@echo off`r`nsetlocal`r`ncd /d ""%~dp0""`r`nDanceTrailCli.exe sync-wanna %*`r`n",
     $batEncoding
 )
 [System.IO.File]::WriteAllText(
     (Join-Path $StageDir "start-watch-vrc-log.bat"),
-    "@echo off`r`nsetlocal`r`ncd /d ""%~dp0""`r`nDancingLogCli.exe watch-vrc-log --overlay-port 8765 %*`r`n",
+    "@echo off`r`nsetlocal`r`ncd /d ""%~dp0""`r`nDanceTrailCli.exe watch-vrc-log --overlay-port 8765 %*`r`n",
     $batEncoding
 )
 

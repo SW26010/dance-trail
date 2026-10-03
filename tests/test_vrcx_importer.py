@@ -1,7 +1,7 @@
 import unittest
 
-from dancing_log.storage import DUDU_SYSTEM_KEY, WANNA_SYSTEM_KEY
-from dancing_log.vrcx_importer import parse_dance_url, parse_wanna_song_id
+from dance_trail.storage import DUDU_SYSTEM_KEY, WANNA_SYSTEM_KEY
+from dance_trail.vrcx_importer import parse_dance_url, parse_wanna_song_id
 
 
 class DanceUrlParsingTest(unittest.TestCase):

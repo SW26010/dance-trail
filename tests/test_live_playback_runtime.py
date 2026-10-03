@@ -6,8 +6,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from unittest.mock import patch
 
-from dancing_log.live_playback_runtime import LivePlaybackRuntime
-from dancing_log.watcher_playback_materializer import make_watcher_playback_event_key
+from dance_trail.live_playback_runtime import LivePlaybackRuntime
+from dance_trail.watcher_playback_materializer import make_watcher_playback_event_key
 
 
 @dataclass
@@ -185,7 +185,7 @@ class LivePlaybackRuntimeModuleTest(unittest.TestCase):
             with (
                 tempfile.TemporaryDirectory() as tmp,
                 patch(
-                    "dancing_log.storage.connect_db",
+                    "dance_trail.storage.connect_db",
                     side_effect=connect_tracking_db,
                 ),
                 self.assertRaises(OSError),

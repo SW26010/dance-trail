@@ -10,18 +10,18 @@ import uuid
 import webbrowser
 from unittest.mock import MagicMock, patch
 
-from dancing_log.desktop_instance import (
+from dance_trail.desktop_instance import (
     ERROR_ALREADY_EXISTS,
     WAIT_ABANDONED,
     WindowsDesktopInstanceLease,
     open_existing_webui,
 )
-from dancing_log.webui_server import WebUiServer
+from dance_trail.webui_server import WebUiServer
 
 
 class DesktopInstanceTest(unittest.TestCase):
     @staticmethod
-    def _webui_response(body: bytes = b"<title>dancing-log</title>") -> MagicMock:
+    def _webui_response(body: bytes = b"<title>DanceTrail</title>") -> MagicMock:
         response = MagicMock()
         response.status = 200
         response.read.return_value = body
@@ -30,7 +30,7 @@ class DesktopInstanceTest(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == "win32", "Windows named mutex test")
     def test_named_mutex_allows_only_one_desktop_owner(self):
-        name = f"Local\\DancingLog.DesktopTray.Test.{uuid.uuid4()}"
+        name = f"Local\\DanceTrail.DesktopTray.Test.{uuid.uuid4()}"
         first = WindowsDesktopInstanceLease.acquire(name)
         self.assertIsNotNone(first)
         try:
@@ -41,7 +41,7 @@ class DesktopInstanceTest(unittest.TestCase):
                     "-c",
                     (
                         "import sys; "
-                        "from dancing_log.desktop_instance import "
+                        "from dance_trail.desktop_instance import "
                         "WindowsDesktopInstanceLease; "
                         "lease = WindowsDesktopInstanceLease.acquire(sys.argv[1]); "
                         "raise SystemExit(0 if lease is None else 1)"
@@ -68,10 +68,10 @@ class DesktopInstanceTest(unittest.TestCase):
         kernel32.CloseHandle.return_value = True
 
         with (
-            patch("dancing_log.desktop_instance._load_kernel32", return_value=kernel32),
-            patch("dancing_log.desktop_instance.ctypes.set_last_error"),
+            patch("dance_trail.desktop_instance._load_kernel32", return_value=kernel32),
+            patch("dance_trail.desktop_instance.ctypes.set_last_error"),
             patch(
-                "dancing_log.desktop_instance.ctypes.get_last_error",
+                "dance_trail.desktop_instance.ctypes.get_last_error",
                 return_value=ERROR_ALREADY_EXISTS,
             ),
         ):
@@ -89,7 +89,7 @@ class DesktopInstanceTest(unittest.TestCase):
             server = WebUiServer(port=0, app_root=tmp)
             server.start()
             try:
-                with patch("dancing_log.desktop_instance.webbrowser.open") as open_browser:
+                with patch("dance_trail.desktop_instance.webbrowser.open") as open_browser:
                     opened = open_existing_webui(server.home_url, wait_seconds=1.0)
             finally:
                 server.stop()
@@ -103,11 +103,11 @@ class DesktopInstanceTest(unittest.TestCase):
 
         with (
             patch(
-                "dancing_log.desktop_instance._DIRECT_HTTP_OPENER.open",
+                "dance_trail.desktop_instance._DIRECT_HTTP_OPENER.open",
                 return_value=response,
             ),
             patch(
-                "dancing_log.desktop_instance.webbrowser.open",
+                "dance_trail.desktop_instance.webbrowser.open",
                 return_value=False,
             ) as open_browser,
         ):
@@ -122,11 +122,11 @@ class DesktopInstanceTest(unittest.TestCase):
 
         with (
             patch(
-                "dancing_log.desktop_instance._DIRECT_HTTP_OPENER.open",
+                "dance_trail.desktop_instance._DIRECT_HTTP_OPENER.open",
                 return_value=response,
             ),
             patch(
-                "dancing_log.desktop_instance.webbrowser.open",
+                "dance_trail.desktop_instance.webbrowser.open",
                 side_effect=webbrowser.Error("no runnable browser"),
             ) as open_browser,
         ):
@@ -152,7 +152,7 @@ class DesktopInstanceTest(unittest.TestCase):
                     ),
                     patch.object(urllib.request, "_opener", None),
                     patch(
-                        "dancing_log.desktop_instance.webbrowser.open",
+                        "dance_trail.desktop_instance.webbrowser.open",
                         return_value=True,
                     ),
                 ):
@@ -167,7 +167,7 @@ class DesktopInstanceTest(unittest.TestCase):
         response.read.side_effect = IncompleteRead(b"", 1)
 
         with patch(
-            "dancing_log.desktop_instance._DIRECT_HTTP_OPENER.open",
+            "dance_trail.desktop_instance._DIRECT_HTTP_OPENER.open",
             return_value=response,
         ):
             opened = open_existing_webui(
@@ -182,10 +182,10 @@ class DesktopInstanceTest(unittest.TestCase):
 
         with (
             patch(
-                "dancing_log.desktop_instance._DIRECT_HTTP_OPENER.open",
+                "dance_trail.desktop_instance._DIRECT_HTTP_OPENER.open",
                 return_value=response,
             ),
-            patch("dancing_log.desktop_instance.webbrowser.open") as open_browser,
+            patch("dance_trail.desktop_instance.webbrowser.open") as open_browser,
         ):
             opened = open_existing_webui(
                 "http://127.0.0.1:8787/home",
@@ -200,14 +200,14 @@ class DesktopInstanceTest(unittest.TestCase):
 
         with (
             patch(
-                "dancing_log.desktop_instance._DIRECT_HTTP_OPENER.open",
+                "dance_trail.desktop_instance._DIRECT_HTTP_OPENER.open",
                 side_effect=[URLError("not ready"), response],
             ) as open_url,
             patch(
-                "dancing_log.desktop_instance.webbrowser.open",
+                "dance_trail.desktop_instance.webbrowser.open",
                 return_value=True,
             ),
-            patch("dancing_log.desktop_instance.time.sleep"),
+            patch("dance_trail.desktop_instance.time.sleep"),
         ):
             opened = open_existing_webui(
                 "http://127.0.0.1:8787/home",

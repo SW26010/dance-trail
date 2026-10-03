@@ -88,7 +88,7 @@ viewer-facing output surface.
   passes and no known release-blocking accessibility defect remains. Use
   `Result: Fail` for a failed required check or known blocking defect.
 - Record the evaluated commit SHA and SHA-256 values for both files under
-  `dancing_log/webui_dist/`. Commit the report before creating the version tag.
+  `dance_trail/webui_dist/`. Commit the report before creating the version tag.
   The release workflow checks `Result: Pass`, verifies the evaluated revision is
   an ancestor of the tag, and recomputes both hashes from that revision and the
   current release build.

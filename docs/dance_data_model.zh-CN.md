@@ -5,7 +5,7 @@
 
 本文主要描述的数据模型定义版本：v0（现状与历史运行时说明）
 
-本文描述 `dancing-log` 当前的 SQLite 运行时模型。项目已经不再使用旧的
+本文描述 `dance-trail` 当前的 SQLite 运行时模型。项目已经不再使用旧的
 `songs` 表，也不再使用 `dance_events.song_id`。
 ADR 0004 记录的一次性 legacy cleanup 之后，`playback_records` 是普通
 Timeline 和 Insights 查询使用的 Local Playback Evidence v0 读模型 contract。
@@ -28,7 +28,7 @@ durable event/occurrence 汇总、Request Source Type Inference、接受状态�
 - SQLite 是运行时存储。
 - CSV/JSON 只是导入、导出或检查产物。
 - 重建时归档旧生成数据，不做原地迁移。
-- `config/dancing-log.local.json` 和 `data/queued_self/` 会作为本地输入保留。
+- `config/dance-trail.local.json` 和 `data/queued_self/` 会作为本地输入保留。
 - WannaDance 是第一个有目录同步实现的舞蹈系统。
 - PyPyDance URL 身份已能从实测日志中识别；DuDu FitDance 基于少量样本有
   实验性支持，能从官网/API URL、VRChat 日志元数据和 VRCX URL 中识别为
@@ -457,14 +457,14 @@ uv run python main.py rebuild-data --archive-existing
 
 重建流程会归档：
 
-- `data/dancing_log.sqlite3`
-- `data/dancing_log.sqlite3-wal`
-- `data/dancing_log.sqlite3-shm`
+- `data/dance_trail.sqlite3`
+- `data/dance_trail.sqlite3-wal`
+- `data/dance_trail.sqlite3-shm`
 - `data/songs.csv`
 - `data/wanna_songs.csv`
 - `data/wanna_songs.json`
 
 并保留：
 
-- `config/dancing-log.local.json`
+- `config/dance-trail.local.json`
 - `data/queued_self/`

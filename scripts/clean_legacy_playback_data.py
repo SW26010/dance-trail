@@ -27,14 +27,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from dancing_log.playback_evidence import init_playback_records_schema  # noqa: E402
-from dancing_log.storage import ensure_dance_system, ensure_dance_track  # noqa: E402
-from dancing_log.wanna_catalog import load_cache_songs  # noqa: E402
+from dance_trail.playback_evidence import init_playback_records_schema  # noqa: E402
+from dance_trail.storage import ensure_dance_system, ensure_dance_track  # noqa: E402
+from dance_trail.wanna_catalog import load_cache_songs  # noqa: E402
 
 
 LOCAL_TZ = timezone(timedelta(hours=8))
 UTC = timezone.utc
-DEFAULT_TARGET_DB = PROJECT_ROOT / "data" / "dancing_log.sqlite3"
+DEFAULT_TARGET_DB = PROJECT_ROOT / "data" / "dance_trail.sqlite3"
 DEFAULT_REPORT_DIR = PROJECT_ROOT / "data" / "legacy_playback_cleanup_reports"
 DEFAULT_WANNA_CACHE = Path(r"path/to/catalog-snapshot")
 NEAR_MATCH_SECONDS = 600
@@ -163,17 +163,17 @@ def default_roots(target_db: Path) -> list[LegacyRoot]:
         LegacyRoot(
             "portable_v0.1.0",
             Path(r"path/to/portable-snapshot"),
-            Path(r"path/to/portable-snapshot/data/dancing_log.sqlite3"),
+            Path(r"path/to/portable-snapshot/data/dance_trail.sqlite3"),
         ),
         LegacyRoot(
             "watch_vrc_log",
             Path(r"path/to/watcher-snapshot-a"),
-            Path(r"path/to/watcher-snapshot-a/data/dancing_log.sqlite3"),
+            Path(r"path/to/watcher-snapshot-a/data/dance_trail.sqlite3"),
         ),
         LegacyRoot(
             "watch_vrc_log_v2",
             Path(r"path/to/watcher-snapshot-b"),
-            Path(r"path/to/watcher-snapshot-b/data/dancing_log.sqlite3"),
+            Path(r"path/to/watcher-snapshot-b/data/dance_trail.sqlite3"),
         ),
     ]
 

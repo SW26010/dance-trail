@@ -1,11 +1,11 @@
-# Dancing Log
+# DanceTrail
 
-`dancing-log` records and reviews local VRChat dance playback activity, including live playback, historical imports, recommendations, and playback evidence.
+`dance-trail` records and reviews local VRChat dance playback activity, including live playback, historical imports, recommendations, and playback evidence.
 
 ## Language
 
 **Web UI**:
-The primary user-facing interaction surface for operating `dancing-log` as a whole. It includes configuration, history review, live status, recommendations, imports, and overlay-related controls.
+The primary user-facing interaction surface for operating `dance-trail` as a whole. It includes configuration, history review, live status, recommendations, imports, and overlay-related controls.
 _Avoid_: OBS overlay, overlay page
 
 **Navigation Entry**:
@@ -21,7 +21,7 @@ A viewer-facing display surface for live playback status in OBS. It is one featu
 _Avoid_: Web UI, control panel
 
 **Local Web UI**:
-The Web UI product boundary for one user operating `dancing-log` on their own machine. It is a Windows desktop productivity surface governed by Fluent 2, WCAG 2.2 AA, and WAI-ARIA APG rather than a SaaS marketing site or mobile application. It is not a shared service, remote dashboard, or multi-user web app. Its HTTP boundary accepts only the expected localhost `Host`, including for read and event-stream requests.
+The Web UI product boundary for one user operating `dance-trail` on their own machine. It is a Windows desktop productivity surface governed by Fluent 2, WCAG 2.2 AA, and WAI-ARIA APG rather than a SaaS marketing site or mobile application. It is not a shared service, remote dashboard, or multi-user web app. Its HTTP boundary accepts only the expected localhost `Host`, including for read and event-stream requests.
 _Avoid_: hosted app, LAN dashboard, multi-user app
 
 **Dance Plan**:
@@ -73,7 +73,7 @@ Derived views that summarize and explain accepted Playback Occurrences, catalog,
 _Avoid_: timeline, raw history, catalog
 
 **Data Operations**:
-Controlled workflows that change or rebuild local data in bulk, such as importing VRCX history, syncing dance-system catalogs, rebuilding generated data, and backup or restore. Cross-`dancing-log` database merge is only a possible future flow, not a v2 commitment. Data Operations is not a raw database editor.
+Controlled workflows that change or rebuild local data in bulk, such as importing VRCX history, syncing dance-system catalogs, rebuilding generated data, and backup or restore. Cross-`dance-trail` database merge is only a possible future flow, not a v2 commitment. Data Operations is not a raw database editor.
 _Avoid_: settings, raw SQLite editor, ad hoc table editing
 
 **Data Operation Coordinator**:
@@ -97,7 +97,7 @@ A saved preference that affects whether an app workflow should publish live watc
 _Avoid_: OBS overlay page, live overlay control
 
 **Desktop Tray Entry**:
-The Windows notification-area entry for running `dancing-log` as a local desktop app. It opens the Local Web UI, exposes immediate watcher and overlay controls, and owns quitting the background app session. One Desktop Tray Entry is allowed per interactive Windows session; a later launch repeatedly chooses among activating the verified existing Local Web UI, acquiring a released or abandoned desktop mutex and becoming the replacement owner, or reporting a visible bounded-time failure. Windows logoff and shutdown notifications give the coordinated Local Web UI, Live App Session Runtime, and desktop-instance cleanup one four-second absolute deadline. Every acquired resource receives a cleanup attempt before the end-session callback returns; a non-cooperative request or watcher is reported as a timeout rather than blocking Windows indefinitely.
+The Windows notification-area entry for running `dance-trail` as a local desktop app. It opens the Local Web UI, exposes immediate watcher and overlay controls, and owns quitting the background app session. One Desktop Tray Entry is allowed per interactive Windows session; a later launch repeatedly chooses among activating the verified existing Local Web UI, acquiring a released or abandoned desktop mutex and becoming the replacement owner, or reporting a visible bounded-time failure. Windows logoff and shutdown notifications give the coordinated Local Web UI, Live App Session Runtime, and desktop-instance cleanup one four-second absolute deadline. Every acquired resource receives a cleanup attempt before the end-session callback returns; a non-cooperative request or watcher is reported as a timeout rather than blocking Windows indefinitely.
 _Avoid_: CLI command, Web UI navigation entry, background service
 
 **Live App Session Runtime**:
@@ -121,11 +121,11 @@ A supported Settings field that remains editable in the Full Configuration Edito
 _Avoid_: hidden setting, unsupported configuration key
 
 **Internal App Path**:
-A configurable path for data or output that `dancing-log` owns under the local application boundary by default, such as the app database, queued-self files, captures, run logs, source-log archives, or recording-frame outputs.
+A configurable path for data or output that `dance-trail` owns under the local application boundary by default, such as the app database, queued-self files, captures, run logs, source-log archives, or recording-frame outputs.
 _Avoid_: external source path, VRChat log directory
 
 **External Source Path**:
-A configurable path to user- or tool-owned data that `dancing-log` reads from outside its own application boundary, such as VRChat logs, VRCX history, WannaDance cache files, or recordings.
+A configurable path to user- or tool-owned data that `dance-trail` reads from outside its own application boundary, such as VRChat logs, VRCX history, WannaDance cache files, or recordings.
 _Avoid_: internal app path, generated output path
 
 **Detected Source Path**:
@@ -161,7 +161,7 @@ The unsaved Settings form state being edited by the user before it is written to
 _Avoid_: active configuration, autosaved settings
 
 **Saved Configuration**:
-The local app configuration currently persisted in `config/dancing-log.local.json` and used as the default for app workflows. Saved configuration is changed only by an explicit save action in the Web UI.
+The local app configuration currently persisted in `config/dance-trail.local.json` and used as the default for app workflows. Saved configuration is changed only by an explicit save action in the Web UI.
 _Avoid_: draft configuration, generated defaults
 
 **Valid Configuration Value**:
@@ -169,7 +169,7 @@ A draft field value that satisfies the requirement for its specific configuratio
 _Avoid_: syntactically valid text, best-effort setting
 
 **Unsupported Configuration Key**:
-A key found in the local app configuration file that is not part of the current supported Settings contract. Unsupported keys are preserved when saving from the Web UI, but the user is warned that `dancing-log` does not understand them.
+A key found in the local app configuration file that is not part of the current supported Settings contract. Unsupported keys are preserved when saving from the Web UI, but the user is warned that `dance-trail` does not understand them.
 _Avoid_: hidden supported setting, raw JSON field
 
 **Live Status**:
@@ -333,7 +333,7 @@ A Playback Evidence field that preserves what the source adapter observed or how
 _Avoid_: user correction, review status, accepted-history inclusion
 
 **Source Playback Evidence**:
-The legacy v1 term for playback evidence inside another `dancing-log` database or app root before a Playback Evidence Merge. Cross-database merge is only a possible future v2 extension; any future design must use v2 Playback Evidence and Handle semantics rather than treating this term as a current contract.
+The legacy v1 term for playback evidence inside another `dance-trail` database or app root before a Playback Evidence Merge. Cross-database merge is only a possible future v2 extension; any future design must use v2 Playback Evidence and Handle semantics rather than treating this term as a current contract.
 _Avoid_: target history, local evidence, copied truth
 
 **Local Playback Evidence**:
@@ -353,7 +353,7 @@ An older local playback-history root kept only to read or migrate existing recor
 _Avoid_: canonical timeline, source evidence, permanent history root
 
 **Playback Evidence Merge**:
-A historical v1 Data Operations design for importing playback records from another `dancing-log` database or app root. V2 does not promise or implement this workflow; it retains only the possibility of a future semantic import that remaps database-local identities and preserves v2 evidence, relationship, and user-state boundaries.
+A historical v1 Data Operations design for importing playback records from another `dance-trail` database or app root. V2 does not promise or implement this workflow; it retains only the possibility of a future semantic import that remaps database-local identities and preserves v2 evidence, relationship, and user-state boundaries.
 _Avoid_: current v2 requirement, raw SQLite merge, settings import, timeline edit
 
 **Merge Source Order**:

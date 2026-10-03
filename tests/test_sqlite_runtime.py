@@ -9,23 +9,23 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from dancing_log.app_paths import save_app_config
-from dancing_log.models import (
+from dance_trail.app_paths import save_app_config
+from dance_trail.models import (
     SOURCE_RECOMMEND,
     add_dance_record,
     generate_daily_playlist,
 )
-from dancing_log.favorite_importer import FavoriteImportError, import_favorites_file
-from dancing_log.local_dance_day import LocalDanceDayBoundary
-from dancing_log.queued_self_importer import sync_queued_self_manifests
-from dancing_log.playback_projection import (
+from dance_trail.favorite_importer import FavoriteImportError, import_favorites_file
+from dance_trail.local_dance_day import LocalDanceDayBoundary
+from dance_trail.queued_self_importer import sync_queued_self_manifests
+from dance_trail.playback_projection import (
     EFFECTIVE_PLAYBACK_ACCEPTED,
     EFFECTIVE_PLAYBACK_EXCLUDED,
     EFFECTIVE_PLAYBACK_PENDING,
     set_manual_playback_decision,
 )
-from dancing_log.playback_evidence import read_timeline_playback_rows
-from dancing_log.playback_record_writer import (
+from dance_trail.playback_evidence import read_timeline_playback_rows
+from dance_trail.playback_record_writer import (
     PROJECT_SOURCE_ROOT_KEY,
     PROJECT_SOURCE_ROOT_PATH,
     PlaybackRecordOriginWrite,
@@ -34,8 +34,8 @@ from dancing_log.playback_record_writer import (
     playback_evidence_key,
     upsert_evidence_record,
 )
-from dancing_log.rebuild import archive_existing_data
-from dancing_log.storage import (
+from dance_trail.rebuild import archive_existing_data
+from dance_trail.storage import (
     DUDU_SYSTEM_KEY,
     WANNA_SYSTEM_KEY,
     add_dance_event,
@@ -50,13 +50,13 @@ from dancing_log.storage import (
     repair_stale_watcher_pending_records,
     upsert_live_playback_event,
 )
-from dancing_log.watcher_playback_materializer import (
+from dance_trail.watcher_playback_materializer import (
     WATCHER_INTERRUPTED_UNEXPECTEDLY_REASON,
     WATCHER_PENDING_REASON,
     WATCHER_PLAYBACK_SOURCE_TABLE,
 )
-from dancing_log.vrcx_importer import import_vrcx_database
-from dancing_log.wanna_catalog import sync_wanna_catalog, upsert_catalog
+from dance_trail.vrcx_importer import import_vrcx_database
+from dance_trail.wanna_catalog import sync_wanna_catalog, upsert_catalog
 from tests.playback_record_helpers import insert_playback_record
 
 
@@ -737,12 +737,12 @@ class SQLiteRuntimeTest(unittest.TestCase):
                 app_root=root,
             )
 
-            with patch("dancing_log.app_paths.default_app_root", return_value=root):
+            with patch("dance_trail.app_paths.default_app_root", return_value=root):
                 stats = sync_wanna_catalog(use_api=False)
 
             self.assertEqual(stats.cache_count, 1)
             self.assertTrue((root / "custom" / "app.sqlite3").exists())
-            self.assertFalse((root / "data" / "dancing_log.sqlite3").exists())
+            self.assertFalse((root / "data" / "dance_trail.sqlite3").exists())
 
     def test_manual_log_uses_system_external_id_and_preserves_note(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -973,7 +973,7 @@ class SQLiteRuntimeTest(unittest.TestCase):
             time_zone=timezone(timedelta(hours=8)),
         )
 
-        with patch("dancing_log.models._playlist_seed", return_value=0) as seed:
+        with patch("dance_trail.models._playlist_seed", return_value=0) as seed:
             playlist = generate_daily_playlist(
                 [],
                 [],
@@ -1702,17 +1702,17 @@ class SQLiteRuntimeTest(unittest.TestCase):
             (root / "queued_self").mkdir()
             (root / "queued_self" / "playlist.md").write_text("keep", encoding="utf-8")
             (root / "local_config.json").write_text("{}", encoding="utf-8")
-            for name in ("dancing_log.sqlite3", "songs.csv", "wanna_songs.json"):
+            for name in ("dance_trail.sqlite3", "songs.csv", "wanna_songs.json"):
                 (root / name).write_text(name, encoding="utf-8")
 
             stats = archive_existing_data(root)
 
             self.assertTrue((root / "local_config.json").exists())
             self.assertTrue((root / "queued_self" / "playlist.md").exists())
-            self.assertFalse((root / "dancing_log.sqlite3").exists())
+            self.assertFalse((root / "dance_trail.sqlite3").exists())
             self.assertFalse((root / "songs.csv").exists())
             self.assertEqual(len(stats.archived), 3)
-            self.assertTrue((stats.archive_dir / "dancing_log.sqlite3").exists())
+            self.assertTrue((stats.archive_dir / "dance_trail.sqlite3").exists())
 
     def test_playback_record_upsert_preserves_existing_requester_user_id(self):
         with tempfile.TemporaryDirectory() as tmp:

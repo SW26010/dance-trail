@@ -26,10 +26,10 @@ ROOT = Path(__file__).resolve().parents[1]
 PRIVATE_OUTPUT_ROOT = (ROOT / "analysis").resolve()
 sys.path.insert(0, str(ROOT))
 
-from dancing_log.live_playback_folding import PlaybackEventBuilder  # noqa: E402
-from dancing_log.time_utils import parse_timestamp  # noqa: E402
-from dancing_log.vrc_log_parser import parse_vrc_log_line  # noqa: E402
-from dancing_log.vrcx_importer import parse_dance_url  # noqa: E402
+from dance_trail.live_playback_folding import PlaybackEventBuilder  # noqa: E402
+from dance_trail.time_utils import parse_timestamp  # noqa: E402
+from dance_trail.vrc_log_parser import parse_vrc_log_line  # noqa: E402
+from dance_trail.vrcx_importer import parse_dance_url  # noqa: E402
 from scripts.replay_vrc_logs import _run_replay  # noqa: E402
 
 MARKER = re.compile(r"\[VRCX\]\s+VideoPlay\(([^)]+)\)\s*(.*)")

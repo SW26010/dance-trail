@@ -7,8 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from dancing_log.app_paths import DEFAULT_CONFIG
-from dancing_log.tray_app import TrayRuntime, run_tray_webui_app
+from dance_trail.app_paths import DEFAULT_CONFIG
+from dance_trail.tray_app import TrayRuntime, run_tray_webui_app
 
 
 def wait_for_call_count(calls: list[dict], count: int) -> None:
@@ -23,7 +23,7 @@ def wait_for_call_count(calls: list[dict], count: int) -> None:
 class TrayRuntimeTest(unittest.TestCase):
     @unittest.skipUnless(sys.platform == "win32", "Windows tray callback test")
     def test_windows_tray_callback_contains_lifecycle_timeout(self):
-        from dancing_log import _win_tray
+        from dance_trail import _win_tray
 
         app = _win_tray.WindowsTrayApp.__new__(_win_tray.WindowsTrayApp)
         app.runtime = SimpleNamespace(
@@ -45,7 +45,7 @@ class TrayRuntimeTest(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == "win32", "Windows shutdown message test")
     def test_windows_query_end_session_accepts_without_cleanup(self):
-        from dancing_log import _win_tray
+        from dance_trail import _win_tray
 
         app = _win_tray.WindowsTrayApp.__new__(_win_tray.WindowsTrayApp)
         app._shutdown = Mock()
@@ -63,7 +63,7 @@ class TrayRuntimeTest(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == "win32", "Windows shutdown message test")
     def test_windows_end_session_cleans_up_before_return(self):
-        from dancing_log import _win_tray
+        from dance_trail import _win_tray
 
         events: list[str] = []
         app = _win_tray.WindowsTrayApp.__new__(_win_tray.WindowsTrayApp)
@@ -94,7 +94,7 @@ class TrayRuntimeTest(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == "win32", "Windows shutdown message test")
     def test_windows_cancelled_end_session_keeps_resources_open(self):
-        from dancing_log import _win_tray
+        from dance_trail import _win_tray
 
         app = _win_tray.WindowsTrayApp.__new__(_win_tray.WindowsTrayApp)
         app._shutdown = Mock()
@@ -111,7 +111,7 @@ class TrayRuntimeTest(unittest.TestCase):
         app._shutdown.assert_not_called()
 
     def test_shutdown_coordinator_is_ordered_and_idempotent(self):
-        from dancing_log import tray_app
+        from dance_trail import tray_app
 
         events: list[str] = []
         instance = SimpleNamespace(
@@ -133,7 +133,7 @@ class TrayRuntimeTest(unittest.TestCase):
         self.assertEqual(events, ["server.stop", "runtime.close", "instance.close"])
 
     def test_shutdown_coordinator_propagates_one_deadline_and_releases_mutex(self):
-        from dancing_log import tray_app
+        from dance_trail import tray_app
 
         events: list[str] = []
 
@@ -167,7 +167,7 @@ class TrayRuntimeTest(unittest.TestCase):
         )
 
     def test_shutdown_coordinator_preserves_composite_failure_on_repeat(self):
-        from dancing_log import tray_app
+        from dance_trail import tray_app
 
         events: list[str] = []
 
@@ -221,12 +221,12 @@ class TrayRuntimeTest(unittest.TestCase):
         with (
             patch.object(sys, "platform", "win32"),
             patch(
-                "dancing_log.tray_app._acquire_windows_desktop_instance",
+                "dance_trail.tray_app._acquire_windows_desktop_instance",
                 return_value=instance,
             ),
-            patch("dancing_log.tray_app.TrayRuntime", return_value=runtime),
-            patch("dancing_log.tray_app.WebUiServer", return_value=server),
-            patch.dict(sys.modules, {"dancing_log._win_tray": fake_win_tray_module}),
+            patch("dance_trail.tray_app.TrayRuntime", return_value=runtime),
+            patch("dance_trail.tray_app.WebUiServer", return_value=server),
+            patch.dict(sys.modules, {"dance_trail._win_tray": fake_win_tray_module}),
         ):
             run_tray_webui_app(open_browser=False, app_root=".")
 
@@ -236,20 +236,20 @@ class TrayRuntimeTest(unittest.TestCase):
         self.assertEqual(events, ["server.stop", "runtime.close", "instance.close"])
 
     def test_second_windows_entry_opens_existing_webui_without_starting_service(self):
-        from dancing_log.desktop_instance import ExistingWebUiActivation
+        from dance_trail.desktop_instance import ExistingWebUiActivation
 
         with (
             patch.object(sys, "platform", "win32"),
             patch(
-                "dancing_log.tray_app._acquire_windows_desktop_instance",
+                "dance_trail.tray_app._acquire_windows_desktop_instance",
                 return_value=None,
             ),
             patch(
-                "dancing_log.tray_app._try_activate_existing_webui",
+                "dance_trail.tray_app._try_activate_existing_webui",
                 return_value=ExistingWebUiActivation.READY,
             ) as activate_existing_webui,
-            patch("dancing_log.tray_app.TrayRuntime") as tray_runtime,
-            patch("dancing_log.tray_app.WebUiServer") as webui_server,
+            patch("dance_trail.tray_app.TrayRuntime") as tray_runtime,
+            patch("dance_trail.tray_app.WebUiServer") as webui_server,
         ):
             run_tray_webui_app(open_browser=True, app_root=".")
 
@@ -258,16 +258,16 @@ class TrayRuntimeTest(unittest.TestCase):
         webui_server.assert_not_called()
 
     def test_second_windows_entry_honors_browser_suppression(self):
-        from dancing_log.desktop_instance import ExistingWebUiActivation
+        from dance_trail.desktop_instance import ExistingWebUiActivation
 
         with (
             patch.object(sys, "platform", "win32"),
             patch(
-                "dancing_log.tray_app._acquire_windows_desktop_instance",
+                "dance_trail.tray_app._acquire_windows_desktop_instance",
                 return_value=None,
             ),
             patch(
-                "dancing_log.tray_app._try_activate_existing_webui",
+                "dance_trail.tray_app._try_activate_existing_webui",
                 return_value=ExistingWebUiActivation.READY,
             ) as activate_existing_webui,
         ):
@@ -276,7 +276,7 @@ class TrayRuntimeTest(unittest.TestCase):
         self.assertFalse(activate_existing_webui.call_args.kwargs["open_browser"])
 
     def test_second_windows_entry_reselects_as_primary_after_owner_releases_mutex(self):
-        from dancing_log.desktop_instance import ExistingWebUiActivation
+        from dance_trail.desktop_instance import ExistingWebUiActivation
 
         instance = SimpleNamespace(close=Mock())
         runtime = SimpleNamespace(session=object(), close=Mock())
@@ -289,17 +289,17 @@ class TrayRuntimeTest(unittest.TestCase):
         with (
             patch.object(sys, "platform", "win32"),
             patch(
-                "dancing_log.tray_app._acquire_windows_desktop_instance",
+                "dance_trail.tray_app._acquire_windows_desktop_instance",
                 side_effect=[None, instance],
             ) as acquire_instance,
             patch(
-                "dancing_log.tray_app._try_activate_existing_webui",
+                "dance_trail.tray_app._try_activate_existing_webui",
                 return_value=ExistingWebUiActivation.NOT_READY,
             ),
-            patch("dancing_log.tray_app.time.sleep"),
-            patch("dancing_log.tray_app.TrayRuntime", return_value=runtime),
-            patch("dancing_log.tray_app.WebUiServer", return_value=server),
-            patch.dict(sys.modules, {"dancing_log._win_tray": fake_win_tray_module}),
+            patch("dance_trail.tray_app.time.sleep"),
+            patch("dance_trail.tray_app.TrayRuntime", return_value=runtime),
+            patch("dance_trail.tray_app.WebUiServer", return_value=server),
+            patch.dict(sys.modules, {"dance_trail._win_tray": fake_win_tray_module}),
         ):
             run_tray_webui_app(open_browser=True, app_root=".")
 
@@ -309,7 +309,7 @@ class TrayRuntimeTest(unittest.TestCase):
         instance.close.assert_called_once_with()
 
     def test_second_windows_entry_reports_failure_when_owner_remains_unready(self):
-        from dancing_log.desktop_instance import ExistingWebUiActivation
+        from dance_trail.desktop_instance import ExistingWebUiActivation
 
         show_error_message = Mock()
         fake_win_tray_module = SimpleNamespace(show_error_message=show_error_message)
@@ -317,18 +317,18 @@ class TrayRuntimeTest(unittest.TestCase):
         with (
             patch.object(sys, "platform", "win32"),
             patch(
-                "dancing_log.tray_app._acquire_windows_desktop_instance",
+                "dance_trail.tray_app._acquire_windows_desktop_instance",
                 return_value=None,
             ) as acquire_instance,
             patch(
-                "dancing_log.tray_app._try_activate_existing_webui",
+                "dance_trail.tray_app._try_activate_existing_webui",
                 return_value=ExistingWebUiActivation.NOT_READY,
             ),
             patch(
-                "dancing_log.tray_app.time.monotonic",
+                "dance_trail.tray_app.time.monotonic",
                 side_effect=[10.0, 15.0, 15.0],
             ),
-            patch.dict(sys.modules, {"dancing_log._win_tray": fake_win_tray_module}),
+            patch.dict(sys.modules, {"dance_trail._win_tray": fake_win_tray_module}),
         ):
             run_tray_webui_app(open_browser=True, app_root=".")
 
@@ -337,7 +337,7 @@ class TrayRuntimeTest(unittest.TestCase):
         self.assertIn("could not activate", show_error_message.call_args.args[0])
 
     def test_second_windows_entry_shows_activation_failure(self):
-        from dancing_log.desktop_instance import ExistingWebUiActivation
+        from dance_trail.desktop_instance import ExistingWebUiActivation
 
         show_error_message = Mock()
         fake_win_tray_module = SimpleNamespace(show_error_message=show_error_message)
@@ -345,14 +345,14 @@ class TrayRuntimeTest(unittest.TestCase):
         with (
             patch.object(sys, "platform", "win32"),
             patch(
-                "dancing_log.tray_app._acquire_windows_desktop_instance",
+                "dance_trail.tray_app._acquire_windows_desktop_instance",
                 return_value=None,
             ),
             patch(
-                "dancing_log.tray_app._try_activate_existing_webui",
+                "dance_trail.tray_app._try_activate_existing_webui",
                 return_value=ExistingWebUiActivation.FAILED,
             ),
-            patch.dict(sys.modules, {"dancing_log._win_tray": fake_win_tray_module}),
+            patch.dict(sys.modules, {"dance_trail._win_tray": fake_win_tray_module}),
         ):
             run_tray_webui_app(open_browser=True, app_root=".")
 
@@ -374,12 +374,12 @@ class TrayRuntimeTest(unittest.TestCase):
         with (
             patch.object(sys, "platform", "win32"),
             patch(
-                "dancing_log.tray_app._acquire_windows_desktop_instance",
+                "dance_trail.tray_app._acquire_windows_desktop_instance",
                 return_value=instance,
             ),
-            patch("dancing_log.tray_app.TrayRuntime", return_value=runtime),
-            patch("dancing_log.tray_app.WebUiServer", return_value=server),
-            patch.dict(sys.modules, {"dancing_log._win_tray": fake_win_tray_module}),
+            patch("dance_trail.tray_app.TrayRuntime", return_value=runtime),
+            patch("dance_trail.tray_app.WebUiServer", return_value=server),
+            patch.dict(sys.modules, {"dance_trail._win_tray": fake_win_tray_module}),
             self.assertRaisesRegex(TimeoutError, "slow SSE drain"),
         ):
             run_tray_webui_app(open_browser=False, app_root=".")
@@ -406,12 +406,12 @@ class TrayRuntimeTest(unittest.TestCase):
         with (
             patch.object(sys, "platform", "win32"),
             patch(
-                "dancing_log.tray_app._acquire_windows_desktop_instance",
+                "dance_trail.tray_app._acquire_windows_desktop_instance",
                 return_value=instance,
             ),
-            patch("dancing_log.tray_app.TrayRuntime", return_value=runtime),
-            patch("dancing_log.tray_app.WebUiServer", return_value=server),
-            patch.dict(sys.modules, {"dancing_log._win_tray": fake_win_tray_module}),
+            patch("dance_trail.tray_app.TrayRuntime", return_value=runtime),
+            patch("dance_trail.tray_app.WebUiServer", return_value=server),
+            patch.dict(sys.modules, {"dance_trail._win_tray": fake_win_tray_module}),
             self.assertRaisesRegex(OSError, "address already in use"),
         ):
             run_tray_webui_app(open_browser=False, app_root=".")
@@ -434,12 +434,12 @@ class TrayRuntimeTest(unittest.TestCase):
         with (
             patch.object(sys, "platform", "win32"),
             patch(
-                "dancing_log.tray_app._acquire_windows_desktop_instance",
+                "dance_trail.tray_app._acquire_windows_desktop_instance",
                 return_value=instance,
             ),
-            patch("dancing_log.tray_app.TrayRuntime", return_value=runtime),
+            patch("dance_trail.tray_app.TrayRuntime", return_value=runtime),
             patch(
-                "dancing_log.tray_app.WebUiServer",
+                "dance_trail.tray_app.WebUiServer",
                 side_effect=OSError("server construction failed"),
             ),
             self.assertRaisesRegex(OSError, "server construction failed"),
@@ -467,12 +467,12 @@ class TrayRuntimeTest(unittest.TestCase):
         with (
             patch.object(sys, "platform", "win32"),
             patch(
-                "dancing_log.tray_app._acquire_windows_desktop_instance",
+                "dance_trail.tray_app._acquire_windows_desktop_instance",
                 return_value=instance,
             ),
-            patch("dancing_log.tray_app.TrayRuntime", return_value=runtime),
-            patch("dancing_log.tray_app.WebUiServer", return_value=server),
-            patch.dict(sys.modules, {"dancing_log._win_tray": fake_win_tray_module}),
+            patch("dance_trail.tray_app.TrayRuntime", return_value=runtime),
+            patch("dance_trail.tray_app.WebUiServer", return_value=server),
+            patch.dict(sys.modules, {"dance_trail._win_tray": fake_win_tray_module}),
             self.assertRaises(ExceptionGroup) as context,
         ):
             run_tray_webui_app(open_browser=False, app_root=".")
@@ -487,7 +487,7 @@ class TrayRuntimeTest(unittest.TestCase):
         with (
             patch.object(sys, "platform", "win32"),
             patch(
-                "dancing_log.tray_app._acquire_windows_desktop_instance",
+                "dance_trail.tray_app._acquire_windows_desktop_instance",
                 return_value=None,
             ) as acquire_instance,
             self.assertRaisesRegex(ValueError, "canonical port"),
@@ -501,7 +501,7 @@ class TrayRuntimeTest(unittest.TestCase):
             root = Path(tmp)
             with (
                 patch.object(sys, "platform", "linux"),
-                patch("dancing_log.webui_server.run_webui_server") as run_webui_server,
+                patch("dance_trail.webui_server.run_webui_server") as run_webui_server,
             ):
                 run_tray_webui_app(port=9988, open_browser=False, app_root=root)
 
@@ -525,7 +525,7 @@ class TrayRuntimeTest(unittest.TestCase):
             config = dict(DEFAULT_CONFIG)
             config["vrc_log_dir"] = str(root / "logs")
             config["overlay_port"] = 9911
-            config_path = root / "config" / "dancing-log.local.json"
+            config_path = root / "config" / "dance-trail.local.json"
             config_path.parent.mkdir()
             config_path.write_text(json.dumps(config), encoding="utf-8")
 
@@ -544,7 +544,7 @@ class TrayRuntimeTest(unittest.TestCase):
                 self.assertFalse(runtime.overlay_running)
                 self.assertEqual(calls[-1]["log_dir"], root / "logs")
                 self.assertEqual(calls[-1]["output_dir"], root / "logs" / "captures")
-                self.assertEqual(calls[-1]["app_db_path"], root / "data" / "dancing_log.sqlite3")
+                self.assertEqual(calls[-1]["app_db_path"], root / "data" / "dance_trail.sqlite3")
                 self.assertEqual(calls[-1]["source_log_dir"], root / "logs" / "source-vrc-logs")
                 self.assertFalse(calls[-1]["live_db"])
                 self.assertTrue(calls[-1]["record_playback"])

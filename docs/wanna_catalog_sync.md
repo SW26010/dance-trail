@@ -4,7 +4,7 @@ Date: 2026-05-17
 
 ## Purpose
 
-`dancing-log` stores WannaDance catalog metadata in the local SQLite database so
+`dance-trail` stores WannaDance catalog metadata in the local SQLite database so
 playback events can point to stable dance-track rows and still show useful song
 names, artists, dancers, groups, player counts, and local cache paths.
 
@@ -12,7 +12,7 @@ The catalog sync uses two complementary sources:
 
 - Public WannaDance API: canonical public catalog metadata.
 - Local `wanna_cache_dir`: local downloaded song cache from
-  `config/dancing-log.local.json`.
+  `config/dance-trail.local.json`.
 
 The local cache remains useful when the API is unavailable because each cached
 song directory can contain `metadata.json`, `download.txt`, and `video.mp4`.
@@ -193,7 +193,7 @@ These counts are local derived data, not repository source.
 
 The sync updates SQLite by default:
 
-- `data/dancing_log.sqlite3`
+- `data/dance_trail.sqlite3`
 
 CSV/JSON files are optional export artifacts when `--write-files` is passed:
 
@@ -207,8 +207,8 @@ source files.
 
 ## Implementation Files
 
-- `dancing_log/wanna_catalog.py`: catalog loading, merging, export, and SQLite
+- `dance_trail/wanna_catalog.py`: catalog loading, merging, export, and SQLite
   upsert logic.
-- `dancing_log/storage.py`: SQLite schema and shared upsert helpers.
+- `dance_trail/storage.py`: SQLite schema and shared upsert helpers.
 - `scripts/sync_wanna_songs.py`: command-line wrapper.
 - `main.py`: exposes the `sync-wanna` command.

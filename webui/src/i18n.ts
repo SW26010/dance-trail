@@ -3,8 +3,8 @@ import type { ViewKey } from "./api";
 export type Language = "en" | "zh";
 export type ThemeChoice = "system" | "light" | "dark";
 
-export const LANGUAGE_KEY = "dancing-log.language";
-export const THEME_KEY = "dancing-log.theme";
+export const LANGUAGE_KEY = "dance-trail.language";
+export const THEME_KEY = "dance-trail.theme";
 
 const en = {
   brandSubtitle: "Local Web UI", languageLabel: "Language", themeLabel: "Theme",

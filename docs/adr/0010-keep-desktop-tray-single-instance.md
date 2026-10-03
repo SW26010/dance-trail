@@ -8,7 +8,7 @@ Accepted
 
 ## Context
 
-The frozen `DancingLog.exe` desktop entry previously started a new Local Web UI
+The frozen `DanceTrail.exe` desktop entry previously started a new Local Web UI
 listener and tray session every time it was launched. Python's HTTP server uses
 `SO_REUSEADDR`; on Windows that can allow two processes to bind the same local
 address, so port binding was not a safe substitute for explicit app-instance
@@ -18,11 +18,11 @@ not the Desktop Tray Entry or its HTTP listener.
 ## Decision
 
 The Windows Desktop Tray Entry owns the named mutex
-`Local\DancingLog.DesktopTray.v1` before it creates the app session or binds the
+`Local\DanceTrail.DesktopTray.v1` before it creates the app session or binds the
 Local Web UI. The mutex is scoped to the interactive Windows session, matching
 notification-area ownership. A later launch runs a bounded election loop. Each
 iteration first tries to acquire a released or abandoned mutex, then probes the
-existing `/home` page and verifies the `dancing-log` page identity. A ready
+existing `/home` page and verifies the `dance-trail` page identity. A ready
 owner is opened in the default browser; a released owner lets the waiting
 process become the replacement primary. The loop otherwise continues for five
 seconds before showing a visible failure. A default-browser failure is also
@@ -57,7 +57,7 @@ callers.
 
 ## Consequences
 
-Launching `DancingLog.exe` while it is already present in the notification area
+Launching `DanceTrail.exe` while it is already present in the notification area
 acts as an Open Web UI command. Simultaneous launches converge on one app
 session, and abnormal first-instance startup no longer permits two listeners to
 share `127.0.0.1:8787`.

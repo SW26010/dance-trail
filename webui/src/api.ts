@@ -29,7 +29,7 @@ const defaultRoutes: RouteMap = {
 };
 
 function readBootstrap(): Bootstrap {
-  const node = document.getElementById("dancing-log-bootstrap");
+  const node = document.getElementById("dance-trail-bootstrap");
   if (!node?.textContent) {
     return { csrfToken: "", routes: defaultRoutes };
   }
@@ -75,7 +75,7 @@ export async function api<Schema extends z.ZodType>(
     init.body = JSON.stringify(init.body);
   }
   if ((init.method ?? "GET").toUpperCase() !== "GET") {
-    headers.set("X-Dancing-Log-CSRF", bootstrap.csrfToken);
+    headers.set("X-Dance-Trail-CSRF", bootstrap.csrfToken);
   }
 
   const response = await fetch(path, init);

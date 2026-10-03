@@ -6,7 +6,7 @@ Date: 2026-06-21
 
 Historical for v1; future v2 reference only
 
-The v2 design does not promise or implement cross-`dancing-log` database
+The v2 design does not promise or implement cross-`dance-trail` database
 merging. It keeps the capability only as a possible future extension. If that
 work is ever revived, a new ADR must redefine the workflow around immutable
 Playback Evidence, remapped Playback Handles, temporal memberships and
@@ -15,7 +15,7 @@ conflict semantics below are not v2 requirements.
 
 ## Context
 
-`dancing-log` needs a Data Operations workflow for merging playback evidence from one target database and one or more read-only source databases or app roots.
+`dance-trail` needs a Data Operations workflow for merging playback evidence from one target database and one or more read-only source databases or app roots.
 
 The merge flow must support preview, explicit approval, target backup, in-place execution, source fingerprints, conflict review, and later audit from the Web UI. Merge reads source playback evidence and converts it into target-owned local playback evidence; it does not copy source evidence tables verbatim as the target's long-term evidence. Imported manual acceptance or exclusion remains a reversible decision overlay; it does not rewrite the underlying source evidence. Merge does not run new settlement rules from raw parser completion. If overlapping records carry incompatible acceptance or exclusion judgments, source order does not resolve the conflict; the merge creates Review Attention for user decision. A JSON snapshot in the archive directory is useful for recovery and forensic inspection, but it is awkward as the primary query surface for Data Operations.
 

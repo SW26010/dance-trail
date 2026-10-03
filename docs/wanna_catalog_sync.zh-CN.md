@@ -6,13 +6,13 @@
 
 ## 目的
 
-`dancing-log` 会把 WannaDance 目录元数据保存到本地 SQLite 数据库中，让播放事件
+`dance-trail` 会把 WannaDance 目录元数据保存到本地 SQLite 数据库中，让播放事件
 可以指向稳定的舞蹈条目，同时还能展示歌名、歌手、舞者、分组、人数和本地缓存路径。
 
 目录同步使用两个来源：
 
 - WannaDance 公共 API：权威的公开目录元数据。
-- 本地 `wanna_cache_dir`：`config/dancing-log.local.json` 中配置的本地下载缓存。
+- 本地 `wanna_cache_dir`：`config/dance-trail.local.json` 中配置的本地下载缓存。
 
 即使 API 不可用，本地缓存仍然有价值，因为每个缓存歌曲目录里可能有
 `metadata.json`、`download.txt` 和 `video.mp4`。
@@ -186,7 +186,7 @@ NetEase/Kugou 等平台 id 和热度字段不属于当前运行时 schema。
 
 默认只更新 SQLite：
 
-- `data/dancing_log.sqlite3`
+- `data/dance_trail.sqlite3`
 
 传入 `--write-files` 时，会额外导出检查用 CSV/JSON：
 
@@ -199,7 +199,7 @@ NetEase/Kugou 等平台 id 和热度字段不属于当前运行时 schema。
 
 ## 实现文件
 
-- `dancing_log/wanna_catalog.py`：目录加载、合并、导出和 SQLite upsert。
-- `dancing_log/storage.py`：SQLite schema 和共享 upsert helper。
+- `dance_trail/wanna_catalog.py`：目录加载、合并、导出和 SQLite upsert。
+- `dance_trail/storage.py`：SQLite schema 和共享 upsert helper。
 - `scripts/sync_wanna_songs.py`：命令行包装。
 - `main.py`：暴露 `sync-wanna` 命令。

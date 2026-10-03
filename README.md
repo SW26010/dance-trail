@@ -1,8 +1,10 @@
-# dancing-log
+# DanceTrail
+
+Repository: [SW26010/dance-trail](https://github.com/SW26010/dance-trail).
 
 > Privacy note: Personal paths and activity examples are anonymized. Replace example paths with your own; sample timestamps are illustrative. Aggregate results and technical conclusions are retained.
 
-`dancing-log` is a local VRChat dance playback timeline tool. It records what
+`dance-trail` is a local VRChat dance playback timeline tool. It records what
 was played, when it was played, where the event came from, and how it maps back
 to dance-system catalog entries and recordings.
 
@@ -107,12 +109,12 @@ uv run python main.py rebuild-data --archive-existing
 
 The rebuild flow keeps:
 
-- `config/dancing-log.local.json`
+- `config/dance-trail.local.json`
 - `data/queued_self/`
 
 It archives generated files such as:
 
-- `data/dancing_log.sqlite3`
+- `data/dance_trail.sqlite3`
 - `data/songs.csv`
 - `data/wanna_songs.csv`
 - `data/wanna_songs.json`
@@ -195,7 +197,7 @@ uv run python main.py import-vrcx "path/to/vrcx-snapshot/VRCX.sqlite3"
 uv run python main.py import-vrcx --dry-run
 ```
 
-If `config/dancing-log.local.json` contains `vrcx_db_path`, the path can be
+If `config/dance-trail.local.json` contains `vrcx_db_path`, the path can be
 omitted. When that field is empty, the importer also tries the standard VRCX
 database at `%APPDATA%/VRCX/VRCX.sqlite3` for the current run without saving it
 to config:
@@ -221,7 +223,7 @@ watcher-derived Local Playback Evidence:
 uv run python main.py watch-vrc-log
 ```
 
-The watcher uses `vrc_log_dir` from `config/dancing-log.local.json` when present, then
+The watcher uses `vrc_log_dir` from `config/dance-trail.local.json` when present, then
 falls back to the standard Windows LocalLow path. It always writes local ignored
 capture artifacts under `logs/captures/<session>/`:
 
@@ -307,8 +309,8 @@ WCAG 2.2 AA, and WAI-ARIA APG. Build and run its browser acceptance suite with:
 
 ```powershell
 uv sync --locked --cache-dir .uv-cache
-uv run --locked --cache-dir .uv-cache ruff check dancing_log tests scripts
-uv run --locked --cache-dir .uv-cache ty check dancing_log
+uv run --locked --cache-dir .uv-cache ruff check dance_trail tests scripts
+uv run --locked --cache-dir .uv-cache ty check dance_trail
 pnpm install --frozen-lockfile
 pnpm check:webui
 pnpm build:webui
@@ -403,7 +405,7 @@ uv run python main.py sync-queued-self --system wannadance
 
 ## Application Directories And Local Config
 
-Local machine paths live in `config/dancing-log.local.json` and are ignored by
+Local machine paths live in `config/dance-trail.local.json` and are ignored by
 git. See `docs/app_directories.md` for the full directory contract.
 
 Supported keys:
@@ -411,7 +413,7 @@ Supported keys:
 ```json
 {
   "config_version": 1,
-  "app_db": "data/dancing_log.sqlite3",
+  "app_db": "data/dance_trail.sqlite3",
   "queued_self_dir": "data/queued_self",
   "capture_dir": "logs/captures",
   "run_log_dir": "logs/runs",
@@ -454,7 +456,7 @@ has a `songs` table.
 
 ## License
 
-Dancing Log source code is licensed under the [MIT License](LICENSE), copyright
+DanceTrail source code is licensed under the [MIT License](LICENSE), copyright
 2026 Himalia. Third-party dependencies retain their own licenses. Portable
 releases include full notices in `Legal/`; see [license packaging](legal/README.md).
 This license does not grant rights to third-party music, videos, or external catalog data.

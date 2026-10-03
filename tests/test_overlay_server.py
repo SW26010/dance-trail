@@ -6,7 +6,7 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from dancing_log.overlay_server import (
+from dance_trail.overlay_server import (
     MountedOverlayAdapter,
     OverlayEventStreams,
     OverlayServer,
@@ -14,7 +14,7 @@ from dancing_log.overlay_server import (
     send_overlay_events,
     _OVERLAY_HTML,
 )
-import dancing_log.overlay_server as overlay_server_module
+import dance_trail.overlay_server as overlay_server_module
 
 
 class OverlayServerTest(unittest.TestCase):
@@ -67,7 +67,7 @@ class OverlayServerTest(unittest.TestCase):
         try:
             with (
                 patch(
-                    "dancing_log.http_request_lifecycle.threading.Thread.start",
+                    "dance_trail.http_request_lifecycle.threading.Thread.start",
                     side_effect=RuntimeError("thread start failed"),
                 ),
                 self.assertRaisesRegex(RuntimeError, "thread start failed"),

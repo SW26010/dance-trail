@@ -1,6 +1,6 @@
 # Application Directories
 
-`dancing-log` resolves relative runtime paths from one application root. In a
+`dance-trail` resolves relative runtime paths from one application root. In a
 source checkout, the application root is the repository root. In a future
 standalone exe build, the application root will be the folder that contains the
 exe.
@@ -8,7 +8,7 @@ exe.
 Configuration precedence is:
 
 1. Command-line arguments.
-2. `config/dancing-log.local.json`.
+2. `config/dance-trail.local.json`.
 3. Auto-detected or built-in defaults.
 
 Command-line path arguments affect only the current run and take precedence over
@@ -44,11 +44,11 @@ need `recordings_dir` when resolving relative recording file names.
 
 ## Directory Roles
 
-- `config/`: local machine configuration. `dancing-log.local.json` is ignored by
-  git; `dancing-log.example.json` documents supported keys.
-- `data/`: long-lived local user data, including `dancing_log.sqlite3`,
+- `config/`: local machine configuration. `dance-trail.local.json` is ignored by
+  git; `dance-trail.example.json` documents supported keys.
+- `data/`: long-lived local user data, including `dance_trail.sqlite3`,
   `queued_self/`, and favorite-list input files. A persistent
-  `.dancing-log-watcher.lock` file provides the OS-backed application-scope
+  `.dance-trail-watcher.lock` file provides the OS-backed application-scope
   watcher lock; an external SQLite database has a sibling `.<name>.watcher.lock`
   file for database-scope exclusion. The files contain no authoritative runtime
   state and may remain after a clean exit; ownership is the live OS file lock.
@@ -64,12 +64,12 @@ need `recordings_dir` when resolving relative recording file names.
 
 ## Config Keys
 
-The tracked example config is `config/dancing-log.example.json`.
+The tracked example config is `config/dance-trail.example.json`.
 
 ```json
 {
   "config_version": 1,
-  "app_db": "data/dancing_log.sqlite3",
+  "app_db": "data/dance_trail.sqlite3",
   "queued_self_dir": "data/queued_self",
   "capture_dir": "logs/captures",
   "run_log_dir": "logs/runs",
@@ -102,6 +102,5 @@ workflows. Setting `auto_start_overlay` to `true` also keeps
 watcher serves the overlay without the Web UI. Desktop/Web UI mode serves
 `/overlay` on the Web UI port.
 
-`data/local_config.json` is a legacy location. The app can read it when the new
-config file does not exist, then writes normalized config to
-`config/dancing-log.local.json`.
+DanceTrail reads `config/dance-trail.local.json` only. If it is absent, defaults
+are used. Configuration and databases from earlier products are not migrated.

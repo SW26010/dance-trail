@@ -65,7 +65,7 @@ jobs:
         run: |
           pnpm check:webui
           pnpm build:webui
-          git diff --exit-code -- dancing_log/webui_dist
+          git diff --exit-code -- dance_trail/webui_dist
 
       - name: Verify accessibility release report and evaluated assets
         if: startsWith(github.ref, 'refs/tags/')
@@ -104,7 +104,7 @@ jobs:
       - name: Upload portable artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: dancing-log-portable
+          name: dance-trail-portable
           path: |
             dist/releases/*.zip
             dist/releases/*.sha256

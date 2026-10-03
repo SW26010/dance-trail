@@ -1,6 +1,6 @@
 import unittest
 
-from dancing_log.live_playback_settlement import (
+from dance_trail.live_playback_settlement import (
     decide_live_playback_settlement,
     is_live_playback_promotable,
 )

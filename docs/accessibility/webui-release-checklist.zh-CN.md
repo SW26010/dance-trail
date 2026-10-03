@@ -75,7 +75,7 @@
   `Not run (advisory)`。
 - 所有必要自动化和资产绑定检查通过，且没有已知的发布阻断级无障碍缺陷时，报告
   写为 `Result: Pass`；必要检查失败或仍有已知阻断缺陷时写 `Result: Fail`。
-- 记录被评估的 commit SHA，以及 `dancing_log/webui_dist/` 下两个文件各自的
+- 记录被评估的 commit SHA，以及 `dance_trail/webui_dist/` 下两个文件各自的
   SHA-256；在创建版本 tag 前提交报告。Release workflow 会检查精确的
   `Result: Pass`，确认评估 revision 是 tag 的祖先，并分别从该 revision 和当前
   release 构建重新计算两个哈希。

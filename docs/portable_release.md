@@ -1,5 +1,9 @@
 # Portable Release
 
+The source version remains 0.8.0. The historical v0.8.0 tag is retained, but no earlier Releases are carried over.
+The commands below use a future 0.9.0 release as an example.
+
+
 The first supported release shape is a Windows x64 portable folder. It keeps the
 same app-root path model as source runs: `config/`, `data/`, and `logs/` live
 next to the executable files.
@@ -32,14 +36,14 @@ ready. It also validates the frozen `/assets/app.js` status, content type, and
 non-empty payload. The build writes:
 
 ```text
-dist/releases/DancingLog-v<version>-win-x64-portable.zip
-dist/releases/DancingLog-v<version>-win-x64-portable.zip.sha256
+dist/releases/DanceTrail-v<version>-win-x64-portable.zip
+dist/releases/DanceTrail-v<version>-win-x64-portable.zip.sha256
 ```
 
 Useful options:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1 -Version 0.8.0
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1 -Version 0.9.0
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1 -SkipTests
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_portable.ps1 -SkipSmoke
 ```
@@ -55,8 +59,8 @@ observations are advisory and are not required for release.
 Push a version tag:
 
 ```powershell
-git tag v0.8.0
-git push origin v0.8.0
+git tag v0.9.0
+git push origin v0.9.0
 ```
 
 The `Release Portable` workflow verifies the matching accessibility report, runs the
@@ -68,10 +72,10 @@ as an artifact, and attaches the zip plus SHA-256 checksum to the GitHub Release
 The generated folder includes:
 
 ```text
-DancingLog.exe
-DancingLogCli.exe
+DanceTrail.exe
+DanceTrailCli.exe
 _internal/
-config/dancing-log.example.json
+config/dance-trail.example.json
 data/
 logs/
 docs/
@@ -81,10 +85,10 @@ sync-wanna.bat
 start-watch-vrc-log.bat
 ```
 
-User-specific settings belong in `config/dancing-log.local.json`, which is not
+User-specific settings belong in `config/dance-trail.local.json`, which is not
 included in the release zip.
 
-Double-clicking `DancingLog.exe` starts the desktop tray entry and activates the
+Double-clicking `DanceTrail.exe` starts the desktop tray entry and activates the
 Local Web UI on `http://127.0.0.1:8787/` without opening a console window. Use
 the tray menu to open the Web UI again, start or stop the live watcher and OBS
 overlay, or quit the background app session. The tray entry is single-instance
@@ -97,7 +101,7 @@ of leaving the session with no desktop instance.
 `start-watch-vrc-log.bat` starts the common OBS overlay workflow:
 
 ```bat
-DancingLogCli.exe watch-vrc-log --overlay-port 8765 %*
+DanceTrailCli.exe watch-vrc-log --overlay-port 8765 %*
 ```
 
 The command writes watcher-derived playback evidence into `playback_records` by

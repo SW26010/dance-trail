@@ -6,15 +6,15 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import dancing_log.vrc_log_watcher as vrc_log_watcher_module
-from dancing_log.storage import DUDU_SYSTEM_KEY, WANNA_SYSTEM_KEY, connect_db
-from dancing_log.vrc_log_watcher import (
+import dance_trail.vrc_log_watcher as vrc_log_watcher_module
+from dance_trail.storage import DUDU_SYSTEM_KEY, WANNA_SYSTEM_KEY, connect_db
+from dance_trail.vrc_log_watcher import (
     parse_vrc_lifecycle_event,
     parse_vrc_log_line,
     replay_vrc_log_files,
     watch_vrc_logs,
 )
-from dancing_log.watcher_lifetime_lock import (
+from dance_trail.watcher_lifetime_lock import (
     WatcherLifetimeLease,
     WatcherLifetimeLockUnavailable,
 )
@@ -59,11 +59,11 @@ class VrcLogParserTest(unittest.TestCase):
 
             with (
                 patch(
-                    "dancing_log.vrc_log_watcher._drain_handle",
+                    "dance_trail.vrc_log_watcher._drain_handle",
                     side_effect=RuntimeError("watch loop failed"),
                 ),
                 patch(
-                    "dancing_log.vrc_log_watcher._write_json",
+                    "dance_trail.vrc_log_watcher._write_json",
                     side_effect=OSError("summary write failed"),
                 ),
                 self.assertRaises(ExceptionGroup) as context,
@@ -155,11 +155,11 @@ class VrcLogParserTest(unittest.TestCase):
 
             with (
                 patch(
-                    "dancing_log.vrc_log_watcher._drain_handle",
+                    "dance_trail.vrc_log_watcher._drain_handle",
                     side_effect=RuntimeError("watch loop failed"),
                 ),
                 patch(
-                    "dancing_log.vrc_log_watcher.LivePlaybackRuntime.settle_graceful_stop"
+                    "dance_trail.vrc_log_watcher.LivePlaybackRuntime.settle_graceful_stop"
                 ) as settle_graceful_stop,
                 self.assertRaisesRegex(RuntimeError, "watch loop failed"),
             ):
@@ -200,7 +200,7 @@ class VrcLogParserTest(unittest.TestCase):
 
             with (
                 patch(
-                    "dancing_log.vrc_log_watcher._write_jsonl_file",
+                    "dance_trail.vrc_log_watcher._write_jsonl_file",
                     side_effect=OSError("artifact write failed"),
                 ),
                 self.assertRaisesRegex(OSError, "artifact write failed"),

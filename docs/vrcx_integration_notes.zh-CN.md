@@ -9,7 +9,7 @@
 ## 目标
 
 评估本地 VRCX 数据能否作为可靠的跳舞播放历史来源，并记录这对
-`dancing-log` 的开源边界和数据模型意味着什么。
+`dance-trail` 的开源边界和数据模型意味着什么。
 
 ## 开源边界
 
@@ -17,7 +17,7 @@
 
 推荐布局：
 
-- `dancing_log/`：只放源码
+- `dance_trail/`：只放源码
 - `docs/`：设计笔记和公开文档
 - `data/`：本地派生数据，git 忽略
 - `analysis/`：本地临时分析文件，git 忽略
@@ -69,7 +69,7 @@ SQLite 更合适的原因：
 
 当前方向：
 
-- 主数据库：`data/dancing_log.sqlite3`
+- 主数据库：`data/dance_trail.sqlite3`
 - 可选导出：
   - WannaDance 目录通过 `sync-wanna --write-files` 导出 CSV/JSON
   - 跳舞历史未来可加 CSV 导出
@@ -163,11 +163,11 @@ VRCX 的 `LogWatcher` 会扫描这些日志，识别视频播放事件，再由 
 1. VRChat `output_log_*.txt` 是真实事件来源。
 2. VRCX `LogWatcher` 是 parser/tailer。
 3. VRCX `gamelog_video_play` 是持久化缓存。
-4. `dancing-log` 优先从 VRCX SQLite 导入历史，未来再考虑直接解析 VRChat 日志做实时捕获。
+4. `dance-trail` 优先从 VRCX SQLite 导入历史，未来再考虑直接解析 VRChat 日志做实时捕获。
 
 ## 当前实现状态
 
-VRCX importer 已实现于 `dancing_log/vrcx_importer.py`，入口命令：
+VRCX importer 已实现于 `dance_trail/vrcx_importer.py`，入口命令：
 
 ```bash
 uv run python main.py import-vrcx
@@ -175,7 +175,7 @@ uv run python main.py import-vrcx "path/to/vrcx-snapshot/VRCX.sqlite3"
 uv run python main.py import-vrcx --dry-run
 ```
 
-VRCX 数据库路径也可以配置在 `config/dancing-log.local.json` 的 `vrcx_db_path`。
+VRCX 数据库路径也可以配置在 `config/dance-trail.local.json` 的 `vrcx_db_path`。
 
 当前 importer 会：
 
@@ -201,7 +201,7 @@ Playback Root，`vrcx_import_events` 是导入 staging 溯源。普通 Timeline 
 VRDancing 和其他系统目前只识别为 unsupported 或 unknown，等看到真实元数据形状后
 再扩展。
 
-实时原始日志捕获单独实现在 `dancing_log/vrc_log_watcher.py`，入口命令：
+实时原始日志捕获单独实现在 `dance_trail/vrc_log_watcher.py`，入口命令：
 
 ```bash
 uv run python main.py watch-vrc-log
@@ -212,7 +212,7 @@ uv run python main.py watch-vrc-log
 `playback_records`。如需额外把 folded state 镜像到 deprecated 的
 `live_playback_events` 取证表，运行 `watch-vrc-log --live-db`。
 
-watcher 默认读取 `config/dancing-log.local.json` 的 `vrc_log_dir`，否则回退到 Windows
+watcher 默认读取 `config/dance-trail.local.json` 的 `vrc_log_dir`，否则回退到 Windows
 LocalLow 下的 VRChat 标准日志目录。默认从当前日志文件末尾开始，避免游玩时重扫旧
 日志；新建日志文件会从头读取，避免漏掉启动阶段信号。
 

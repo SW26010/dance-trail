@@ -26,7 +26,7 @@ logs/
 backups/
 
 # Local app configuration
-config/dancing-log.local.json
+config/dance-trail.local.json
 config/*.local.json
 
 # Local configuration / secrets
@@ -42,7 +42,7 @@ config/*.local.json
 *.db-shm
 
 # Runtime watcher lifetime locks
-.dancing-log-watcher.lock
+.dance-trail-watcher.lock
 *.watcher.lock
 
 # Progress/temp files

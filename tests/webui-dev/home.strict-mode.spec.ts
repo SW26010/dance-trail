@@ -5,7 +5,7 @@ test("StrictMode development remount still loads Home", async ({ page }) => {
     await route.fulfill({
       contentType: "application/json",
       json: {
-        database_path: "C:/tmp/dancing-log.sqlite3",
+        database_path: "C:/tmp/dance-trail.sqlite3",
         database_exists: true,
         counts: {},
         recent: [],

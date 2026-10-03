@@ -1,7 +1,7 @@
 import socket
 import unittest
 
-from dancing_log.http_request_lifecycle import (
+from dance_trail.http_request_lifecycle import (
     AcceptedOperationShutdown,
     HttpShutdownParticipant,
     ManagedLocalHTTPRequestHandler,
@@ -48,7 +48,7 @@ class ManagedLocalHttpLifecycleTest(unittest.TestCase):
             ),
         )
         port = int(server.server_address[1])
-        server.start_http(thread_name="DancingLogHttpLifecycleTest")
+        server.start_http(thread_name="DanceTrailHttpLifecycleTest")
 
         with self.assertRaisesRegex(RuntimeError, "participant stop failed"):
             server.stop_http()

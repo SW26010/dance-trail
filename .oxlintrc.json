@@ -10,7 +10,7 @@
     "node": true
   },
   "ignorePatterns": [
-    "dancing_log/webui_dist/**",
+    "dance_trail/webui_dist/**",
     "node_modules/**",
     "playwright-report/**",
     "test-results/**"

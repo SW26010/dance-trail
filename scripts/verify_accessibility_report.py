@@ -10,8 +10,8 @@ from pathlib import Path
 
 
 REQUIRED_ASSETS = (
-    Path("dancing_log/webui_dist/app.js"),
-    Path("dancing_log/webui_dist/index.html"),
+    Path("dance_trail/webui_dist/app.js"),
+    Path("dance_trail/webui_dist/index.html"),
 )
 REVISION_PATTERN = re.compile(r"^Evaluated revision: `([^`]+)`$")
 RESULT_PATTERN = re.compile(r"^Result: (Pending|Pass|Fail)$")

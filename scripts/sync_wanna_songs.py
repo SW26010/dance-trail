@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dancing_log.wanna_catalog import sync_wanna_catalog
+from dance_trail.wanna_catalog import sync_wanna_catalog
 
 
 def main() -> None:

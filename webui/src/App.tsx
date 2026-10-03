@@ -67,7 +67,7 @@ export function App() {
 
   useEffect(() => {
     document.documentElement.lang = language === "zh" ? "zh-CN" : "en";
-    document.title = `${title} — dancing-log`;
+    document.title = `${title} — DanceTrail`;
   }, [language, title]);
 
   useEffect(() => {
@@ -129,7 +129,7 @@ export function App() {
       <div className={styles.shell}>
         <aside className={styles.sidebar} aria-label={t("applicationNavigation")}>
           <div className={styles.brand}>
-            <Text size={500} weight="semibold">dancing-log</Text>
+            <Text size={500} weight="semibold">DanceTrail</Text>
             <Text size={200} className={styles.muted}>{t("brandSubtitle")}</Text>
           </div>
           <nav className={styles.nav} aria-label={t("primaryNavigation")}>

@@ -9,16 +9,16 @@ $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Net.Http
 
 $PortableRoot = (Resolve-Path $PortableDir).Path
-$ExePath = Join-Path $PortableRoot "DancingLog.exe"
-$CliExePath = Join-Path $PortableRoot "DancingLogCli.exe"
+$ExePath = Join-Path $PortableRoot "DanceTrail.exe"
+$CliExePath = Join-Path $PortableRoot "DanceTrailCli.exe"
 if (-not (Test-Path -LiteralPath $ExePath)) {
-    throw "DancingLog.exe not found under portable directory: $PortableRoot"
+    throw "DanceTrail.exe not found under portable directory: $PortableRoot"
 }
 if (-not (Test-Path -LiteralPath $CliExePath)) {
-    throw "DancingLogCli.exe not found under portable directory: $PortableRoot"
+    throw "DanceTrailCli.exe not found under portable directory: $PortableRoot"
 }
 
-$SmokeRoot = Join-Path $env:TEMP ("dancing-log-portable-smoke-" + [guid]::NewGuid().ToString("N"))
+$SmokeRoot = Join-Path $env:TEMP ("dance-trail-portable-smoke-" + [guid]::NewGuid().ToString("N"))
 $DbPath = Join-Path $SmokeRoot "smoke.sqlite3"
 $FavoritesPath = Join-Path $SmokeRoot "favorites.txt"
 $ManifestDir = Join-Path $SmokeRoot "queued"
@@ -47,10 +47,10 @@ function Invoke-Portable {
             $_
         }
     }
-    Write-Host "==> DancingLogCli.exe $($displayArguments -join ' ')"
+    Write-Host "==> DanceTrailCli.exe $($displayArguments -join ' ')"
     & $CliExePath @Arguments
     if ($LASTEXITCODE -ne 0) {
-        throw "DancingLogCli.exe $($Arguments -join ' ') failed with exit code $LASTEXITCODE"
+        throw "DanceTrailCli.exe $($Arguments -join ' ') failed with exit code $LASTEXITCODE"
     }
 }
 
@@ -68,14 +68,14 @@ function Assert-PortableRejects {
             $_
         }
     }
-    Write-Host "==> DancingLogCli.exe $($displayArguments -join ' ')"
+    Write-Host "==> DanceTrailCli.exe $($displayArguments -join ' ')"
     $output = & $CliExePath @Arguments 2>&1
     $exitCode = $LASTEXITCODE
     if ($exitCode -eq 0) {
-        throw "DancingLogCli.exe $($Arguments -join ' ') unexpectedly succeeded"
+        throw "DanceTrailCli.exe $($Arguments -join ' ') unexpectedly succeeded"
     }
     if (($output -join "`n") -notlike "*$ExpectedOutput*") {
-        throw "DancingLogCli.exe $($Arguments -join ' ') did not print expected output: $ExpectedOutput"
+        throw "DanceTrailCli.exe $($Arguments -join ' ') did not print expected output: $ExpectedOutput"
     }
 }
 
@@ -140,7 +140,7 @@ function Wait-DesktopWebUi {
             try {
                 $response = $client.GetAsync($Url).GetAwaiter().GetResult()
                 $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-                if ([int]$response.StatusCode -eq 200 -and $body.Contains("<title>dancing-log</title>")) {
+                if ([int]$response.StatusCode -eq 200 -and $body.Contains("<title>DanceTrail</title>")) {
                     return
                 }
             }
@@ -247,24 +247,24 @@ function Invoke-DesktopSingleInstanceSmoke {
     )
 
     $desktopRoot = Join-Path $TestRoot "desktop-portable"
-    $desktopExe = Join-Path $desktopRoot "DancingLog.exe"
+    $desktopExe = Join-Path $desktopRoot "DanceTrail.exe"
     $browserLog = Join-Path $TestRoot "browser-open.log"
     $browserCommand = Join-Path $TestRoot "smoke-browser.cmd"
     $homeUrl = "http://127.0.0.1:8787/home"
     $processes = [System.Collections.Generic.List[System.Diagnostics.Process]]::new()
     $previousBrowser = $env:BROWSER
-    $previousBrowserLog = $env:DANCING_LOG_SMOKE_BROWSER_LOG
+    $previousBrowserLog = $env:DANCE_TRAIL_SMOKE_BROWSER_LOG
 
     New-Item -ItemType Directory -Force -Path $desktopRoot | Out-Null
     Copy-Item -Path (Join-Path $SourcePortableRoot "*") -Destination $desktopRoot -Recurse -Force
     [System.IO.File]::WriteAllText(
         $browserCommand,
-        "@echo off`r`n>>`"%DANCING_LOG_SMOKE_BROWSER_LOG%`" echo %~1`r`nexit /b 0`r`n",
+        "@echo off`r`n>>`"%DANCE_TRAIL_SMOKE_BROWSER_LOG%`" echo %~1`r`nexit /b 0`r`n",
         $TextEncoding
     )
 
     try {
-        $env:DANCING_LOG_SMOKE_BROWSER_LOG = $browserLog
+        $env:DANCE_TRAIL_SMOKE_BROWSER_LOG = $browserLog
         $env:BROWSER = "`"$browserCommand`" %s"
 
         $existingOwners = @(Get-DesktopListenerProcessIds)
@@ -272,7 +272,7 @@ function Invoke-DesktopSingleInstanceSmoke {
             throw "Cannot run desktop smoke while 127.0.0.1:8787 is already listening; owners: $($existingOwners -join ', ')"
         }
 
-        Write-Host "==> DancingLog.exe first desktop instance"
+        Write-Host "==> DanceTrail.exe first desktop instance"
         $first = Start-Process `
             -FilePath $desktopExe `
             -WorkingDirectory $desktopRoot `
@@ -285,7 +285,7 @@ function Invoke-DesktopSingleInstanceSmoke {
         Wait-SmokeBrowserCount -LogPath $browserLog -MinimumCount 1
         $beforeSecondCount = @(Get-SmokeBrowserUrls -LogPath $browserLog).Count
 
-        Write-Host "==> DancingLog.exe second desktop instance"
+        Write-Host "==> DanceTrail.exe second desktop instance"
         $secondTimer = [System.Diagnostics.Stopwatch]::StartNew()
         $second = Start-Process `
             -FilePath $desktopExe `
@@ -294,26 +294,26 @@ function Invoke-DesktopSingleInstanceSmoke {
             -WindowStyle Hidden
         $processes.Add($second)
         if (-not $second.WaitForExit(10000)) {
-            throw "Second DancingLog.exe instance did not exit within 10 seconds"
+            throw "Second DanceTrail.exe instance did not exit within 10 seconds"
         }
         $secondTimer.Stop()
         if ($second.ExitCode -ne 0) {
-            throw "Second DancingLog.exe instance exited with code $($second.ExitCode)"
+            throw "Second DanceTrail.exe instance exited with code $($second.ExitCode)"
         }
         Wait-SmokeBrowserCount -LogPath $browserLog -MinimumCount ($beforeSecondCount + 1)
         $browserUrls = @(Get-SmokeBrowserUrls -LogPath $browserLog)
         if ($browserUrls[-1] -ne $homeUrl) {
-            throw "Second DancingLog.exe opened '$($browserUrls[-1])' instead of '$homeUrl'"
+            throw "Second DanceTrail.exe opened '$($browserUrls[-1])' instead of '$homeUrl'"
         }
         Wait-DesktopListenerOwner -ProcessId $first.Id
 
         $first.Kill()
         if (-not $first.WaitForExit(10000)) {
-            throw "First DancingLog.exe instance did not exit after Kill()"
+            throw "First DanceTrail.exe instance did not exit after Kill()"
         }
         Wait-DesktopListenerRelease
 
-        Write-Host "==> DancingLog.exe replacement instance after mutex release"
+        Write-Host "==> DanceTrail.exe replacement instance after mutex release"
         $replacement = Start-Process `
             -FilePath $desktopExe `
             -WorkingDirectory $desktopRoot `
@@ -326,11 +326,11 @@ function Invoke-DesktopSingleInstanceSmoke {
         Stop-SmokeProcess -Process $replacement
         Wait-DesktopListenerRelease
 
-        Write-Host "==> DancingLog.exe takeover after startup owner releases mutex"
+        Write-Host "==> DanceTrail.exe takeover after startup owner releases mutex"
         $createdStartupOwner = $false
         $startupOwner = [System.Threading.Mutex]::new(
             $true,
-            "Local\DancingLog.DesktopTray.v1",
+            "Local\DanceTrail.DesktopTray.v1",
             [ref]$createdStartupOwner
         )
         if (-not $createdStartupOwner) {
@@ -350,11 +350,11 @@ function Invoke-DesktopSingleInstanceSmoke {
             Start-Sleep -Milliseconds 750
             $takeover.Refresh()
             if ($takeover.HasExited) {
-                throw "Waiting DancingLog.exe exited before startup mutex release"
+                throw "Waiting DanceTrail.exe exited before startup mutex release"
             }
             $prematureOwners = @(Get-DesktopListenerProcessIds)
             if ($prematureOwners.Count -ne 0) {
-                throw "Waiting DancingLog.exe bound 8787 before startup mutex release; owners: $($prematureOwners -join ', ')"
+                throw "Waiting DanceTrail.exe bound 8787 before startup mutex release; owners: $($prematureOwners -join ', ')"
             }
 
             $startupOwner.ReleaseMutex()
@@ -364,7 +364,7 @@ function Invoke-DesktopSingleInstanceSmoke {
             Wait-SmokeBrowserCount -LogPath $browserLog -MinimumCount ($beforeTakeoverCount + 1)
             $browserUrls = @(Get-SmokeBrowserUrls -LogPath $browserLog)
             if ($browserUrls[-1] -ne $homeUrl) {
-                throw "Takeover DancingLog.exe opened '$($browserUrls[-1])' instead of '$homeUrl'"
+                throw "Takeover DanceTrail.exe opened '$($browserUrls[-1])' instead of '$homeUrl'"
             }
         }
         finally {
@@ -381,7 +381,7 @@ function Invoke-DesktopSingleInstanceSmoke {
             Stop-SmokeProcess -Process $process
         }
         $env:BROWSER = $previousBrowser
-        $env:DANCING_LOG_SMOKE_BROWSER_LOG = $previousBrowserLog
+        $env:DANCE_TRAIL_SMOKE_BROWSER_LOG = $previousBrowserLog
     }
 }
 

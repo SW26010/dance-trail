@@ -12,16 +12,16 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from dancing_log.app_paths import DEFAULT_CONFIG, save_app_config
-from dancing_log.data_operations import DataOperationResult
-from dancing_log.live_app_session import LiveAppSessionRuntime
-from dancing_log.playback_projection import (
+from dance_trail.app_paths import DEFAULT_CONFIG, save_app_config
+from dance_trail.data_operations import DataOperationResult
+from dance_trail.live_app_session import LiveAppSessionRuntime
+from dance_trail.playback_projection import (
     EFFECTIVE_PLAYBACK_ACCEPTED,
     EFFECTIVE_PLAYBACK_EXCLUDED,
     EFFECTIVE_PLAYBACK_NEEDS_ATTENTION,
     set_manual_playback_decision,
 )
-from dancing_log.webui_endpoints import (
+from dance_trail.webui_endpoints import (
     control_live_overlay_from_payload,
     load_catalog_snapshot,
     load_insights_snapshot,
@@ -30,22 +30,22 @@ from dancing_log.webui_endpoints import (
     load_timeline_snapshot,
     update_playback_review_from_payload,
 )
-from dancing_log.storage import (
+from dance_trail.storage import (
     WANNA_SYSTEM_KEY,
     connect_db,
     ensure_dance_track,
     upsert_live_playback_event,
 )
-from dancing_log.webui_server import (
+from dance_trail.webui_server import (
     RequestRejected,
     WebUiRuntime,
     WebUiServer,
     _WebUiHandler,
     _WebUiHTTPServer,
 )
-from dancing_log.webui_routes import WebUiRouteResponse, handle_get_request
-from dancing_log.webui_settings import load_config_snapshot
-from dancing_log.windows_picker import (
+from dance_trail.webui_routes import WebUiRouteResponse, handle_get_request
+from dance_trail.webui_settings import load_config_snapshot
+from dance_trail.windows_picker import (
     FOS_FILEMUSTEXIST,
     FOS_FORCEFILESYSTEM,
     FOS_PATHMUSTEXIST,
@@ -53,7 +53,7 @@ from dancing_log.windows_picker import (
     _file_dialog_options,
     _run_windows_picker,
 )
-from dancing_log.watcher_lifetime_lock import WatcherLifetimeLockUnavailable
+from dance_trail.watcher_lifetime_lock import WatcherLifetimeLockUnavailable
 from tests.playback_record_helpers import insert_playback_record
 
 
@@ -122,7 +122,7 @@ class WebUiServerTest(unittest.TestCase):
             try:
                 with (
                     patch(
-                        "dancing_log.http_request_lifecycle.threading.Thread.start",
+                        "dance_trail.http_request_lifecycle.threading.Thread.start",
                         side_effect=RuntimeError("thread start failed"),
                     ),
                     self.assertRaisesRegex(RuntimeError, "thread start failed"),
@@ -157,7 +157,7 @@ class WebUiServerTest(unittest.TestCase):
             self.assertTrue(watcher_started.wait(timeout=1.0))
             try:
                 with patch(
-                    "dancing_log.storage.repair_stale_watcher_pending_records"
+                    "dance_trail.storage.repair_stale_watcher_pending_records"
                 ) as repair:
                     server = WebUiServer(port=0, app_root=tmp)
                 repair.assert_not_called()
@@ -168,7 +168,7 @@ class WebUiServerTest(unittest.TestCase):
     def test_startup_maintenance_failure_is_visible_in_summary(self):
         with tempfile.TemporaryDirectory() as tmp:
             with patch(
-                "dancing_log.storage.repair_stale_watcher_pending_records",
+                "dance_trail.storage.repair_stale_watcher_pending_records",
                 side_effect=RuntimeError("repair exploded"),
             ):
                 server = WebUiServer(port=0, app_root=tmp)
@@ -210,7 +210,7 @@ class WebUiServerTest(unittest.TestCase):
                             f"Host: {server.host}:{server.port}\r\n"
                             "Content-Type: application/json\r\n"
                             f"Origin: {server.url.rstrip('/')}\r\n"
-                            f"X-Dancing-Log-CSRF: {token}\r\n"
+                            f"X-Dance-Trail-CSRF: {token}\r\n"
                             "Content-Length: 100\r\n"
                             "Connection: keep-alive\r\n"
                             "\r\n"
@@ -295,7 +295,7 @@ class WebUiServerTest(unittest.TestCase):
                 f"Host: {server.host}:{server.port}\r\n"
                 "Content-Type: application/json\r\n"
                 f"Origin: {server.url.rstrip('/')}\r\n"
-                f"X-Dancing-Log-CSRF: {token}\r\n"
+                f"X-Dance-Trail-CSRF: {token}\r\n"
                 "Content-Length: 10000\r\n"
                 "Connection: keep-alive\r\n"
                 "\r\n"
@@ -365,7 +365,7 @@ class WebUiServerTest(unittest.TestCase):
             stop_thread = threading.Thread(target=server.stop)
             try:
                 with patch(
-                    "dancing_log.webui_server.handle_post_request",
+                    "dance_trail.webui_server.handle_post_request",
                     side_effect=blocking_post,
                 ):
                     request_thread.start()
@@ -424,7 +424,7 @@ class WebUiServerTest(unittest.TestCase):
             request_thread = threading.Thread(target=send_request)
             try:
                 with patch(
-                    "dancing_log.webui_server.handle_post_request",
+                    "dance_trail.webui_server.handle_post_request",
                     side_effect=blocking_post,
                 ):
                     request_thread.start()
@@ -494,11 +494,11 @@ class WebUiServerTest(unittest.TestCase):
         bootstrap = self._webui_bootstrap(html)
         token = bootstrap["csrfToken"]
         self.assertTrue(token)
-        self.assertNotEqual(token, "__DANCING_LOG_BOOTSTRAP__")
+        self.assertNotEqual(token, "__DANCE_TRAIL_BOOTSTRAP__")
         return token
 
     def _webui_bootstrap(self, html: str) -> dict:
-        marker = '<script id="dancing-log-bootstrap" type="application/json">'
+        marker = '<script id="dance-trail-bootstrap" type="application/json">'
         self.assertIn(marker, html)
         payload = html.split(marker, 1)[1].split("</script>", 1)[0]
         bootstrap = json.loads(payload)
@@ -573,7 +573,7 @@ class WebUiServerTest(unittest.TestCase):
     ) -> Request:
         headers = {"Content-Type": content_type}
         if token is not None:
-            headers["X-Dancing-Log-CSRF"] = token
+            headers["X-Dance-Trail-CSRF"] = token
         if origin is not None:
             headers["Origin"] = origin
         if host is not None:
@@ -605,14 +605,14 @@ class WebUiServerTest(unittest.TestCase):
                     html = response.read().decode("utf-8")
                     final_url = response.geturl()
                 self.assertEqual(final_url, server.home_url)
-                self.assertIn("<title>dancing-log</title>", html)
+                self.assertIn("<title>DanceTrail</title>", html)
                 self.assertIn('<div id="root"></div>', html)
                 self.assertIn(
                     '<script type="module" crossorigin src="/assets/app.js"></script>',
                     html,
                 )
                 self.assertNotIn("https://", html)
-                self.assertNotIn("__DANCING_LOG_BOOTSTRAP__", html)
+                self.assertNotIn("__DANCE_TRAIL_BOOTSTRAP__", html)
 
                 bootstrap = self._webui_bootstrap(html)
                 self.assertTrue(bootstrap["csrfToken"])
@@ -630,7 +630,7 @@ class WebUiServerTest(unittest.TestCase):
 
                 with urlopen(f"{server.url}api/config", timeout=2) as response:
                     snapshot = json.loads(response.read().decode("utf-8"))
-                self.assertEqual(snapshot["config"]["app_db"], "data/dancing_log.sqlite3")
+                self.assertEqual(snapshot["config"]["app_db"], "data/dance_trail.sqlite3")
                 self.assertIn("overlay_port", snapshot["config"])
                 self.assertEqual(
                     snapshot["config"]["dance_day_boundary_time"],
@@ -655,7 +655,7 @@ class WebUiServerTest(unittest.TestCase):
                 ):
                     with urlopen(f"{server.url}{path}", timeout=2) as response:
                         self.assertEqual(response.status, 200)
-                        self.assertIn("dancing-log", response.read().decode("utf-8"))
+                        self.assertIn("dance-trail", response.read().decode("utf-8"))
 
                 with urlopen(f"{server.url}api/overlay/state", timeout=2) as response:
                     inactive_snapshot = json.loads(response.read().decode("utf-8"))
@@ -741,7 +741,7 @@ class WebUiServerTest(unittest.TestCase):
     def test_webui_config_save_preserves_unknown_keys(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            config_path = root / "config" / "dancing-log.local.json"
+            config_path = root / "config" / "dance-trail.local.json"
             config_path.parent.mkdir()
             config_path.write_text(
                 json.dumps(
@@ -802,7 +802,7 @@ class WebUiServerTest(unittest.TestCase):
     def test_webui_config_save_rejects_invalid_port_without_writing(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            config_path = root / "config" / "dancing-log.local.json"
+            config_path = root / "config" / "dance-trail.local.json"
             config_path.parent.mkdir()
             config_path.write_text(
                 json.dumps({"app_db": "data/original.sqlite3"}),
@@ -842,7 +842,7 @@ class WebUiServerTest(unittest.TestCase):
     def test_webui_config_save_rejects_cross_origin_text_and_missing_token(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            config_path = root / "config" / "dancing-log.local.json"
+            config_path = root / "config" / "dance-trail.local.json"
             config_path.parent.mkdir()
             config_path.write_text(
                 json.dumps({"app_db": "data/original.sqlite3"}),
@@ -989,7 +989,7 @@ class WebUiServerTest(unittest.TestCase):
             config = dict(DEFAULT_CONFIG)
             config["vrc_log_dir"] = str(root / "logs")
             config["overlay_port"] = 9911
-            config_path = root / "config" / "dancing-log.local.json"
+            config_path = root / "config" / "dance-trail.local.json"
             config_path.parent.mkdir()
             config_path.write_text(json.dumps(config), encoding="utf-8")
 
@@ -1300,7 +1300,7 @@ class WebUiServerTest(unittest.TestCase):
     def test_webui_playback_review_endpoint_updates_timeline_decision(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            db_path = root / "data" / "dancing_log.sqlite3"
+            db_path = root / "data" / "dance_trail.sqlite3"
             with connect_db(db_path) as conn:
                 track_id = ensure_dance_track(
                     conn,
@@ -1376,7 +1376,7 @@ class WebUiServerTest(unittest.TestCase):
     def test_webui_playback_review_endpoint_does_not_create_missing_database(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            db_path = root / "data" / "dancing_log.sqlite3"
+            db_path = root / "data" / "dance_trail.sqlite3"
             body, status = update_playback_review_from_payload(
                 WebUiRuntime.from_root(root),
                 {"playback_record_id": 1, "action": "accept"},
@@ -1423,7 +1423,7 @@ class WebUiServerTest(unittest.TestCase):
     def test_webui_read_snapshots_do_not_initialize_empty_sqlite_db(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            db_path = root / "data" / "dancing_log.sqlite3"
+            db_path = root / "data" / "dance_trail.sqlite3"
             db_path.parent.mkdir()
             db_path.write_bytes(b"")
             runtime = WebUiRuntime.from_root(root)
@@ -1440,7 +1440,7 @@ class WebUiServerTest(unittest.TestCase):
     def test_timeline_without_date_defaults_to_latest_playback_day(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            db_path = root / "data" / "dancing_log.sqlite3"
+            db_path = root / "data" / "dance_trail.sqlite3"
             with connect_db(db_path) as conn:
                 older_track = ensure_dance_track(
                     conn,
@@ -1483,7 +1483,7 @@ class WebUiServerTest(unittest.TestCase):
                 {"dance_day_boundary_time": "00:00"},
                 app_root=root,
             )
-            db_path = root / "data" / "dancing_log.sqlite3"
+            db_path = root / "data" / "dance_trail.sqlite3"
             with connect_db(db_path) as conn:
                 late_night_track = ensure_dance_track(
                     conn,
@@ -1544,7 +1544,7 @@ class WebUiServerTest(unittest.TestCase):
     def test_webui_read_snapshots_use_playback_records_not_legacy_tables(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            db_path = root / "data" / "dancing_log.sqlite3"
+            db_path = root / "data" / "dance_trail.sqlite3"
             with connect_db(db_path) as conn:
                 legacy_track = ensure_dance_track(
                     conn,
@@ -1787,13 +1787,13 @@ class WebUiServerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             legacy_path = root / "data" / "local_config.json"
-            new_path = root / "config" / "dancing-log.local.json"
+            new_path = root / "config" / "dance-trail.local.json"
             legacy_path.parent.mkdir()
             legacy_path.write_text(json.dumps({"app_db": "data/legacy.sqlite3"}), encoding="utf-8")
 
             snapshot = load_config_snapshot(WebUiRuntime.from_root(root))
 
-            self.assertEqual(snapshot["config"]["app_db"], "data/legacy.sqlite3")
+            self.assertEqual(snapshot["config"]["app_db"], "data/dance_trail.sqlite3")
             self.assertFalse(new_path.exists())
 
     def test_webui_config_snapshot_previews_standard_vrcx_database_without_saving(self):
@@ -1814,7 +1814,7 @@ class WebUiServerTest(unittest.TestCase):
             self.assertEqual(candidates["vrcx_db_path"]["value"], str(standard))
             self.assertTrue(candidates["vrcx_db_path"]["exists"])
             self.assertIsNone(snapshot["config"]["vrcx_db_path"])
-            self.assertFalse((root / "config" / "dancing-log.local.json").exists())
+            self.assertFalse((root / "config" / "dance-trail.local.json").exists())
 
     def test_webui_operations_snapshot_uses_shared_catalog(self):
         snapshot = load_operations_snapshot()
@@ -1829,7 +1829,7 @@ class WebUiServerTest(unittest.TestCase):
             server.start()
             try:
                 token = self._csrf_token(server)
-                with patch("dancing_log.webui_endpoints.run_data_operation_request") as runner:
+                with patch("dance_trail.webui_endpoints.run_data_operation_request") as runner:
                     request = self._json_request(
                         server,
                         "api/operations/run",
@@ -1854,7 +1854,7 @@ class WebUiServerTest(unittest.TestCase):
             try:
                 token = self._csrf_token(server)
                 with patch(
-                    "dancing_log.webui_endpoints.run_data_operation_request",
+                    "dance_trail.webui_endpoints.run_data_operation_request",
                     side_effect=WatcherLifetimeLockUnavailable("data lifetime is active"),
                 ):
                     request = self._json_request(
@@ -1917,7 +1917,7 @@ class WebUiServerTest(unittest.TestCase):
                         worker_errors.append(exc)
 
                 with patch.dict(
-                    "dancing_log.data_operations._RUNNERS",
+                    "dance_trail.data_operations._RUNNERS",
                     {"sync-wanna": blocking_runner},
                 ):
                     worker = threading.Thread(target=run_first_request)
@@ -1963,7 +1963,7 @@ class WebUiServerTest(unittest.TestCase):
                     metrics={"count": 1},
                 )
                 with patch(
-                    "dancing_log.webui_endpoints.run_data_operation_request",
+                    "dance_trail.webui_endpoints.run_data_operation_request",
                     return_value=fake_result,
                 ) as runner:
                     request = self._json_request(
@@ -1995,7 +1995,7 @@ class WebUiServerTest(unittest.TestCase):
             server.start()
             try:
                 token = self._csrf_token(server)
-                with patch("dancing_log.webui_endpoints.run_data_operation_request") as runner:
+                with patch("dance_trail.webui_endpoints.run_data_operation_request") as runner:
                     request = self._json_request(
                         server,
                         "api/operations/run",
@@ -2027,7 +2027,7 @@ class WebUiServerTest(unittest.TestCase):
         self.assertFalse(file_options & FOS_PICKFOLDERS)
 
     def test_windows_picker_delegates_to_ifileopendialog_backend(self):
-        with patch("dancing_log.windows_picker._show_windows_file_open_dialog", return_value="C:\\temp\\x.sqlite3") as picker:
+        with patch("dance_trail.windows_picker._show_windows_file_open_dialog", return_value="C:\\temp\\x.sqlite3") as picker:
             selected = _run_windows_picker({"picker": "file", "label": "App database"}, "C:\\temp")
 
         self.assertEqual(selected, "C:\\temp\\x.sqlite3")

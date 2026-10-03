@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from dancing_log.webui_server import run_webui_server
+from dance_trail.webui_server import run_webui_server
 
 
 def main() -> None:

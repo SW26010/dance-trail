@@ -54,7 +54,7 @@ watcher 使用现有 `scripts/replay_vrc_logs.py` 的同一 `_run_replay` 入口
 一个连续播放过程。最终汇总把第一次请求时间与第二次实际开始拼在一起，产生 682 秒和
 878 秒的延迟；已经结算的持久记录又保留了第一次的状态。
 
-代码原因可定位至 `dancing_log/live_playback_folding.py` 的 `_event_key_for_record`：一个
+代码原因可定位至 `dance_trail/live_playback_folding.py` 的 `_event_key_for_record`：一个
 尚无 `actual_play_at` 的同舞蹈 open event 会继续吸收后续 request/load-start；
 `live_playback_runtime.py` 的结算并不总是关闭 builder 中相应的 open event。
 这属于当前实现的行为，不能把它直接提升为 v2 的 occurrence 证明。
@@ -186,7 +186,7 @@ VRCX 行缺失，串错的 watcher 还可能呈现单锚点，因此双向唯一
 
 ### 字段差异需要先排除表示方法和缓存污染
 
-原文的标题“仅 84 对相同”可复现，但比较的是 Dancing Log 去掉编号后的标题与 VRCX
+原文的标题“仅 84 对相同”可复现，但比较的是 DanceTrail 去掉编号后的标题与 VRCX
 自己的解析结果。复刻固定版本 VRCX 的 PyPyDance 解析后，3,153 个适用样本的标题全部
 一致（含 5 对两侧为空）；`video_id` 同样一致或同时为空。剩余 1 个是 VRDancing。
 因此这是可解释的表示差异，不能用来证明原始标题信息不可靠。

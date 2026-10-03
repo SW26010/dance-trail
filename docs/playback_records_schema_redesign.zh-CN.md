@@ -231,7 +231,7 @@ CREATE TABLE playback_record_origins (
 字段含义：
 
 - `origin_key`: 来源侧事件、坐标或 payload 的稳定身份；用于 origin 去重。
-- `origin_source`: 来源坐标命名空间，例如 VRCX 数据库、VRChat log、legacy dancing-log root、manual entry。它不是 `evidence_source` 的替代品。
+- `origin_source`: 来源坐标命名空间，例如 VRCX 数据库、VRChat log、legacy dance-trail root、manual entry。它不是 `evidence_source` 的替代品。
 - `origin_root_key` / `origin_root_path`: 来源 app root、数据库、日志目录或文件集合的定位信息。
 - `origin_table` / `origin_row_id` / `origin_event_key`: 来源侧表、行或事件 key；没有对应概念时为空。
 - `ingest_run_id`: 一次导入、迁移、replay 或 merge 的运行身份；脚本日期或版本不要编码进 `evidence_source`。

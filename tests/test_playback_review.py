@@ -2,25 +2,25 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from dancing_log.playback_projection import (
+from dance_trail.playback_projection import (
     EFFECTIVE_PLAYBACK_ACCEPTED,
     EFFECTIVE_PLAYBACK_EXCLUDED,
     EFFECTIVE_PLAYBACK_NEEDS_ATTENTION,
 )
-from dancing_log.playback_review import (
+from dance_trail.playback_review import (
     PlaybackReviewError,
     clear_playback_record_manual_decision,
     read_playback_review_state,
     set_playback_record_manual_decision,
 )
-from dancing_log.storage import WANNA_SYSTEM_KEY, connect_db, ensure_dance_track
+from dance_trail.storage import WANNA_SYSTEM_KEY, connect_db, ensure_dance_track
 from tests.playback_record_helpers import insert_playback_record
 
 
 class PlaybackReviewTest(unittest.TestCase):
     def test_set_and_clear_manual_decision_preserves_default_projection(self):
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "dancing_log.sqlite3"
+            db_path = Path(tmp) / "dance_trail.sqlite3"
             with connect_db(db_path) as conn:
                 track_id = ensure_dance_track(
                     conn,
@@ -87,7 +87,7 @@ class PlaybackReviewTest(unittest.TestCase):
 
     def test_review_rejects_missing_record(self):
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "dancing_log.sqlite3"
+            db_path = Path(tmp) / "dance_trail.sqlite3"
             with connect_db(db_path) as conn:
                 with self.assertRaisesRegex(PlaybackReviewError, "playback record not found"):
                     read_playback_review_state(conn, 999)

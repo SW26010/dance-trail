@@ -1,0 +1,265 @@
+"""Overlay queued-self manifests onto existing Local Playback Evidence."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import date
+from pathlib import Path
+import re
+import sqlite3
+
+from dance_trail.app_paths import QUEUED_SELF_DIR
+from dance_trail.local_dance_day import LocalDanceDayBoundary
+from dance_trail.playback_projection import (
+    accepted_playback_where_sql,
+    playback_projection_join_sql,
+)
+from dance_trail.storage import connect_db
+
+
+SOURCE_QUEUED_SELF = "queued_self"
+
+DATE_RE = re.compile(r"^\s*#*\s*(\d{4}-\d{2}-\d{2})\s*$")
+BARE_DOTTED_TRACK_REF_RE = re.compile(
+    r"(?:^|\s|[?？|])(?:\d+\s*[.、)]\s*)?"
+    r"(?P<external_id>\d+)[.、)]\s*"
+    r"(?P<label>.*?)(?=(?:\s|[?？|])(?:\d+\s*[.、)]\s*)?\d+[.、)]\s*|$)"
+)
+BARE_SPACED_TRACK_REF_RE = re.compile(
+    r"^\s*(?:[-*]\s*)?(?:\d+\s*[.、)]\s*)?"
+    r"(?P<external_id>\d+)\s+(?P<label>.*?)\s*$"
+)
+TRACK_REF_RE = re.compile(
+    r"(?:^|\s)(?:\d+\s*[.。]\s*)?"
+    r"(?P<system>[A-Za-z][A-Za-z0-9_-]*):(?P<external_id>\S+)"
+    r"\s*(?P<label>.*?)(?=(?:\s+(?:\d+\s*[.。]\s*)?[A-Za-z][A-Za-z0-9_-]*:\S+)|$)"
+)
+
+
+@dataclass(frozen=True)
+class QueuedSelfEntry:
+    played_date: date
+    system_key: str | None
+    external_id: str | None
+    label: str
+    source_file: Path
+    ordinal: int
+
+
+@dataclass(frozen=True)
+class QueuedSelfImportStats:
+    files_scanned: int = 0
+    entries_seen: int = 0
+    entries_with_track_ref: int = 0
+    entries_without_track_ref: int = 0
+    matched_entries: int = 0
+    unmatched_entries: int = 0
+    existing_records_updated: int = 0
+    stale_manifest_records_deleted: int = 0
+
+    @property
+    def existing_events_updated(self) -> int:
+        """Compatibility alias for pre-playback-record callers."""
+        return self.existing_records_updated
+
+    @property
+    def stale_manifest_events_deleted(self) -> int:
+        """Compatibility alias for pre-playback-record callers."""
+        return self.stale_manifest_records_deleted
+
+
+def parse_queued_self_file(
+    path: Path,
+    default_system_key: str | None = None,
+) -> list[QueuedSelfEntry]:
+    """Parse one Markdown queued-self manifest."""
+    entries: list[QueuedSelfEntry] = []
+    current_date: date | None = None
+    ordinal = 0
+    normalized_default_system = _normalize_system_key(default_system_key)
+
+    for raw_line in path.read_text(encoding="utf-8-sig").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        date_match = DATE_RE.match(line)
+        if date_match:
+            current_date = date.fromisoformat(date_match.group(1))
+            ordinal = 0
+            continue
+
+        if current_date is None:
+            continue
+
+        matches = list(TRACK_REF_RE.finditer(line))
+        if matches:
+            for match in matches:
+                ordinal += 1
+                entries.append(
+                    QueuedSelfEntry(
+                        played_date=current_date,
+                        system_key=match.group("system").strip().lower(),
+                        external_id=match.group("external_id").strip(),
+                        label=match.group("label").strip(),
+                        source_file=path,
+                        ordinal=ordinal,
+                    )
+                )
+            continue
+
+        bare_matches = list(BARE_DOTTED_TRACK_REF_RE.finditer(line))
+        if bare_matches:
+            for match in bare_matches:
+                ordinal += 1
+                entries.append(
+                    QueuedSelfEntry(
+                        played_date=current_date,
+                        system_key=normalized_default_system,
+                        external_id=match.group("external_id").strip(),
+                        label=match.group("label").strip(),
+                        source_file=path,
+                        ordinal=ordinal,
+                    )
+                )
+            continue
+
+        bare_match = BARE_SPACED_TRACK_REF_RE.match(line)
+        if bare_match:
+            ordinal += 1
+            entries.append(
+                QueuedSelfEntry(
+                    played_date=current_date,
+                    system_key=normalized_default_system,
+                    external_id=bare_match.group("external_id").strip(),
+                    label=bare_match.group("label").strip(),
+                    source_file=path,
+                    ordinal=ordinal,
+                )
+            )
+            continue
+
+        ordinal += 1
+        entries.append(
+            QueuedSelfEntry(
+                played_date=current_date,
+                system_key=None,
+                external_id=None,
+                label=line,
+                source_file=path,
+                ordinal=ordinal,
+            )
+        )
+
+    return entries
+
+
+def load_queued_self_entries(
+    manifest_dir: Path | str | None = None,
+    default_system_key: str | None = None,
+) -> list[QueuedSelfEntry]:
+    """Load all queued-self Markdown manifests from a directory."""
+    root = Path(manifest_dir) if manifest_dir is not None else QUEUED_SELF_DIR
+    if not root.exists():
+        return []
+
+    entries: list[QueuedSelfEntry] = []
+    for path in sorted(root.glob("*.md")):
+        entries.extend(
+            parse_queued_self_file(path, default_system_key=default_system_key)
+        )
+    return entries
+
+
+def sync_queued_self_manifests(
+    app_db_path: Path | str | None = None,
+    manifest_dir: Path | str | None = None,
+    system_key: str | None = None,
+    dance_day_boundary: LocalDanceDayBoundary | None = None,
+) -> QueuedSelfImportStats:
+    """Apply queued-self manifests as a source override on existing records."""
+    root = Path(manifest_dir) if manifest_dir is not None else QUEUED_SELF_DIR
+    entries = load_queued_self_entries(root, default_system_key=system_key)
+    boundary = dance_day_boundary or LocalDanceDayBoundary.from_config({})
+
+    with connect_db(app_db_path) as conn:
+        deleted = 0
+
+        matched_entries = 0
+        unmatched_entries = 0
+        existing_updates = 0
+
+        for entry in entries:
+            if entry.system_key is None or entry.external_id is None:
+                unmatched_entries += 1
+                continue
+
+            matched_existing = _matching_existing_record_count(
+                conn,
+                entry,
+                boundary,
+            )
+            if matched_existing == 0:
+                unmatched_entries += 1
+                continue
+
+            matched_entries += 1
+            # Request-type promotion is intentionally deferred; keep manifest
+            # matching active so the future seam can reuse this boundary.
+
+        conn.commit()
+
+    return QueuedSelfImportStats(
+        files_scanned=len(list(root.glob("*.md"))) if root.exists() else 0,
+        entries_seen=len(entries),
+        entries_with_track_ref=sum(1 for entry in entries if entry.system_key and entry.external_id),
+        entries_without_track_ref=sum(1 for entry in entries if not (entry.system_key and entry.external_id)),
+        matched_entries=matched_entries,
+        unmatched_entries=unmatched_entries,
+        existing_records_updated=existing_updates,
+        stale_manifest_records_deleted=deleted,
+    )
+
+
+def _matching_existing_record_count(
+    conn: sqlite3.Connection,
+    entry: QueuedSelfEntry,
+    dance_day_boundary: LocalDanceDayBoundary,
+) -> int:
+    projection_join = playback_projection_join_sql(conn)
+    target_range = dance_day_boundary.range_for(entry.played_date)
+    rows = conn.execute(
+        f"""
+        SELECT pr.played_at
+        FROM playback_records pr
+        {projection_join}
+        JOIN dance_tracks dt ON dt.id = pr.dance_track_id
+        JOIN dance_systems ds ON ds.id = dt.system_id
+        WHERE
+            ds.key = ?
+            AND dt.external_id = ?
+            AND {accepted_playback_where_sql(conn)}
+        """,
+        (
+            entry.system_key,
+            entry.external_id,
+        ),
+    ).fetchall()
+    matched = 0
+    for row in rows:
+        try:
+            played_at = dance_day_boundary.local_datetime(row["played_at"])
+        except (TypeError, ValueError):
+            continue
+        if target_range.contains(played_at):
+            matched += 1
+    return matched
+
+
+def _normalize_system_key(system_key: str | None) -> str | None:
+    if system_key is None:
+        return None
+    normalized = system_key.strip().lower()
+    if not normalized:
+        raise ValueError("system key must not be empty")
+    return normalized

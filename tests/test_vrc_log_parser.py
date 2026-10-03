@@ -1,6 +1,6 @@
 import unittest
 
-from dancing_log.vrc_log_parser import (
+from dance_trail.vrc_log_parser import (
     parse_vrc_identity_event,
     parse_vrc_lifecycle_event,
     parse_vrc_log_line,

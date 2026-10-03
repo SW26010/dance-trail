@@ -5,7 +5,7 @@ Updated: 2026-07-19
 
 Primary data-model definition described here: v0 (runtime and historical reference)
 
-This document describes the current SQLite runtime model for `dancing-log`.
+This document describes the current SQLite runtime model for `dance-trail`.
 The project no longer uses the legacy `songs` table or
 `dance_events.song_id` path.
 After the legacy cleanup recorded in ADR 0004, `playback_records` is the
@@ -31,7 +31,7 @@ The first refactor implements the core model directly:
 - SQLite is the runtime store.
 - Generated CSV/JSON files are import/export artifacts only.
 - Existing generated data is archived during rebuild, not migrated in place.
-- `config/dancing-log.local.json` and `data/queued_self/` are preserved as local inputs.
+- `config/dance-trail.local.json` and `data/queued_self/` are preserved as local inputs.
 - WannaDance is the first dance system with catalog sync implemented.
 - PyPyDance URL identity is supported from observed logs. DuDu FitDance has
   experimental support from a small sample set: official/API URLs, VRChat log
@@ -495,14 +495,14 @@ uv run python main.py rebuild-data --archive-existing
 
 The rebuild flow archives generated files such as:
 
-- `data/dancing_log.sqlite3`
-- `data/dancing_log.sqlite3-wal`
-- `data/dancing_log.sqlite3-shm`
+- `data/dance_trail.sqlite3`
+- `data/dance_trail.sqlite3-wal`
+- `data/dance_trail.sqlite3-shm`
 - `data/songs.csv`
 - `data/wanna_songs.csv`
 - `data/wanna_songs.json`
 
 It preserves:
 
-- `config/dancing-log.local.json`
+- `config/dance-trail.local.json`
 - `data/queued_self/`

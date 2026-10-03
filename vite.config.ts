@@ -6,7 +6,7 @@ export default defineConfig({
   base: "/assets/",
   plugins: [react()],
   build: {
-    outDir: "../dancing_log/webui_dist",
+    outDir: "../dance_trail/webui_dist",
     emptyOutDir: true,
     assetsDir: "",
     sourcemap: false,

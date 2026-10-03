@@ -4,8 +4,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from dancing_log.app_paths import AppRuntimeConfig, DEFAULT_CONFIG
-from dancing_log.data_operations import (
+from dance_trail.app_paths import AppRuntimeConfig, DEFAULT_CONFIG
+from dance_trail.data_operations import (
     DataOperationResult,
     DataOperationError,
     build_data_operation_request,
@@ -13,8 +13,8 @@ from dancing_log.data_operations import (
     operation_catalog_snapshot,
     run_data_operation,
 )
-from dancing_log.vrcx_importer import ImportStats
-from dancing_log.watcher_lifetime_lock import (
+from dance_trail.vrcx_importer import ImportStats
+from dance_trail.watcher_lifetime_lock import (
     WatcherLifetimeLease,
     WatcherLifetimeLockUnavailable,
 )
@@ -54,7 +54,7 @@ class DataOperationsTests(unittest.TestCase):
                     worker_errors.append(exc)
 
             with patch.dict(
-                "dancing_log.data_operations._RUNNERS",
+                "dance_trail.data_operations._RUNNERS",
                 {"sync-wanna": runner},
             ):
                 worker = threading.Thread(target=run_first_operation)
@@ -79,7 +79,7 @@ class DataOperationsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             runtime_config = AppRuntimeConfig.from_config(DEFAULT_CONFIG, app_root=tmp)
             runner_patch = patch(
-                "dancing_log.data_operations._RUNNERS",
+                "dance_trail.data_operations._RUNNERS",
                 {
                     "sync-wanna": lambda operation, _config, _params: DataOperationResult(
                         operation_key=operation.key,
@@ -105,12 +105,12 @@ class DataOperationsTests(unittest.TestCase):
                     )
 
     def test_catalog_exposes_risk_defaults_command_and_localized_text(self):
-        snapshot = operation_catalog_snapshot(command_prefix="dancing-log")
+        snapshot = operation_catalog_snapshot(command_prefix="dance-trail")
         operations = {operation["key"]: operation for operation in snapshot["operations"]}
 
         self.assertEqual(
             operations["sync-queued-self"]["command"],
-            "dancing-log sync-queued-self --system wannadance",
+            "dance-trail sync-queued-self --system wannadance",
         )
         self.assertEqual(operations["import-vrcx"]["risk"], "writes playback history")
         self.assertEqual(operations["import-vrcx"]["text"]["zh"]["title"], "导入 VRCX 历史")
@@ -176,7 +176,7 @@ class DataOperationsTests(unittest.TestCase):
             with (
                 patch.dict("os.environ", {"APPDATA": str(appdata)}),
                 patch(
-                    "dancing_log.vrcx_importer.import_vrcx_database",
+                    "dance_trail.vrcx_importer.import_vrcx_database",
                     return_value=ImportStats(scanned=1, candidate_events=1),
                 ) as importer,
             ):

@@ -6,7 +6,7 @@ Date: 2026-05-16
 
 ## Goal
 
-Evaluate whether local VRCX data can be used as a reliable source of dance song play history, and record the implications for `dancing-log` as an eventually open-source project.
+Evaluate whether local VRCX data can be used as a reliable source of dance song play history, and record the implications for `dance-trail` as an eventually open-source project.
 
 ## Open-source Boundary
 
@@ -14,7 +14,7 @@ For this project, code and personal data should stay fully separated.
 
 Recommended layout:
 
-- `dancing_log/`: source code only
+- `dance_trail/`: source code only
 - `docs/`: design notes and public documentation
 - `data/`: local derived datasets, ignored by git
 - `analysis/`: local scratch copies, ignored by git
@@ -69,7 +69,7 @@ Why SQLite is the better fit now:
 
 Implemented direction:
 
-- primary app database: `data/dancing_log.sqlite3`
+- primary app database: `data/dance_trail.sqlite3`
 - optional export commands:
   - WannaDance catalog -> optional CSV/JSON artifacts through `sync-wanna --write-files`
   - dance history -> future CSV export if needed
@@ -210,7 +210,7 @@ So the data hierarchy is:
 1. VRChat `output_log_*.txt` is the real event source.
 2. VRCX `LogWatcher` is the parser/tailer.
 3. VRCX `gamelog_video_play` is the derived durable cache.
-4. `dancing-log` should import from VRCX SQLite first, and optionally support direct VRChat log parsing later.
+4. `dance-trail` should import from VRCX SQLite first, and optionally support direct VRChat log parsing later.
 
 Local verification note:
 
@@ -274,7 +274,7 @@ The remaining hard problem is "can we infer source semantics with enough confide
 
 ## Current Implementation Status
 
-The importer described above is now implemented in `dancing_log/vrcx_importer.py`
+The importer described above is now implemented in `dance_trail/vrcx_importer.py`
 and exposed through:
 
 ```bash
@@ -283,7 +283,7 @@ uv run python main.py import-vrcx "path/to/vrcx-snapshot/VRCX.sqlite3"
 uv run python main.py import-vrcx --dry-run
 ```
 
-The VRCX database path can also be stored in `config/dancing-log.local.json` as
+The VRCX database path can also be stored in `config/dance-trail.local.json` as
 `vrcx_db_path`.
 
 The importer currently:
@@ -313,7 +313,7 @@ Observed DuDu FitDance API, CDN, and page URLs are parsed experimentally into
 VRDancing and other systems are recognized only as unsupported or unknown until
 their real metadata shapes are inspected.
 
-Live raw-log capture is implemented separately in `dancing_log/vrc_log_watcher.py`
+Live raw-log capture is implemented separately in `dance_trail/vrc_log_watcher.py`
 and exposed through:
 
 ```bash
@@ -326,7 +326,7 @@ watcher-derived playback evidence into `playback_records` once a folded
 observation has a stable dance identity. To also mirror folded state into the
 deprecated `live_playback_events` forensic table, run `watch-vrc-log --live-db`.
 
-The watcher defaults to `config/dancing-log.local.json` key `vrc_log_dir`, falling back
+The watcher defaults to `config/dance-trail.local.json` key `vrc_log_dir`, falling back
 to the standard Windows LocalLow VRChat log directory. It starts from the current
 log file's end by default to avoid rescanning old large logs during gameplay;
 newly created log files are read from the beginning so startup lines are not

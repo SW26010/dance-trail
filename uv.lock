@@ -12,7 +12,7 @@ wheels = [
 ]
 
 [[package]]
-name = "dancing-log"
+name = "dance-trail"
 version = "0.8.0"
 source = { virtual = "." }
 dependencies = [

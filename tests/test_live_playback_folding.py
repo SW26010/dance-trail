@@ -1,6 +1,6 @@
 import unittest
 
-from dancing_log.live_playback_folding import PlaybackEventBuilder, playback_delay_metrics
+from dance_trail.live_playback_folding import PlaybackEventBuilder, playback_delay_metrics
 
 
 class LivePlaybackFoldingModuleTest(unittest.TestCase):

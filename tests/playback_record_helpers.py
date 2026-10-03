@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from dancing_log.playback_record_writer import (
+from dance_trail.playback_record_writer import (
     PROJECT_SOURCE_ROOT_KEY,
     PROJECT_SOURCE_ROOT_PATH,
     PlaybackRecordOriginWrite,

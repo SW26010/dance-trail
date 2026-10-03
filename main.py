@@ -1,21 +1,21 @@
-"""dancing-log command-line entrypoint."""
+"""dance-trail command-line entrypoint."""
 
 from pathlib import Path, PureWindowsPath
 import subprocess
 import sys
 
-from dancing_log.app_paths import AppRuntimeConfig, resolve_app_path
-from dancing_log.data_operations import (
+from dance_trail.app_paths import AppRuntimeConfig, resolve_app_path
+from dance_trail.data_operations import (
     DataOperationError,
     operation_cli_descriptions,
     parse_data_operation_cli_request,
     run_data_operation_request,
 )
-from dancing_log.local_config import CONFIG_FILE
+from dance_trail.local_config import CONFIG_FILE
 
 
 def _get_runtime_config() -> AppRuntimeConfig:
-    return AppRuntimeConfig.load(migrate_legacy=True)
+    return AppRuntimeConfig.load()
 
 
 def _is_frozen() -> bool:
@@ -30,13 +30,13 @@ def _executable_name() -> str:
 
 
 def _is_desktop_tray_entry() -> bool:
-    return _is_frozen() and PureWindowsPath(_executable_name()).stem.casefold() == "dancinglog"
+    return _is_frozen() and PureWindowsPath(_executable_name()).stem.casefold() == "dancetrail"
 
 
 def _command_prefix() -> str:
     if _is_frozen():
         if _is_desktop_tray_entry():
-            return "DancingLogCli.exe"
+            return "DanceTrailCli.exe"
         return _executable_name()
     return "uv run python main.py"
 
@@ -95,7 +95,7 @@ def cmd_recommend():
     args = parser.parse_args(sys.argv[2:])
     db_path = _configured_db_path(args.app_db, config)
 
-    from dancing_log.models import generate_daily_playlist, load_dance_log, load_dance_tracks
+    from dance_trail.models import generate_daily_playlist, load_dance_log, load_dance_tracks
 
     tracks = load_dance_tracks(db_path)
     if not tracks:
@@ -149,7 +149,7 @@ def cmd_day():
         parser.error("date must use YYYY-MM-DD format")
 
     db_path = _configured_db_path(args.app_db, config)
-    from dancing_log.daily_report import (
+    from dance_trail.daily_report import (
         format_daily_dance_line,
         load_daily_dances,
         load_daily_live_dances,
@@ -187,13 +187,13 @@ def cmd_log():
     args = parser.parse_args(sys.argv[2:])
     db_path = _configured_db_path(args.app_db, config)
 
-    from dancing_log.models import (
+    from dance_trail.models import (
         SOURCE_LABELS,
         SOURCE_OTHER,
         SOURCE_SELF,
         add_dance_record,
     )
-    from dancing_log.storage import get_dance_track
+    from dance_trail.storage import get_dance_track
 
     track = get_dance_track(args.system, args.external_id, db_path)
     if track and (track.get("title") or track.get("artist")):
@@ -252,7 +252,7 @@ def cmd_import_favorites():
     db_path = _configured_db_path(args.app_db, config)
     favorites_file = config.resolve_path(args.favorites_file)
 
-    from dancing_log.favorite_importer import FavoriteImportError, import_favorites_file
+    from dance_trail.favorite_importer import FavoriteImportError, import_favorites_file
 
     try:
         stats = import_favorites_file(
@@ -315,7 +315,7 @@ def cmd_sample_recording_frames():
         app_root=config.app_root,
     )
 
-    from dancing_log.recordings import sample_top_frames
+    from dance_trail.recordings import sample_top_frames
 
     outputs = sample_top_frames(
         recording_path=recording_path,
@@ -392,7 +392,7 @@ def cmd_watch_vrc_log():
     )
     args = parser.parse_args(sys.argv[2:])
 
-    from dancing_log.live_app_session import LiveAppSessionRuntime, LiveWatcherRunOptions
+    from dance_trail.live_app_session import LiveAppSessionRuntime, LiveWatcherRunOptions
 
     options = LiveWatcherRunOptions(
         log_dir=args.log_dir,
@@ -409,7 +409,7 @@ def cmd_watch_vrc_log():
         stop_after_idle_seconds=args.stop_after_idle_seconds,
         archive_source_logs=not args.no_source_archive,
     )
-    runtime = LiveAppSessionRuntime(migrate_legacy_config=True)
+    runtime = LiveAppSessionRuntime()
     print(f"Watching VRChat logs: {runtime.resolved_log_dir(options)}")
     print("Press Ctrl+C to stop.")
 
@@ -447,7 +447,7 @@ def cmd_webui():
     """Start the local Web UI server."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="Start the local dancing-log Web UI")
+    parser = argparse.ArgumentParser(description="Start the local DanceTrail Web UI")
     parser.add_argument("--port", type=int, default=8787, help="Localhost port")
     parser.add_argument(
         "--no-open",
@@ -456,14 +456,14 @@ def cmd_webui():
     )
     args = parser.parse_args(sys.argv[2:])
 
-    from dancing_log.webui_server import run_webui_server
+    from dance_trail.webui_server import run_webui_server
 
     run_webui_server(port=args.port, open_browser=not args.no_open)
 
 
 def run_desktop_tray_entry():
     """Run the frozen desktop tray entry."""
-    from dancing_log.tray_app import run_tray_webui_app
+    from dance_trail.tray_app import run_tray_webui_app
 
     run_tray_webui_app()
 
@@ -514,7 +514,7 @@ def main():
 
     if len(sys.argv) < 2 or sys.argv[1] not in all_names:
         prefix = _command_prefix()
-        print("dancing-log - local dance playback timeline toolkit\n")
+        print("dance-trail - local dance playback timeline toolkit\n")
         print(f"Usage: {prefix} <command> [args...]\n")
         print("User workflow:")
         for name, (desc, _) in {**user_script_commands, **user_builtin_commands}.items():

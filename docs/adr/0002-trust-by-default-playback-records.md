@@ -16,7 +16,7 @@ v1 mechanics below remain historical implementation context.
 
 ## Context
 
-`dancing-log` records frequent dance playback activity. Requiring the user to manually confirm every dance would create low-value review work, and over time would likely lead to fatigue, skipped maintenance, or careless confirmations. On the other hand, only counting manually confirmed records would make normal statistics too sparse and would undermine the value of live watcher and VRCX history capture.
+`dance-trail` records frequent dance playback activity. Requiring the user to manually confirm every dance would create low-value review work, and over time would likely lead to fatigue, skipped maintenance, or careless confirmations. On the other hand, only counting manually confirmed records would make normal statistics too sparse and would undermine the value of live watcher and VRCX history capture.
 
 Most daily playback records are not ambiguous. The product should help the user by accepting normal records and asking for attention only when evidence conflicts, looks unusual, or is explicitly corrected by the user.
 

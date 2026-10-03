@@ -345,10 +345,10 @@ Dudu 专有扩展字段暂未建表。候选字段包括：
 
 ## 当前实现文件
 
-- `dancing_log/vrc_log_parser.py`：实验性解析 Dudu 队列、当前播放元数据和实际播放信号。
-- `dancing_log/live_playback_folding.py`：把 Dudu 元数据和 `OnVideoPlay` 保守折叠成播放证据。
-- `dancing_log/vrcx_importer.py`：实验性解析 Dudu API/CDN/官网 URL，保守保留 requester 字段，不推断 user id。
-- `dancing_log/storage.py`：定义 `dudu` 系统名。
+- `dance_trail/vrc_log_parser.py`：实验性解析 Dudu 队列、当前播放元数据和实际播放信号。
+- `dance_trail/live_playback_folding.py`：把 Dudu 元数据和 `OnVideoPlay` 保守折叠成播放证据。
+- `dance_trail/vrcx_importer.py`：实验性解析 Dudu API/CDN/官网 URL，保守保留 requester 字段，不推断 user id。
+- `dance_trail/storage.py`：定义 `dudu` 系统名。
 
 ## 与 WannaDance 的差异
 

@@ -2,7 +2,7 @@ from datetime import date, datetime, timedelta, timezone
 import unittest
 from zoneinfo import ZoneInfo
 
-from dancing_log.local_dance_day import (
+from dance_trail.local_dance_day import (
     DEFAULT_DANCE_DAY_BOUNDARY_TIME,
     LocalDanceDayBoundary,
 )

@@ -1,6 +1,6 @@
 import unittest
 
-from dancing_log.overlay_view_model import build_overlay_view_model, overlay_meta_text
+from dance_trail.overlay_view_model import build_overlay_view_model, overlay_meta_text
 
 
 class OverlayViewModelTest(unittest.TestCase):

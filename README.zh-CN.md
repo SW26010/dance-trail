@@ -1,8 +1,10 @@
-# dancing-log
+# DanceTrail
+
+项目仓库：[SW26010/dance-trail](https://github.com/SW26010/dance-trail)。
 
 > 隐私说明：玩家名、日志文件名及事件时间已匿名化；示例路径需替换为本地实际路径。聚合统计与技术结论保留。
 
-`dancing-log` 是一个本地 VRChat 跳舞播放时间线工具。它记录：
+`dance-trail` 是一个本地 VRChat 跳舞播放时间线工具。它记录：
 
 - 播放了什么舞蹈曲目
 - 什么时候播放
@@ -86,12 +88,12 @@ uv run python main.py rebuild-data --archive-existing
 
 重建流程会保留：
 
-- `config/dancing-log.local.json`
+- `config/dance-trail.local.json`
 - `data/queued_self/`
 
 会归档这些生成文件：
 
-- `data/dancing_log.sqlite3`
+- `data/dance_trail.sqlite3`
 - `data/songs.csv`
 - `data/wanna_songs.csv`
 - `data/wanna_songs.json`
@@ -153,7 +155,7 @@ uv run python main.py import-vrcx "path/to/vrcx-snapshot/VRCX.sqlite3"
 uv run python main.py import-vrcx --dry-run
 ```
 
-如果 `config/dancing-log.local.json` 里配置了 `vrcx_db_path`，路径可以省略。该字段为空时，importer 也会在本次运行中尝试标准 VRCX 数据库 `%APPDATA%/VRCX/VRCX.sqlite3`，但不会把自动检测结果写入配置：
+如果 `config/dance-trail.local.json` 里配置了 `vrcx_db_path`，路径可以省略。该字段为空时，importer 也会在本次运行中尝试标准 VRCX 数据库 `%APPDATA%/VRCX/VRCX.sqlite3`，但不会把自动检测结果写入配置：
 
 ```bash
 uv run python main.py import-vrcx
@@ -271,14 +273,14 @@ pnpm test:a11y
 
 ## 应用目录与本地配置
 
-本机路径放在 `config/dancing-log.local.json`，该文件会被 git 忽略。完整目录约定见 `docs/app_directories.zh-CN.md`。
+本机路径放在 `config/dance-trail.local.json`，该文件会被 git 忽略。完整目录约定见 `docs/app_directories.zh-CN.md`。
 
 支持字段：
 
 ```json
 {
   "config_version": 1,
-  "app_db": "data/dancing_log.sqlite3",
+  "app_db": "data/dance_trail.sqlite3",
   "queued_self_dir": "data/queued_self",
   "capture_dir": "logs/captures",
   "run_log_dir": "logs/runs",
@@ -338,6 +340,6 @@ uv sync --extra recording-tools
 
 ## 许可证
 
-Dancing Log 源码采用 [MIT 许可证](LICENSE)，版权归 2026 Himalia 所有。
+DanceTrail 源码采用 [MIT 许可证](LICENSE)，版权归 2026 Himalia 所有。
 第三方依赖保留各自的许可证，便携包中的 `Legal/` 包含完整许可文本；
 详情见[许可打包说明](legal/README.md)。此许可证不授予第三方音乐、视频或外部曲库数据的使用权。

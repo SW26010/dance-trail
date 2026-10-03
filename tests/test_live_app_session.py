@@ -8,9 +8,9 @@ import threading
 import time
 import unittest
 
-from dancing_log.app_paths import DEFAULT_CONFIG
-from dancing_log.live_app_session import LiveAppSessionRuntime, LiveWatcherRunOptions
-from dancing_log.overlay_server import MountedOverlayAdapter, OverlayState
+from dance_trail.app_paths import DEFAULT_CONFIG
+from dance_trail.live_app_session import LiveAppSessionRuntime, LiveWatcherRunOptions
+from dance_trail.overlay_server import MountedOverlayAdapter, OverlayState
 
 
 def wait_for_call_count(calls: list[dict], count: int) -> None:
@@ -116,7 +116,7 @@ class LiveAppSessionRuntimeTest(unittest.TestCase):
                 "-c",
                 (
                     "import sys; "
-                    "from dancing_log.live_app_session import LiveAppSessionRuntime; "
+                    "from dance_trail.live_app_session import LiveAppSessionRuntime; "
                     "runtime=LiveAppSessionRuntime(app_root=sys.argv[1], "
                     "watch_vrc_logs_func=lambda **kwargs: None); "
                     "\ntry: runtime.run_watcher()\n"
@@ -376,7 +376,7 @@ class LiveAppSessionRuntimeTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            config_path = root / "config" / "dancing-log.local.json"
+            config_path = root / "config" / "dance-trail.local.json"
             config_path.parent.mkdir()
             config_path.write_text(json.dumps(DEFAULT_CONFIG), encoding="utf-8")
             runtime = LiveAppSessionRuntime(
@@ -414,7 +414,7 @@ class LiveAppSessionRuntimeTest(unittest.TestCase):
                     return {"overlay_port": kwargs["overlay_port"]}
 
                 root = Path(tmp)
-                config_path = root / "config" / "dancing-log.local.json"
+                config_path = root / "config" / "dance-trail.local.json"
                 config_path.parent.mkdir()
                 config_path.write_text(json.dumps(DEFAULT_CONFIG), encoding="utf-8")
                 runtime = LiveAppSessionRuntime(
@@ -457,7 +457,7 @@ class LiveAppSessionRuntimeTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            config_path = root / "config" / "dancing-log.local.json"
+            config_path = root / "config" / "dance-trail.local.json"
             config_path.parent.mkdir()
             config_path.write_text(json.dumps(DEFAULT_CONFIG), encoding="utf-8")
             state = OverlayState(enabled=False)
@@ -498,7 +498,7 @@ class LiveAppSessionRuntimeTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            config_path = root / "config" / "dancing-log.local.json"
+            config_path = root / "config" / "dance-trail.local.json"
             config_path.parent.mkdir()
             config_path.write_text(json.dumps(DEFAULT_CONFIG), encoding="utf-8")
             state = OverlayState(enabled=False)
@@ -612,7 +612,7 @@ class LiveAppSessionRuntimeTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            config_path = root / "config" / "dancing-log.local.json"
+            config_path = root / "config" / "dance-trail.local.json"
             config_path.parent.mkdir()
             config_path.write_text(json.dumps(DEFAULT_CONFIG), encoding="utf-8")
             state = OverlayState(enabled=False)
@@ -657,7 +657,7 @@ class LiveAppSessionRuntimeTest(unittest.TestCase):
             config = dict(DEFAULT_CONFIG)
             config["vrc_log_dir"] = str(root / "logs")
             config["overlay_port"] = 9911
-            config_path = root / "config" / "dancing-log.local.json"
+            config_path = root / "config" / "dance-trail.local.json"
             config_path.parent.mkdir()
             config_path.write_text(json.dumps(config), encoding="utf-8")
             state = OverlayState(enabled=False)
@@ -677,7 +677,7 @@ class LiveAppSessionRuntimeTest(unittest.TestCase):
                 self.assertFalse(runtime.status().overlay_running)
                 self.assertEqual(calls[-1]["log_dir"], root / "logs")
                 self.assertEqual(calls[-1]["output_dir"], root / "logs" / "captures")
-                self.assertEqual(calls[-1]["app_db_path"], root / "data" / "dancing_log.sqlite3")
+                self.assertEqual(calls[-1]["app_db_path"], root / "data" / "dance_trail.sqlite3")
                 self.assertEqual(calls[-1]["source_log_dir"], root / "logs" / "source-vrc-logs")
                 self.assertFalse(calls[-1]["live_db"])
                 self.assertTrue(calls[-1]["record_playback"])
@@ -714,7 +714,7 @@ class LiveAppSessionRuntimeTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            config_path = root / "config" / "dancing-log.local.json"
+            config_path = root / "config" / "dance-trail.local.json"
             config_path.parent.mkdir()
             config_path.write_text(json.dumps(DEFAULT_CONFIG), encoding="utf-8")
             runtime = LiveAppSessionRuntime(
@@ -850,7 +850,7 @@ class LiveAppSessionRuntimeTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            config_path = root / "config" / "dancing-log.local.json"
+            config_path = root / "config" / "dance-trail.local.json"
             config_path.parent.mkdir()
             config_path.write_text(json.dumps(DEFAULT_CONFIG), encoding="utf-8")
             runtime = LiveAppSessionRuntime(
@@ -875,7 +875,7 @@ class LiveAppSessionRuntimeTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            config_path = root / "config" / "dancing-log.local.json"
+            config_path = root / "config" / "dance-trail.local.json"
             config_path.parent.mkdir()
             config_path.write_text(json.dumps(DEFAULT_CONFIG), encoding="utf-8")
             runtime = LiveAppSessionRuntime(

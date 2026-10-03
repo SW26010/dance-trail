@@ -1,6 +1,6 @@
 import unittest
 
-from dancing_log.requester_identity_enrichment import (
+from dance_trail.requester_identity_enrichment import (
     REQUESTER_IDENTITY_SOURCE_ACTIVE,
     REQUESTER_IDENTITY_SOURCE_EXPIRED,
     RequesterIdentityEnricher,

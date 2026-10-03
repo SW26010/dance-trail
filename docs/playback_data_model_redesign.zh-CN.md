@@ -23,7 +23,7 @@
 界面或写入路径。v2 完成切换前，现有 v1 入口可以继续服务当前应用；切换后不保留这些
 入口作为 v2 兼容读写路径。
 
-把另一个 Dancing Log app root 或 v2 数据库中的证据、Handle 关系和用户状态语义合入
+把另一个 DanceTrail app root 或 v2 数据库中的证据、Handle 关系和用户状态语义合入
 当前数据库，只保留为未来可能的扩展方向，不是 v2 完成条件，也不保证以后一定实现。
 当前模型不得为了这项极少使用的可能性预建 Merge Plan、跨库冲突流程或全局 Handle 身份，
 也不得让它决定本地主键长度；若未来正式立项，应以新的 ADR 重新定义范围和语义。
@@ -689,6 +689,6 @@ rebuild 应按修正后的集合重新产生 `self` / `other`。VRCX identity de
 ### 已明确暂缓或排除
 
 Manual Log Entry、Manual Record Update、单次播放评分、推荐算法与 Recommendation List
-Snapshot 生产、跨 Dancing Log 数据库语义导入、Handle 拆分、Handle redirect 关闭、任意
+Snapshot 生产、跨 DanceTrail 数据库语义导入、Handle 拆分、Handle redirect 关闭、任意
 membership 解除或改挂，以及完整的同位置内容变化审核产品流程均不属于当前 v2 完成条件。
 v1→v2 数据迁移、双写、混合读取和兼容回退已经明确不实施，也不是待决项。

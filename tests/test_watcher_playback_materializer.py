@@ -1,6 +1,6 @@
 import unittest
 
-from dancing_log.watcher_playback_materializer import (
+from dance_trail.watcher_playback_materializer import (
     WATCHER_PLAYBACK_EVENT_SOURCE,
     WATCHER_PLAYBACK_SOURCE_TABLE,
     watcher_playback_record,

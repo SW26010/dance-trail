@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import main as cli
-from dancing_log.storage import (
+from dance_trail.storage import (
     WANNA_SYSTEM_KEY,
     connect_db,
     ensure_dance_track,
@@ -203,8 +203,6 @@ class CliEntrypointTests(unittest.TestCase):
         calls = {}
 
         class FakeRuntime:
-            def __init__(self, *, migrate_legacy_config=False):
-                calls["migrate_legacy_config"] = migrate_legacy_config
 
             def resolved_log_dir(self, options):
                 calls["resolved_options"] = options
@@ -255,7 +253,7 @@ class CliEntrypointTests(unittest.TestCase):
         try:
             output = io.StringIO()
             with (
-                patch("dancing_log.live_app_session.LiveAppSessionRuntime", FakeRuntime),
+                patch("dance_trail.live_app_session.LiveAppSessionRuntime", FakeRuntime),
                 contextlib.redirect_stdout(output),
             ):
                 cli.main()
@@ -263,7 +261,6 @@ class CliEntrypointTests(unittest.TestCase):
             sys.argv = original_argv
 
         options = calls["run_options"]
-        self.assertTrue(calls["migrate_legacy_config"])
         self.assertIs(calls["resolved_options"], options)
         self.assertEqual(options.log_dir, "logs/input")
         self.assertEqual(options.output_dir, "logs/output")
@@ -287,8 +284,6 @@ class CliEntrypointTests(unittest.TestCase):
         calls = {}
 
         class FakeRuntime:
-            def __init__(self, *, migrate_legacy_config=False):
-                calls["migrate_legacy_config"] = migrate_legacy_config
 
             def resolved_log_dir(self, options):
                 calls["resolved_options"] = options
@@ -316,7 +311,7 @@ class CliEntrypointTests(unittest.TestCase):
         try:
             output = io.StringIO()
             with (
-                patch("dancing_log.live_app_session.LiveAppSessionRuntime", FakeRuntime),
+                patch("dance_trail.live_app_session.LiveAppSessionRuntime", FakeRuntime),
                 contextlib.redirect_stdout(output),
             ):
                 cli.main()
@@ -332,7 +327,7 @@ class CliEntrypointTests(unittest.TestCase):
         original_argv = sys.argv
         had_frozen = hasattr(sys, "frozen")
         original_frozen = getattr(sys, "frozen", None)
-        sys.argv = ["DancingLog.exe", "sample-frames"]
+        sys.argv = ["DanceTrail.exe", "sample-frames"]
         sys.frozen = True
         try:
             output = io.StringIO()
@@ -356,8 +351,8 @@ class CliEntrypointTests(unittest.TestCase):
         original_executable = sys.executable
         had_frozen = hasattr(sys, "frozen")
         original_frozen = getattr(sys, "frozen", None)
-        sys.argv = ["DancingLog.exe"]
-        sys.executable = r"C:\portable\DancingLog.exe"
+        sys.argv = ["DanceTrail.exe"]
+        sys.executable = r"C:\portable\DanceTrail.exe"
         sys.frozen = True
         try:
             with patch("main.run_desktop_tray_entry") as run_tray:
@@ -377,8 +372,8 @@ class CliEntrypointTests(unittest.TestCase):
         original_executable = sys.executable
         had_frozen = hasattr(sys, "frozen")
         original_frozen = getattr(sys, "frozen", None)
-        sys.argv = ["DancingLogCli.exe"]
-        sys.executable = r"C:\portable\DancingLogCli.exe"
+        sys.argv = ["DanceTrailCli.exe"]
+        sys.executable = r"C:\portable\DanceTrailCli.exe"
         sys.frozen = True
         try:
             output = io.StringIO()
@@ -395,7 +390,7 @@ class CliEntrypointTests(unittest.TestCase):
 
         self.assertEqual(exit_context.exception.code, 0)
         self.assertIn("Usage:", output.getvalue())
-        self.assertIn("DancingLogCli.exe", output.getvalue())
+        self.assertIn("DanceTrailCli.exe", output.getvalue())
 
 
 if __name__ == "__main__":

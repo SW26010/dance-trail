@@ -152,7 +152,7 @@ B 中视频行原值已由 A1 保存；其他表只在独立研究快照中按�
 ## 附录：源码与实验依据，不增加执行规则
 
 以下保留先前源码调查，解释本合同为什么有这些边界。这里描述的 VRCX 内部行为不是
-要求 Dancing Log 重新模拟的算法，也不构成 A1–A6 之外的过滤或推断规则。
+要求 DanceTrail 重新模拟的算法，也不构成 A1–A6 之外的过滤或推断规则。
 
 ## 版本与验证范围
 
@@ -243,7 +243,7 @@ VRCX 同时接受世界发出的 `[VRCX] VideoPlay(...)` 和通用媒体加载�
 
 时间依据：[本地秒转 UTC](https://github.com/vrcx-team/VRCX/blob/eafcccb20ed5828d99bd1b0f4b53a384a52a1d47/Dotnet/LogWatcher.cs#L319)。
 转换依赖 VRCX 解析时的操作系统时区规则，数据库没有保留该时区。已带 `Z` 的时间按 UTC
-读取，不再套用 Dancing Log 当前机器的时区。历史值若缺少时区，需使用明确来源配置或
+读取，不再套用 DanceTrail 当前机器的时区。历史值若缺少时区，需使用明确来源配置或
 保持时间未决；单独从 `.000Z` 也不能断言所有旧版本的输入精度。
 
 身份依据：[缓存按显示名取首个命中](https://github.com/vrcx-team/VRCX/blob/eafcccb20ed5828d99bd1b0f4b53a384a52a1d47/src/shared/utils/user.js#L298)。
@@ -284,7 +284,7 @@ user id 对应；保存关联依据后可支持字段解释。它们没有视频
 VRCX 自身也不是完整的原始日志归档：禁用 game log、原生格式匹配失败、RPC 世界过滤、
 同 URL 状态去重、唯一键冲突、时间截止和未运行都可能造成缺行。启动补读的 cutoff 来自
 多张表尾记录，且有 24 小时条件；C# 跳过小于等于 cutoff 的日志。不要把这套“继续当前
-会话”的读取方式复制为 Dancing Log 历史导入规则，更不能把 VRCX 缺行当作未播放证明。
+会话”的读取方式复制为 DanceTrail 历史导入规则，更不能把 VRCX 缺行当作未播放证明。
 依据：[启动 cutoff](https://github.com/vrcx-team/VRCX/blob/eafcccb20ed5828d99bd1b0f4b53a384a52a1d47/src/services/database/gameLog.js#L1138)、
 [原生日志过滤](https://github.com/vrcx-team/VRCX/blob/eafcccb20ed5828d99bd1b0f4b53a384a52a1d47/Dotnet/LogWatcher.cs#L201)。
 

@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from dancing_log.app_paths import (
+from dance_trail.app_paths import (
     AppRuntimeConfig,
     CONFIG_FIELDS,
     DEFAULT_CONFIG,
@@ -35,7 +35,7 @@ class AppPathTests(unittest.TestCase):
                 absolute,
             )
 
-    def test_load_app_config_migrates_legacy_data_config(self):
+    def test_load_app_config_ignores_legacy_data_config(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             legacy = root / "data" / "local_config.json"
@@ -50,14 +50,13 @@ class AppPathTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            config = load_app_config(app_root=root, migrate_legacy=True)
+            config = load_app_config(app_root=root)
 
-            self.assertEqual(config["vrcx_db_path"], "path/to/vrcx-snapshot/VRCX.sqlite3")
+            self.assertEqual(config["vrcx_db_path"], DEFAULT_CONFIG["vrcx_db_path"])
             self.assertEqual(config["app_db"], DEFAULT_CONFIG["app_db"])
-            migrated = root / "config" / "dancing-log.local.json"
-            self.assertTrue(migrated.exists())
-            migrated_config = json.loads(migrated.read_text(encoding="utf-8"))
-            self.assertEqual(migrated_config["vrc_log_dir"], config["vrc_log_dir"])
+            migrated = root / "config" / "dance-trail.local.json"
+            self.assertFalse(migrated.exists())
+            self.assertTrue(legacy.exists())
 
     def test_save_app_config_preserves_unknown_keys(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -77,13 +76,13 @@ class AppPathTests(unittest.TestCase):
     def test_save_app_config_keeps_existing_file_when_atomic_replace_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            config_path = root / "config" / "dancing-log.local.json"
+            config_path = root / "config" / "dance-trail.local.json"
             config_path.parent.mkdir(parents=True)
             original = '{"app_db":"data/original.sqlite3"}\n'
             config_path.write_text(original, encoding="utf-8")
 
             with patch(
-                "dancing_log.app_paths.os.replace",
+                "dance_trail.app_paths.os.replace",
                 side_effect=OSError("replace failed"),
             ):
                 with self.assertRaisesRegex(OSError, "replace failed"):
@@ -190,9 +189,9 @@ class AppPathTests(unittest.TestCase):
 
             self.assertEqual(
                 runtime.paths.local_config_file,
-                root / "config" / "dancing-log.local.json",
+                root / "config" / "dance-trail.local.json",
             )
-            self.assertEqual(runtime.app_db_path, root / "data" / "dancing_log.sqlite3")
+            self.assertEqual(runtime.app_db_path, root / "data" / "dance_trail.sqlite3")
             self.assertEqual(runtime.queued_self_dir, root / "data" / "queued_self")
             self.assertEqual(runtime.capture_dir, root / "logs" / "captures")
             self.assertEqual(runtime.run_log_dir, root / "logs" / "runs")

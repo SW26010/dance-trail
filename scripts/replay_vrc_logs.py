@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from dancing_log.time_utils import parse_timestamp  # noqa: E402
+from dance_trail.time_utils import parse_timestamp  # noqa: E402
 
 KNOWN_OUTPUTS = (
     "raw_output_log.txt",
@@ -245,7 +245,7 @@ def run_compare(args) -> None:
 
 
 def _run_replay(*, log_dir: Path, pattern: str, output: Path):
-    from dancing_log.vrc_log_watcher import replay_vrc_log_files
+    from dance_trail.vrc_log_watcher import replay_vrc_log_files
 
     log_files = sorted(log_dir.glob(pattern), key=lambda path: path.name)
     if not log_files:
@@ -262,7 +262,7 @@ def _run_replay(*, log_dir: Path, pattern: str, output: Path):
 
 
 def _acceptance_threshold_label() -> str:
-    from dancing_log.vrc_log_watcher import PROMOTION_COMPLETION_RATIO
+    from dance_trail.vrc_log_watcher import PROMOTION_COMPLETION_RATIO
 
     return f"{PROMOTION_COMPLETION_RATIO:.0%}"
 

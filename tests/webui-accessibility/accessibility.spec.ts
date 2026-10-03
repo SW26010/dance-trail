@@ -21,7 +21,7 @@ const primaryPages = [
 
 function summaryPayload(session: Record<string, unknown> = {}) {
   return {
-    database_path: "C:/tmp/dancing-log.sqlite3",
+    database_path: "C:/tmp/dance-trail.sqlite3",
     database_exists: true,
     counts: {},
     recent: [],
@@ -165,8 +165,8 @@ for (const theme of ["light", "dark"] as const) {
   test.describe(`${theme} theme`, () => {
     test.beforeEach(async ({ page }) => {
       await page.addInitScript((value) => {
-        localStorage.setItem("dancing-log.language", "en");
-        localStorage.setItem("dancing-log.theme", value);
+        localStorage.setItem("dance-trail.language", "en");
+        localStorage.setItem("dance-trail.theme", value);
       }, theme);
     });
 
@@ -330,8 +330,8 @@ test("navigation scrolls the focused heading into a 320 by 225 CSS-pixel viewpor
 
 test("dark-theme primary button text keeps AA contrast while pressed", async ({ page }) => {
   await page.addInitScript(() => {
-    localStorage.setItem("dancing-log.language", "en");
-    localStorage.setItem("dancing-log.theme", "dark");
+    localStorage.setItem("dance-trail.language", "en");
+    localStorage.setItem("dance-trail.theme", "dark");
   });
   await openSettledPage(page, "/home", "Home", "#home-live-status");
   const button = page.getByRole("button", { name: "Start watcher" });
@@ -364,7 +364,7 @@ test("theme and language controls expose and update their state", async ({ page 
   await expect(page.getByRole("button", { name: "中文" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("button", { name: "中文" })).toBeFocused();
   await expect(page.getByRole("heading", { level: 1, name: "首页" })).toBeVisible();
-  await expect(page).toHaveTitle("首页 — dancing-log");
+  await expect(page).toHaveTitle("首页 — DanceTrail");
   await expectNoWcag22AAViolations(page);
 });
 
