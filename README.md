@@ -8,6 +8,11 @@ DanceTrail records dance playback from local VRChat logs and gives you a place
 to revisit your sessions, find tracks you enjoyed, and decide what to dance next.
 It runs on your Windows PC, with an interface in your browser.
 
+**Currently supported dance systems: WannaDance, PyPyDance, and DuDu FitDance.**
+DanceTrail recognizes supported playback logs and URLs from these three systems;
+it does not support every VRChat dance world or video player. See
+[support details and limitations](#supported-sources-and-current-limits).
+
 ## What you can do
 
 - **Record WannaDance, PyPyDance, and DuDu FitDance sessions.** Start the log watcher

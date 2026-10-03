@@ -7,6 +7,10 @@
 DanceTrail 从本地 VRChat 日志记录舞蹈播放，帮助你回顾每次跳舞的经历、
 找回喜欢的曲目，并决定下一首跳什么。程序在 Windows 电脑上运行，通过浏览器操作。
 
+**目前支持的舞蹈系统：WannaDance、PyPyDance 和 DuDu FitDance。**
+DanceTrail 识别这三个系统中支持的播放日志和 URL，并非兼容所有 VRChat 舞蹈世界或视频播放器。
+具体支持程度请见[支持范围与当前限制](#支持范围与当前限制)。
+
 ## 可以做什么
 
 - **记录 WannaDance、PyPyDance 和 DuDu FitDance 的播放**：启动日志监听，记录这三个舞蹈系统中支持的播放，并查看当前正在播放的曲目。
